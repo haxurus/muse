@@ -8,7 +8,7 @@ fi
 
 command -v iptables >/dev/null 2>&1 || { echo "iptables is required" >&2; exit 1; }
 
-for iface in muse-eg muse-c01 muse-c02 muse-c03 muse-c04 muse-c05; do
+for iface in muse-eg muse-dw muse-dc muse-c01 muse-c02 muse-c03 muse-c04 muse-c05; do
   iptables -C INPUT -i "$iface" -j DROP 2>/dev/null || iptables -I INPUT 1 -i "$iface" -j DROP
 done
 
