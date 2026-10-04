@@ -41,8 +41,11 @@ const requestOptions = (accessToken: string) => ({
   },
 });
 
-export const ADMINISTRATOR = 1n << 3n;
-export const MANAGE_GUILD = 1n << 5n;
+export const ADMINISTRATOR = 8n;
+export const MANAGE_GUILD = 32n;
+
+const hasPermission = (permissions: bigint, permission: bigint): boolean =>
+  (permissions / permission) % 2n === 1n;
 
 export const canManageGuild = (guild: DiscordGuild): boolean => {
   if (guild.owner) {
@@ -50,8 +53,8 @@ export const canManageGuild = (guild: DiscordGuild): boolean => {
   }
 
   const permissions = BigInt(guild.permissions);
-  return (permissions & ADMINISTRATOR) === ADMINISTRATOR
-    || (permissions & MANAGE_GUILD) === MANAGE_GUILD;
+  return hasPermission(permissions, ADMINISTRATOR)
+    || hasPermission(permissions, MANAGE_GUILD);
 };
 
 export default class DiscordOAuthClient {
