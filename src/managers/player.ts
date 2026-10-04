@@ -26,6 +26,10 @@ export default class {
     }));
   }
 
+  find(guildId: string): Player | undefined {
+    return this.guildPlayers.get(guildId);
+  }
+
   cleanup(): void {
     for (const player of this.guildPlayers.values()) {
       player.stop();
