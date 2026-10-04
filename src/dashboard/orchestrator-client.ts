@@ -1,5 +1,6 @@
 import got from 'got';
 import type {DashboardConfig} from './config.js';
+import type {GuildPoolConfig} from '../orchestrator/pool-types.js';
 
 type OrchestratorGuild = {
   id: string;
@@ -24,6 +25,16 @@ export type OrchestratorGuildWorkers = {
 export type GuildSettingsUpdate = {
   workerIds?: string[];
   settings: Record<string, unknown>;
+};
+
+export type OrchestratorGuildPool = {
+  guildId: string;
+  config: GuildPoolConfig;
+  availableWorkerIds: string[];
+  voiceChannels: Array<{
+    id: string;
+    name: string;
+  }>;
 };
 
 const options = (token: string) => ({
@@ -53,6 +64,23 @@ export default class OrchestratorClient {
       `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/workers`,
       options(this.config.orchestratorToken),
     ).json<OrchestratorGuildWorkers>();
+  }
+
+  async guildPool(guildId: string): Promise<OrchestratorGuildPool> {
+    return got.get(
+      this.config.orchestratorUrl + '/v1/guilds/' + encodeURIComponent(guildId) + '/pool',
+      options(this.config.orchestratorToken),
+    ).json<OrchestratorGuildPool>();
+  }
+
+  async updateGuildPool(guildId: string, body: GuildPoolConfig): Promise<unknown> {
+    return got.put(
+      this.config.orchestratorUrl + '/v1/guilds/' + encodeURIComponent(guildId) + '/pool',
+      {
+        ...options(this.config.orchestratorToken),
+        json: body,
+      },
+    ).json<unknown>();
   }
 
   async updateGuildSettings(guildId: string, body: GuildSettingsUpdate): Promise<unknown> {
