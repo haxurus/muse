@@ -130,10 +130,6 @@ export default class Config {
       }
     }
 
-    if ((this.SPOTIFY_CLIENT_ID === '') !== (this.SPOTIFY_CLIENT_SECRET === '')) {
-      throw new Error('SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be configured together');
-    }
-
     if (this.ALLOW_HTTP_STREAMS && this.HTTP_STREAM_ALLOWED_HOSTS.length === 0) {
       throw new Error('HTTP_STREAM_ALLOWED_HOSTS must be set when ALLOW_HTTP_STREAMS=true');
     }
