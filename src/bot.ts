@@ -16,7 +16,7 @@ import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
 import {getGuildSettings} from './utils/get-guild-settings.js';
-import {routePoolCommand} from './pool/ingress-client.js';
+import {routePoolCommand, routePoolFavoriteAutocomplete} from './pool/ingress-client.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -135,21 +135,19 @@ export default class {
                 return;
               }
 
-              if (interaction.commandName !== 'favorites') {
-                const ephemeralCommands = new Set(['play', 'resume', 'skip', 'unskip']);
-                await interaction.deferReply({ephemeral: ephemeralCommands.has(interaction.commandName)});
-                const result = await routePoolCommand(this.config, interaction);
-                const response = typeof result.response === 'object'
-                  && result.response !== null
-                  && !Array.isArray(result.response)
-                  ? Object.fromEntries(
-                    Object.entries(result.response as Record<string, unknown>)
-                      .filter(([key]) => key !== 'ephemeral'),
-                  )
-                  : result.response;
-                await interaction.editReply(response as never);
-                return;
-              }
+              const ephemeralCommands = new Set(['favorites', 'play', 'resume', 'skip', 'unskip']);
+              await interaction.deferReply({ephemeral: ephemeralCommands.has(interaction.commandName)});
+              const result = await routePoolCommand(this.config, interaction);
+              const response = typeof result.response === 'object'
+                && result.response !== null
+                && !Array.isArray(result.response)
+                ? Object.fromEntries(
+                  Object.entries(result.response as Record<string, unknown>)
+                    .filter(([key]) => key !== 'ephemeral'),
+                )
+                : result.response;
+              await interaction.editReply(response as never);
+              return;
             }
 
             await command.execute(interaction);
@@ -171,6 +169,11 @@ export default class {
             return;
           }
 
+          if (this.poolIngressEnabled && interaction.commandName === 'favorites') {
+            await interaction.respond(await routePoolFavoriteAutocomplete(this.config, interaction));
+            return;
+          }
+
           if (command.handleAutocompleteInteraction) {
             await command.handleAutocompleteInteraction(interaction);
           }
@@ -188,7 +191,9 @@ export default class {
 
         // This can fail if the message was deleted, and we don't want to crash the whole bot
         try {
-          if ((interaction.isCommand() || interaction.isButton()) && (interaction.replied || interaction.deferred)) {
+          if (interaction.isAutocomplete()) {
+            await interaction.respond([]);
+          } else if ((interaction.isCommand() || interaction.isButton()) && (interaction.replied || interaction.deferred)) {
             await interaction.editReply(errorMsg(userSafeError));
           } else if (interaction.isCommand() || interaction.isButton()) {
             await interaction.reply({content: errorMsg(userSafeError), ephemeral: true});
