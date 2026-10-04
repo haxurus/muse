@@ -69,7 +69,7 @@ container.bind<YoutubeAPI>(TYPES.Services.YoutubeAPI).to(YoutubeAPI).inSingleton
 const config = container.get<ConfigProvider>(TYPES.Config);
 if (config.SPOTIFY_CLIENT_ID !== '' && config.SPOTIFY_CLIENT_SECRET !== '') {
   container.bind<SpotifyAPI>(TYPES.Services.SpotifyAPI).to(SpotifyAPI).inSingletonScope();
-  container.bind(TYPES.ThirdParty).to(ThirdParty);
+  container.bind(TYPES.ThirdParty).to(ThirdParty).inSingletonScope();
 }
 
 // Commands
