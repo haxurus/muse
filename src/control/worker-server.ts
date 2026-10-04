@@ -1,5 +1,5 @@
 import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
-import {Client} from 'discord.js';
+import {ChannelType, Client} from 'discord.js';
 import Config from '../services/config.js';
 import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
@@ -119,6 +119,13 @@ export default class WorkerControlServer {
       guilds: this.client.guilds.cache.map(guild => ({
         id: guild.id,
         name: guild.name,
+        voiceChannels: guild.channels.cache
+          .filter(channel => channel.type === ChannelType.GuildVoice)
+          .map(channel => ({
+            id: channel.id,
+            name: channel.name,
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
       })),
       players: this.playerManager.snapshot(),
       uptimeSeconds: Math.floor(process.uptime()),
