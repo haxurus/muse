@@ -135,11 +135,12 @@ export default class AddQueryToQueue {
       newSongs = await Promise.all(newSongs.map(this.skipNonMusicSegments.bind(this)));
     }
 
-    const needsConnection = player.voiceConnection === null;
+    const existingConnection = player.voiceConnection;
+    const needsConnection = existingConnection === null;
     if (needsConnection) {
       await player.connect(targetVoiceChannel);
     } else {
-      const connectedChannelId = player.voiceConnection.joinConfig.channelId;
+      const connectedChannelId = existingConnection.joinConfig.channelId;
       if (connectedChannelId !== targetVoiceChannel.id) {
         throw new Error('this music bot is already assigned to another voice channel');
       }
