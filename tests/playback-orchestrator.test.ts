@@ -27,30 +27,43 @@ const workerStatus = (id: string): WorkerStatus => ({
 
 const makeWorker = (id: string) => {
   const status = workerStatus(id);
-  const playbackAction = vi.fn(async (_guildId: string, _action: string, body: Record<string, unknown>) => ({
-    message: 'ok',
-    playback: {
+  const playbackAction = vi.fn(async (_guildId: string, _action: string, body: Record<string, unknown>) => {
+    const voiceChannelId = String(body.voiceChannelId);
+    status.players = [{
       guildId: GUILD,
       connected: true,
-      voiceChannelId: String(body.voiceChannelId),
-      status: 'PLAYING' as const,
-      volume: 100,
-      positionSeconds: 0,
-      current: {
-        title: 'Song',
-        artist: 'Artist',
-        url: 'abcdefghijk',
-        length: 120,
-        offset: 0,
-        playlist: null,
-        isLive: false,
-        thumbnailUrl: null,
-        source: 0,
-        requestedBy: REQUESTER,
+      channelId: voiceChannelId,
+      lastChannelId: voiceChannelId,
+      status: 'PLAYING',
+      hasCurrent: true,
+      queueSize: 0,
+    }];
+
+    return {
+      message: 'ok',
+      playback: {
+        guildId: GUILD,
+        connected: true,
+        voiceChannelId,
+        status: 'PLAYING' as const,
+        volume: 100,
+        positionSeconds: 0,
+        current: {
+          title: 'Song',
+          artist: 'Artist',
+          url: 'abcdefghijk',
+          length: 120,
+          offset: 0,
+          playlist: null,
+          isLive: false,
+          thumbnailUrl: null,
+          source: 0,
+          requestedBy: REQUESTER,
+        },
+        queue: [],
       },
-      queue: [],
-    },
-  }));
+    };
+  });
 
   return {
     id,
