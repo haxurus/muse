@@ -128,10 +128,10 @@ export default class PlaybackControl {
 
     if (player.voiceConnection === null) {
       await player.connect(channel);
-    } else if (player.voiceConnection.joinConfig.channelId !== channel.id) {
-      throw new HttpError(409, 'this worker is assigned to another voice channel');
-    } else {
+    } else if (player.voiceConnection.joinConfig.channelId === channel.id) {
       await player.ensureVoiceConnectionReady();
+    } else {
+      throw new HttpError(409, 'this worker is assigned to another voice channel');
     }
 
     await player.play();
