@@ -100,7 +100,7 @@ export const updateStoredSettingsPatch = (
 
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {
-      Reflect.deleteProperty(next as object, key);
+      Reflect.deleteProperty(next as Record<string, unknown>, key);
     } else {
       (next as Record<string, unknown>)[key] = value;
     }
