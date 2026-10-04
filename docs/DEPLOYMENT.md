@@ -240,7 +240,8 @@ Networks are segmented as follows:
 - `dashboard-web`: edge <-> dashboard;
 - `dashboard-control`: dashboard <-> orchestrator;
 - `muse-c01` ... `muse-c05`: orchestrator <-> one worker each;
-- `muse-eg`: filtered outbound Internet access for workers and the OAuth dashboard.
+- `muse-eg`: filtered outbound Internet access for music workers;
+- `muse-deg`: separate filtered outbound Internet access for the OAuth dashboard.
 
 The host firewall blocks private/link-local destinations from the egress bridge and blocks private control bridges from reaching host services.
 
