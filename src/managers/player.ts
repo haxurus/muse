@@ -17,6 +17,14 @@ export default class {
     this.youtubeAPI = youtubeAPI;
   }
 
+  cleanup(): void {
+    for (const player of this.guildPlayers.values()) {
+      player.stop();
+    }
+
+    this.guildPlayers.clear();
+  }
+
   get(guildId: string): Player {
     let player = this.guildPlayers.get(guildId);
 
