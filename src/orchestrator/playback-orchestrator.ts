@@ -182,9 +182,26 @@ export default class PlaybackOrchestrator {
     };
   }
 
-  async reconcileGuild(guildId: string): Promise<void> {
+  async reconcileAll(): Promise<void> {
     const statuses = await this.statuses();
+    const guildIds = new Set<string>();
 
+    for (const {status} of statuses) {
+      for (const player of status?.players ?? []) {
+        guildIds.add(player.guildId);
+      }
+    }
+
+    for (const guildId of guildIds) {
+      this.reconcileGuildFromStatuses(guildId, statuses);
+    }
+  }
+
+  async reconcileGuild(guildId: string): Promise<void> {
+    this.reconcileGuildFromStatuses(guildId, await this.statuses());
+  }
+
+  private reconcileGuildFromStatuses(guildId: string, statuses: WorkerStatusResult[]): void {
     for (const {worker, status} of statuses) {
       if (!status) {
         continue;
