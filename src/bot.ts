@@ -50,18 +50,6 @@ export default class {
     this.commandsByButtonId = new Collection();
   }
 
-  private setReady(ready: boolean): void {
-    const readyFile = this.config.READY_FILE ?? '/tmp/muse-ready';
-    if (ready) {
-      writeFileSync(readyFile, 'ready\n', {mode: 0o600});
-      return;
-    }
-
-    if (existsSync(readyFile)) {
-      unlinkSync(readyFile);
-    }
-  }
-
   public shutdown(): void {
     this.setReady(false);
     this.client.destroy();
@@ -206,11 +194,28 @@ export default class {
 
     this.client.on('error', console.error);
     this.client.on('debug', debug);
-    this.client.on('shardDisconnect', () => this.setReady(false));
-    this.client.on('shardResume', () => this.setReady(true));
+    this.client.on('shardDisconnect', () => {
+      this.setReady(false);
+    });
+    this.client.on('shardResume', () => {
+      this.setReady(true);
+    });
 
     this.client.on('guildCreate', handleGuildCreate);
     this.client.on('voiceStateUpdate', handleVoiceStateUpdate);
     await this.client.login();
   }
+
+  private setReady(ready: boolean): void {
+    const readyFile = this.config.READY_FILE ?? '/tmp/muse-ready';
+    if (ready) {
+      writeFileSync(readyFile, 'ready\n', {mode: 0o600});
+      return;
+    }
+
+    if (existsSync(readyFile)) {
+      unlinkSync(readyFile);
+    }
+  }
+
 }
