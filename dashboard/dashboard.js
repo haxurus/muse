@@ -438,6 +438,8 @@ const saveGroup = async () => {
 const selectGuild = async guildId => {
   selectedGuildId = guildId;
   formMessage.textContent = '';
+  groupMessage.textContent = '';
+  resetGroupEditor();
   statusPill.textContent = 'Caricamento';
   statusPill.className = 'status-pill';
 
@@ -452,6 +454,7 @@ const selectGuild = async guildId => {
     emptyState.hidden = true;
     guildContent.hidden = false;
     renderWorkers();
+    renderGroups();
     statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online`;
     statusPill.className = 'status-pill ok';
   } catch (error) {
@@ -544,6 +547,17 @@ document.getElementById('select-none').addEventListener('click', () => {
 });
 
 applyButton.addEventListener('click', applySettings);
+saveGroupButton.addEventListener('click', saveGroup);
+
+cancelGroupEditButton.addEventListener('click', () => {
+  resetGroupEditor();
+});
+
+dropOfflineMembersButton.addEventListener('click', () => {
+  preservedUnavailableWorkers.clear();
+  groupOfflineRow.hidden = true;
+  groupOfflineNote.textContent = '';
+});
 
 document.getElementById('logout-button').addEventListener('click', async () => {
   try {
