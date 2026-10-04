@@ -109,6 +109,7 @@ export default class OrchestratorServer {
         sendJson(response, 401, {error: 'unauthorized'});
         return;
       }
+
       if (request.method === 'GET' && segments.join('/') === 'v1/workers') {
         sendJson(response, 200, {workers: await this.workerStatuses()});
         return;
