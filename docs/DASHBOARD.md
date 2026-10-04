@@ -144,3 +144,18 @@ muse-dashboard:8080
 Use HTTP between NPM and the edge container. TLS terminates at NPM/Cloudflare according to the VPS01 proxy design.
 
 Do not proxy the dashboard container, orchestrator, or worker control ports directly.
+
+
+## Pool administration
+
+For every Discord server, Muse Control can configure:
+
+- the guild-wide concurrent-player quota;
+- arbitrary worker partitions such as 3+2, 4+1, or 2+2+1;
+- a quota for each group;
+- the default worker group;
+- voice channels explicitly assigned to a group.
+
+Workers and voice channels cannot belong to multiple groups in the same guild. The server validates the configuration again even if the browser UI is bypassed.
+
+See [POOL.md](POOL.md) for assignment semantics.
