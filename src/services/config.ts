@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import 'reflect-metadata';
+import {readFileSync} from 'node:fs';
 import {injectable} from 'inversify';
 import path from 'path';
 import xbytes from 'xbytes';
@@ -13,11 +14,37 @@ const firstNonEmpty = (...values: Array<string | undefined>) => values
   .map(value => value?.trim())
   .find((value): value is string => Boolean(value));
 
+const readSecret = (name: string, optional = false) => {
+  const direct = firstNonEmpty(process.env[name]);
+  if (direct) {
+    return direct;
+  }
+
+  const filePath = firstNonEmpty(process.env[`${name}_FILE`]);
+  if (filePath) {
+    try {
+      return readFileSync(filePath, 'utf8').trim();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not read ${name}_FILE: ${message}`);
+    }
+  }
+
+  return optional ? '' : undefined;
+};
+
+const parseHostAllowlist = (value: string | undefined) => (
+  (value ?? '')
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(Boolean)
+);
+
 const CONFIG_MAP = {
-  DISCORD_TOKEN: firstNonEmpty(process.env.DISCORD_TOKEN),
-  YOUTUBE_API_KEY: firstNonEmpty(process.env.YOUTUBE_API_KEY),
-  SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID ?? '',
-  SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET ?? '',
+  DISCORD_TOKEN: readSecret('DISCORD_TOKEN'),
+  YOUTUBE_API_KEY: readSecret('YOUTUBE_API_KEY'),
+  SPOTIFY_CLIENT_ID: readSecret('SPOTIFY_CLIENT_ID', true),
+  SPOTIFY_CLIENT_SECRET: readSecret('SPOTIFY_CLIENT_SECRET', true),
   REGISTER_COMMANDS_ON_BOT: process.env.REGISTER_COMMANDS_ON_BOT === 'true',
   DATA_DIR,
   CACHE_DIR: path.join(DATA_DIR, 'cache'),
@@ -30,6 +57,9 @@ const CONFIG_MAP = {
   SPONSORBLOCK_TIMEOUT: parseInt(process.env.SPONSORBLOCK_TIMEOUT ?? '5', 10),
   YT_DLP_PATH: firstNonEmpty(process.env.YT_DLP_PATH, process.env.MUSE_BUNDLED_YT_DLP_PATH) ?? 'yt-dlp',
   YT_DLP_AUTO_UPDATE: process.env.YT_DLP_AUTO_UPDATE === 'true',
+  ALLOW_HTTP_STREAMS: process.env.ALLOW_HTTP_STREAMS === 'true',
+  HTTP_STREAM_ALLOWED_HOSTS: parseHostAllowlist(process.env.HTTP_STREAM_ALLOWED_HOSTS),
+  READY_FILE: process.env.MUSE_READY_FILE ?? '/tmp/muse-ready',
 } as const;
 
 const BOT_ACTIVITY_TYPE_MAP = {
@@ -57,6 +87,9 @@ export default class Config {
   readonly SPONSORBLOCK_TIMEOUT!: number;
   readonly YT_DLP_PATH!: string;
   readonly YT_DLP_AUTO_UPDATE!: boolean;
+  readonly ALLOW_HTTP_STREAMS!: boolean;
+  readonly HTTP_STREAM_ALLOWED_HOSTS!: readonly string[];
+  readonly READY_FILE!: string;
 
   constructor() {
     for (const [key, value] of Object.entries(CONFIG_MAP)) {
@@ -67,10 +100,17 @@ export default class Config {
 
       if (key === 'BOT_ACTIVITY_TYPE') {
         this[key] = BOT_ACTIVITY_TYPE_MAP[(value as string).toUpperCase() as keyof typeof BOT_ACTIVITY_TYPE_MAP];
+        if (typeof this[key] === 'undefined') {
+          throw new Error('Invalid BOT_ACTIVITY_TYPE');
+        }
+
         continue;
       }
 
-      if (typeof value === 'number') {
+      if (Array.isArray(value)) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        (this as any)[key] = value;
+      } else if (typeof value === 'number') {
         if (!Number.isFinite(value)) {
           throw new Error(`Invalid numeric value for ${key}`);
         }
@@ -88,6 +128,14 @@ export default class Config {
       } else {
         throw new Error(`Unsupported type for ${key}`);
       }
+    }
+
+    if ((this.SPOTIFY_CLIENT_ID === '') !== (this.SPOTIFY_CLIENT_SECRET === '')) {
+      throw new Error('SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be configured together');
+    }
+
+    if (this.ALLOW_HTTP_STREAMS && this.HTTP_STREAM_ALLOWED_HOSTS.length === 0) {
+      throw new Error('HTTP_STREAM_ALLOWED_HOSTS must be set when ALLOW_HTTP_STREAMS=true');
     }
   }
 }
