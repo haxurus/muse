@@ -31,10 +31,6 @@ export type QueueAddRequest = {
 
 export type QueueAddResult = {
   message: string;
-  currentSong: SongMetadata | null;
-  queueSize: number;
-  status: STATUS;
-  voiceChannelId: string | null;
   showPlayingEmbed: boolean;
 };
 
@@ -135,16 +131,10 @@ export default class AddQueryToQueue {
       newSongs = await Promise.all(newSongs.map(this.skipNonMusicSegments.bind(this)));
     }
 
-    const existingConnection = player.voiceConnection;
-    const needsConnection = existingConnection === null;
+    const needsConnection = player.voiceConnection === null;
     if (needsConnection) {
       await player.connect(targetVoiceChannel);
     } else {
-      const connectedChannelId = existingConnection.joinConfig.channelId;
-      if (connectedChannelId !== targetVoiceChannel.id) {
-        throw new Error('this music bot is already assigned to another voice channel');
-      }
-
       await player.ensureVoiceConnectionReady();
     }
 
@@ -204,10 +194,6 @@ export default class AddQueryToQueue {
 
     return {
       message,
-      currentSong: player.getCurrent(),
-      queueSize: player.queueSize(),
-      status: player.status,
-      voiceChannelId: player.voiceConnection?.joinConfig.channelId ?? null,
       showPlayingEmbed: needsConnection,
     };
   }
