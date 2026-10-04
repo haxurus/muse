@@ -9,9 +9,13 @@ import PlayerManager from './managers/player.js';
 import ThirdParty from './services/third-party.js';
 import prepareYtDlp from './utils/prepare-yt-dlp.js';
 import {prisma} from './utils/db.js';
+import {Client} from 'discord.js';
+import {Server} from 'node:http';
+import {startWorkerControlServer} from './worker-control/server.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
+let workerControlServer: Server | null = null;
 
 const shutdown = async (signal: NodeJS.Signals) => {
   if (shuttingDown) {
@@ -24,6 +28,13 @@ const shutdown = async (signal: NodeJS.Signals) => {
   try {
     bot.shutdown();
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
+
+    if (workerControlServer) {
+      await new Promise<void>((resolve, reject) => {
+        workerControlServer!.close(error => error ? reject(error) : resolve());
+      });
+      workerControlServer = null;
+    }
 
     if (container.isBound(TYPES.ThirdParty)) {
       container.get<ThirdParty>(TYPES.ThirdParty).cleanup();
@@ -54,6 +65,12 @@ const startBot = async () => {
 
   await container.get<FileCacheProvider>(TYPES.FileCache).cleanup();
   await prepareYtDlp(config);
+
+  workerControlServer = startWorkerControlServer({
+    config,
+    client: container.get<Client>(TYPES.Client),
+    playerManager: container.get<PlayerManager>(TYPES.Managers.Player),
+  });
 
   installSignalHandlers();
   await bot.register();
