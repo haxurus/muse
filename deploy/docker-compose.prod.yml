@@ -16,6 +16,8 @@ x-worker-common: &worker-common
   networks:
     - control
     - egress
+  group_add:
+    - "${MUSE_SECRET_GID:?MUSE_SECRET_GID must be configured by the installer}"
   security_opt:
     - no-new-privileges:true
   cap_drop:
@@ -58,6 +60,8 @@ services:
       - dashboard_internal
       - control
       - egress
+    group_add:
+      - "${MUSE_SECRET_GID:?MUSE_SECRET_GID must be configured by the installer}"
     security_opt:
       - no-new-privileges:true
     cap_drop:
