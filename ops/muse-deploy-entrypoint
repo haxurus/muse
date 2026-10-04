@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+command_line=${SSH_ORIGINAL_COMMAND:-status}
+
+case "$command_line" in
+  status)
+    exec sudo -n /usr/local/sbin/muse-deploy status
+    ;;
+  rollback)
+    exec sudo -n /usr/local/sbin/muse-deploy rollback
+    ;;
+  deploy ghcr.io/haxurus/muse@sha256:*)
+    image=${command_line#deploy }
+    exec sudo -n /usr/local/sbin/muse-deploy deploy "$image"
+    ;;
+  *)
+    echo "Unsupported deploy command." >&2
+    exit 64
+    ;;
+esac
