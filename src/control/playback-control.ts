@@ -81,6 +81,14 @@ export default class PlaybackControl {
     const channel = this.requireVoiceChannel(guildId, body.voiceChannelId);
     this.requireRequesterInChannel(channel, body.requesterId);
 
+    const existingPlayer = this.playerManager.find(guildId);
+    if (existingPlayer
+      && existingPlayer.status === STATUS.IDLE
+      && existingPlayer.voiceConnection === null
+      && existingPlayer.getCurrent()) {
+      existingPlayer.stop();
+    }
+
     const result = await this.addQueryToQueue.addRequest({
       guildId,
       targetVoiceChannel: channel,
