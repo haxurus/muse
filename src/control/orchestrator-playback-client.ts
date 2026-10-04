@@ -14,7 +14,7 @@ export type OrchestratedPlaybackResult = PlaybackActionResult & {
 
 const extractErrorMessage = (error: unknown): string => {
   if (typeof error === 'object' && error !== null && 'response' in error) {
-    const response = (error as {response?: {body?: unknown}}).response;
+    const {response} = error as {response?: {body?: unknown}};
     if (typeof response?.body === 'string') {
       try {
         const parsed = JSON.parse(response.body) as {error?: unknown};
