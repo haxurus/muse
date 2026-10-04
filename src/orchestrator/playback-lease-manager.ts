@@ -23,7 +23,7 @@ export default class PlaybackLeaseManager {
     const current = new Promise<void>(resolve => {
       release = resolve;
     });
-    const chained = previous.then(() => current);
+    const chained = previous.then(async () => current);
     this.guildLocks.set(guildId, chained);
 
     await previous;
