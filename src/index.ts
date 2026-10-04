@@ -74,11 +74,13 @@ const startBot = async () => {
   await container.get<FileCacheProvider>(TYPES.FileCache).cleanup();
   await prepareYtDlp(config);
 
-  workerControlServer = startWorkerControlServer({
-    config,
-    client: container.get<Client>(TYPES.Client),
-    playerManager: container.get<PlayerManager>(TYPES.Managers.Player),
-  });
+  if (config.WORKER_CONTROL_ENABLED) {
+    workerControlServer = startWorkerControlServer({
+      config,
+      client: container.get<Client>(TYPES.Client),
+      playerManager: container.get<PlayerManager>(TYPES.Managers.Player),
+    });
+  }
 
   installSignalHandlers();
   await bot.register();
