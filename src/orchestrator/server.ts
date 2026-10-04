@@ -26,6 +26,7 @@ import {
 import {disconnectWorkerFromGuild} from './worker-client.js';
 import {verifyControlRequest} from '../control/signature.js';
 import {
+  getFavoriteAutocomplete,
   routePoolIngressCommand,
   validatePoolIngressRequest,
   withGuildPoolLock,
@@ -131,6 +132,38 @@ const guildContext = (
 
 const isMutation = (method: string | undefined) => !['GET', 'HEAD', 'OPTIONS'].includes(method ?? 'GET');
 
+const authenticateIngressRequest = (
+  request: IncomingMessage,
+  config: OrchestratorConfig,
+  requestPath: string,
+  rawBody: string,
+) => {
+  const workerId = typeof request.headers['x-muse-worker-id'] === 'string'
+    ? request.headers['x-muse-worker-id']
+    : '';
+  if (workerId !== config.INGRESS_WORKER_ID) {
+    return false;
+  }
+
+  const ingressWorker = config.WORKERS.find(worker => worker.id === workerId);
+  if (!ingressWorker) {
+    return false;
+  }
+
+  return verifyControlRequest({
+    secret: ingressWorker.secret,
+    method: request.method ?? 'POST',
+    requestPath,
+    body: rawBody,
+    timestampHeader: typeof request.headers['x-muse-timestamp'] === 'string'
+      ? request.headers['x-muse-timestamp']
+      : undefined,
+    signatureHeader: typeof request.headers['x-muse-signature'] === 'string'
+      ? request.headers['x-muse-signature']
+      : undefined,
+  });
+};
+
 export const startOrchestratorServer = (config: OrchestratorConfig) => {
   const workerIds = new Set(config.WORKERS.map(worker => worker.id));
   let reconciling = false;
@@ -148,34 +181,8 @@ export const startOrchestratorServer = (config: OrchestratorConfig) => {
       }
 
       if (request.method === 'POST' && requestUrl.pathname === '/internal/v1/commands') {
-        const workerId = typeof request.headers['x-muse-worker-id'] === 'string'
-          ? request.headers['x-muse-worker-id']
-          : '';
-        if (workerId !== config.INGRESS_WORKER_ID) {
-          sendJson(response, 401, {error: 'unauthorized'});
-          return;
-        }
-
-        const ingressWorker = config.WORKERS.find(worker => worker.id === workerId);
-        if (!ingressWorker) {
-          sendJson(response, 401, {error: 'unauthorized'});
-          return;
-        }
-
         const rawBody = await readRawBody(request);
-        const authenticated = verifyControlRequest({
-          secret: ingressWorker.secret,
-          method: 'POST',
-          requestPath: requestUrl.pathname,
-          body: rawBody,
-          timestampHeader: typeof request.headers['x-muse-timestamp'] === 'string'
-            ? request.headers['x-muse-timestamp']
-            : undefined,
-          signatureHeader: typeof request.headers['x-muse-signature'] === 'string'
-            ? request.headers['x-muse-signature']
-            : undefined,
-        });
-        if (!authenticated) {
+        if (!authenticateIngressRequest(request, config, requestUrl.pathname, rawBody)) {
           sendJson(response, 401, {error: 'unauthorized'});
           return;
         }
@@ -186,6 +193,33 @@ export const startOrchestratorServer = (config: OrchestratorConfig) => {
           async () => routePoolIngressCommand(poolRequest, config),
         );
         sendJson(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/internal/v1/autocomplete') {
+        const rawBody = await readRawBody(request);
+        if (!authenticateIngressRequest(request, config, requestUrl.pathname, rawBody)) {
+          sendJson(response, 401, {error: 'unauthorized'});
+          return;
+        }
+
+        const body = parseBody(rawBody) as Record<string, unknown>;
+        if (typeof body.guildId !== 'string'
+          || typeof body.guildOwnerId !== 'string'
+          || typeof body.userId !== 'string'
+          || typeof body.subcommand !== 'string'
+          || typeof body.query !== 'string') {
+          throw new Error('invalid autocomplete request');
+        }
+
+        const choices = await getFavoriteAutocomplete({
+          guildId: body.guildId,
+          guildOwnerId: body.guildOwnerId,
+          userId: body.userId,
+          subcommand: body.subcommand,
+          query: body.query,
+        });
+        sendJson(response, 200, {choices});
         return;
       }
 
