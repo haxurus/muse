@@ -47,6 +47,9 @@ FROM base AS runner
 
 WORKDIR /usr/app
 
+RUN groupadd --system --gid 10001 muse \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin muse
+
 ARG COMMIT_HASH=unknown
 ARG BUILD_DATE=unknown
 
@@ -58,16 +61,16 @@ ENV DATA_DIR=/data \
     MUSE_READY_FILE=/tmp/muse-ready \
     YT_DLP_AUTO_UPDATE=false
 
-COPY --from=builder --chown=node:node /usr/app/dist ./dist
-COPY --from=dependencies --chown=node:node /usr/app/prod_node_modules ./node_modules
-COPY --from=builder --chown=node:node /usr/app/node_modules/.prisma/client ./node_modules/.prisma/client
-COPY --from=builder --chown=node:node /usr/app/migrations ./migrations
-COPY --from=builder --chown=node:node /usr/app/schema.prisma ./schema.prisma
-COPY --from=builder --chown=node:node /usr/app/package.json ./package.json
+COPY --from=builder --chown=10001:10001 /usr/app/dist ./dist
+COPY --from=dependencies --chown=10001:10001 /usr/app/prod_node_modules ./node_modules
+COPY --from=builder --chown=10001:10001 /usr/app/node_modules/.prisma/client ./node_modules/.prisma/client
+COPY --from=builder --chown=10001:10001 /usr/app/migrations ./migrations
+COPY --from=builder --chown=10001:10001 /usr/app/schema.prisma ./schema.prisma
+COPY --from=builder --chown=10001:10001 /usr/app/package.json ./package.json
 
-RUN mkdir -p /data && chown node:node /data
+RUN mkdir -p /data && chown 10001:10001 /data
 
-USER node
+USER 10001:10001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=45s --retries=3 \
   CMD test -f /tmp/muse-ready || exit 1
