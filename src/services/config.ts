@@ -64,6 +64,7 @@ const CONFIG_MAP = {
   CONTROL_HOST: process.env.MUSE_CONTROL_HOST?.trim() ?? '127.0.0.1',
   CONTROL_PORT: parseInt(process.env.MUSE_CONTROL_PORT ?? '0', 10),
   CONTROL_TOKEN: readSecret('MUSE_CONTROL_TOKEN', true),
+  ORCHESTRATOR_URL: process.env.MUSE_ORCHESTRATOR_URL?.trim() ?? 'http://orchestrator:3100',
 } as const;
 
 const BOT_ACTIVITY_TYPE_MAP = {
@@ -98,6 +99,7 @@ export default class Config {
   readonly CONTROL_HOST!: string;
   readonly CONTROL_PORT!: number;
   readonly CONTROL_TOKEN!: string;
+  readonly ORCHESTRATOR_URL!: string;
 
   constructor() {
     for (const [key, value] of Object.entries(CONFIG_MAP)) {
@@ -153,6 +155,17 @@ export default class Config {
 
       if (!this.CONTROL_TOKEN) {
         throw new Error('MUSE_CONTROL_TOKEN or MUSE_CONTROL_TOKEN_FILE is required for a managed worker');
+      }
+
+      const orchestratorUrl = new URL(this.ORCHESTRATOR_URL);
+      if (orchestratorUrl.protocol !== 'http:'
+        || !/^[a-z0-9][a-z0-9-]*$/u.test(orchestratorUrl.hostname)
+        || orchestratorUrl.username
+        || orchestratorUrl.password
+        || orchestratorUrl.search
+        || orchestratorUrl.hash
+        || orchestratorUrl.pathname !== '/') {
+        throw new Error('MUSE_ORCHESTRATOR_URL must be an internal Docker http origin');
       }
     }
   }
