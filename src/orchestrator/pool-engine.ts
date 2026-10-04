@@ -38,7 +38,7 @@ export default class PoolEngine {
       workers,
     } = options;
 
-    const active = this.activeAssignments(guildId, workers);
+    const active = this.sessionAssignments(guildId, workers);
     const existing = active.find(assignment => assignment.voiceChannelId === voiceChannelId);
     if (existing) {
       return this.toAssignment(guildId, voiceChannelId, existing.worker, config, false);
@@ -102,12 +102,16 @@ export default class PoolEngine {
     return this.toAssignment(guildId, voiceChannelId, chosen, config, true);
   }
 
-  private activeAssignments(guildId: string, workers: ReachableWorker[]) {
+  private sessionAssignments(guildId: string, workers: ReachableWorker[]) {
     return workers.flatMap(worker => worker.status.players
-      .filter(player => player.guildId === guildId && player.connected && player.channelId)
+      .filter(player => (
+        player.guildId === guildId
+        && (player.connected || player.hasCurrent)
+        && (player.channelId || player.lastChannelId)
+      ))
       .map(player => ({
         worker,
-        voiceChannelId: player.channelId!,
+        voiceChannelId: (player.channelId ?? player.lastChannelId)!,
       })));
   }
 
