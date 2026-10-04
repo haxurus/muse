@@ -31,6 +31,6 @@ Shared provider credentials:
 
 Spotify is optional. If disabled, keep both Spotify files empty.
 
-The orchestrator never receives a Discord token. Each worker receives only its own Discord token and its own control token. The dashboard receives the OAuth client secret and orchestrator token, but no Discord bot token. The public `dashboard-edge` receives no secrets.
+The orchestrator never receives a Discord token. Each worker receives only its own Discord token and its own control token. `muse-01`, acting as controller, additionally receives the orchestrator API token so it can request playback leases; it still cannot read any other bot token. The dashboard receives the OAuth client secret and orchestrator token, but no Discord bot token. The public `dashboard-edge` receives no secrets.
 
 All secret files are root-owned on the host and must never be committed.
