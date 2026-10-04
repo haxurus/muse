@@ -30,8 +30,16 @@ const shutdown = async (signal: NodeJS.Signals) => {
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
 
     if (workerControlServer) {
+      const server = workerControlServer;
       await new Promise<void>((resolve, reject) => {
-        workerControlServer!.close(error => error ? reject(error) : resolve());
+        server.close(error => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
       });
       workerControlServer = null;
     }
