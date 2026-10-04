@@ -25,7 +25,7 @@ const uniqueStrings = (value: unknown, label: string): string[] => {
 
 const parseInteger = (value: unknown, label: string, min: number, max: number): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
-    throw new HttpError(400, label + ' must be an integer between ' + min + ' and ' + max);
+    throw new HttpError(400, `${label} must be an integer between ${min} and ${max}`);
   }
 
   return value;
@@ -48,7 +48,7 @@ export const sanitizeGuildPoolConfig = (
   );
 
   if (!Array.isArray(body.groups) || body.groups.length > knownWorkerIds.length) {
-    throw new HttpError(400, 'groups must contain at most ' + knownWorkerIds.length + ' entries');
+    throw new HttpError(400, `groups must contain at most ${knownWorkerIds.length} entries`);
   }
 
   const knownWorkers = new Set(knownWorkerIds);
@@ -59,7 +59,7 @@ export const sanitizeGuildPoolConfig = (
 
   const groups: PoolGroup[] = body.groups.map((rawGroup, index) => {
     if (typeof rawGroup !== 'object' || rawGroup === null || Array.isArray(rawGroup)) {
-      throw new HttpError(400, 'groups[' + index + '] must be an object');
+      throw new HttpError(400, `groups[${index}] must be an object`);
     }
 
     const candidate = rawGroup as {
@@ -72,25 +72,27 @@ export const sanitizeGuildPoolConfig = (
     };
 
     if (typeof candidate.id !== 'string' || !GROUP_ID.test(candidate.id)) {
-      throw new HttpError(400, 'groups[' + index + '].id is invalid');
+      throw new HttpError(400, `groups[${index}].id is invalid`);
     }
 
     if (groupIds.has(candidate.id)) {
       throw new HttpError(400, 'duplicate group id: ' + candidate.id);
     }
+
     groupIds.add(candidate.id);
 
     if (typeof candidate.name !== 'string') {
-      throw new HttpError(400, 'groups[' + index + '].name is required');
-    }
-    const name = candidate.name.trim();
-    if (name.length < 1 || name.length > 48) {
-      throw new HttpError(400, 'groups[' + index + '].name must be between 1 and 48 characters');
+      throw new HttpError(400, `groups[${index}].name is required`);
     }
 
-    const workerIds = uniqueStrings(candidate.workerIds, 'groups[' + index + '].workerIds');
+    const name = candidate.name.trim();
+    if (name.length < 1 || name.length > 48) {
+      throw new HttpError(400, `groups[${index}].name must be between 1 and 48 characters`);
+    }
+
+    const workerIds = uniqueStrings(candidate.workerIds, `groups[${index}].workerIds`);
     if (workerIds.length === 0) {
-      throw new HttpError(400, 'groups[' + index + '] must contain at least one worker');
+      throw new HttpError(400, `groups[${index}] must contain at least one worker`);
     }
 
     for (const workerId of workerIds) {
@@ -105,7 +107,7 @@ export const sanitizeGuildPoolConfig = (
       assignedWorkers.add(workerId);
     }
 
-    const voiceChannelIds = uniqueStrings(candidate.voiceChannelIds, 'groups[' + index + '].voiceChannelIds');
+    const voiceChannelIds = uniqueStrings(candidate.voiceChannelIds, `groups[${index}].voiceChannelIds`);
     for (const channelId of voiceChannelIds) {
       if (!/^\d{10,32}$/u.test(channelId)) {
         throw new HttpError(400, 'invalid voice channel id in group ' + candidate.id);
@@ -119,8 +121,9 @@ export const sanitizeGuildPoolConfig = (
     }
 
     if (typeof candidate.isDefault !== 'boolean') {
-      throw new HttpError(400, 'groups[' + index + '].isDefault must be a boolean');
+      throw new HttpError(400, `groups[${index}].isDefault must be a boolean`);
     }
+
     if (candidate.isDefault) {
       defaultGroups++;
     }
@@ -132,7 +135,7 @@ export const sanitizeGuildPoolConfig = (
       voiceChannelIds,
       maxConcurrentPlayers: parseInteger(
         candidate.maxConcurrentPlayers,
-        'groups[' + index + '].maxConcurrentPlayers',
+        `groups[${index}].maxConcurrentPlayers`,
         0,
         workerIds.length,
       ),
@@ -195,7 +198,7 @@ export default class PoolStore {
 
   private async persist(): Promise<void> {
     this.writeChain = this.writeChain.then(async () => {
-      const tmp = this.filePath + '.' + process.pid + '.tmp';
+      const tmp = `${this.filePath}.${process.pid}.tmp`;
       await fs.writeFile(tmp, JSON.stringify(this.state, null, 2) + '\n', {mode: 0o600});
       await fs.rename(tmp, this.filePath);
     });
