@@ -1,6 +1,7 @@
 import {IncomingMessage, ServerResponse} from 'node:http';
 import {randomBytes} from 'node:crypto';
 import got from 'got';
+import {PermissionFlagsBits, PermissionsBitField} from 'discord.js';
 import OrchestratorConfig from './config.js';
 
 type DiscordUser = {
@@ -34,8 +35,6 @@ export type DashboardSession = {
 const sessions = new Map<string, DashboardSession>();
 const oauthStates = new Map<string, number>();
 
-const MANAGE_GUILD = 1n << 5n;
-const ADMINISTRATOR = 1n << 3n;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 const cleanExpired = () => {
@@ -77,9 +76,9 @@ const canManageGuild = (guild: SessionGuild) => {
   }
 
   try {
-    const permissions = BigInt(guild.permissions);
-    return (permissions & MANAGE_GUILD) === MANAGE_GUILD
-      || (permissions & ADMINISTRATOR) === ADMINISTRATOR;
+    const permissions = new PermissionsBitField(BigInt(guild.permissions));
+    return permissions.has(PermissionFlagsBits.ManageGuild)
+      || permissions.has(PermissionFlagsBits.Administrator);
   } catch {
     return false;
   }
@@ -191,6 +190,7 @@ export const completeDiscordLogin = async (
   ]);
 
   const sessionId = randomBytes(32).toString('hex');
+  const globalName = user.global_name?.trim();
   const session: DashboardSession = {
     id: sessionId,
     csrfToken: randomBytes(32).toString('hex'),
@@ -198,7 +198,7 @@ export const completeDiscordLogin = async (
     user: {
       id: user.id,
       username: user.username,
-      displayName: user.global_name?.trim() || user.username,
+      displayName: globalName && globalName.length > 0 ? globalName : user.username,
       avatar: user.avatar ?? null,
     },
     guilds: guilds.filter(canManageGuild),
