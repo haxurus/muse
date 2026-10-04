@@ -2,6 +2,9 @@ import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
 import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from '../control/http.js';
 import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
+import PoolEngine, {type ReachableWorker} from './pool-engine.js';
+import PoolStore, {sanitizeGuildPoolConfig} from './pool-store.js';
+import type {PoolAssignmentMode} from './pool-types.js';
 import WorkerClient from './worker-client.js';
 
 type WorkerResult<T> = {
@@ -19,12 +22,17 @@ const errorLabel = (error: unknown): string => error instanceof Error ? error.na
 export default class OrchestratorServer {
   private server?: Server;
   private readonly workers: WorkerClient[];
+  private readonly poolStore: PoolStore;
+  private readonly poolEngine = new PoolEngine();
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
+    this.poolStore = new PoolStore(config.poolStorePath);
   }
 
   async start(): Promise<void> {
+    await this.poolStore.load();
+
     this.server = createServer((request, response) => {
       void this.handle(request, response);
     });
@@ -37,7 +45,9 @@ export default class OrchestratorServer {
       });
     });
 
-    console.log(`Muse orchestrator listening on ${this.config.host}:${this.config.port} with ${this.workers.length} workers`);
+    console.log('Muse orchestrator listening on '
+      + this.config.host + ':' + this.config.port
+      + ' with ' + this.workers.length + ' workers');
   }
 
   async close(): Promise<void> {
@@ -64,12 +74,23 @@ export default class OrchestratorServer {
         return;
       }
 
+      const segments = getPathSegments(request);
+      if (request.method === 'POST' && segments.join('/') === 'v1/pool/assign') {
+        const sourceWorker = this.workerForRequest(request);
+        if (!sourceWorker) {
+          sendJson(response, 401, {error: 'unauthorized worker'});
+          return;
+        }
+
+        sendJson(response, 200, await this.assignPoolWorker(sourceWorker.id, await readJsonBody(request)));
+        return;
+      }
+
       if (!hasBearerToken(request, this.config.apiToken)) {
         sendJson(response, 401, {error: 'unauthorized'});
         return;
       }
 
-      const segments = getPathSegments(request);
       if (request.method === 'GET' && segments.join('/') === 'v1/workers') {
         sendJson(response, 200, {workers: await this.workerStatuses()});
         return;
@@ -80,9 +101,28 @@ export default class OrchestratorServer {
         return;
       }
 
-      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'workers' && request.method === 'GET') {
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'workers'
+        && request.method === 'GET') {
         sendJson(response, 200, await this.guildWorkers(segments[2]));
         return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'pool') {
+        if (request.method === 'GET') {
+          sendJson(response, 200, await this.guildPool(segments[2]));
+          return;
+        }
+
+        if (request.method === 'PUT') {
+          sendJson(response, 200, await this.updateGuildPool(segments[2], await readJsonBody(request)));
+          return;
+        }
       }
 
       if (segments.length === 5
@@ -107,8 +147,22 @@ export default class OrchestratorServer {
     }
   }
 
+  private workerForRequest(request: IncomingMessage): WorkerClient | undefined {
+    return this.workers.find(worker => hasBearerToken(request, worker.token));
+  }
+
   private async workerStatuses() {
     return Promise.all(this.workers.map(async worker => this.wrap(worker.id, worker.status())));
+  }
+
+  private async reachableWorkers(): Promise<ReachableWorker[]> {
+    const statuses = await this.workerStatuses();
+    return statuses
+      .filter((result): result is Extract<typeof result, {ok: true}> => result.ok)
+      .map(result => ({
+        id: result.workerId,
+        status: result.value,
+      }));
   }
 
   private async guilds() {
@@ -155,6 +209,101 @@ export default class OrchestratorServer {
     };
   }
 
+  private async guildPool(guildId: string) {
+    const reachable = await this.reachableWorkers();
+    const present = reachable.filter(worker => worker.status.guilds.some(guild => guild.id === guildId));
+    if (present.length === 0) {
+      throw new HttpError(404, 'no Muse worker is available in that guild');
+    }
+
+    const voiceChannels = new Map<string, string>();
+    for (const worker of present) {
+      const guild = worker.status.guilds.find(candidate => candidate.id === guildId);
+      for (const channel of guild?.voiceChannels ?? []) {
+        voiceChannels.set(channel.id, channel.name);
+      }
+    }
+
+    return {
+      guildId,
+      config: this.poolStore.getGuild(guildId, present.length),
+      availableWorkerIds: present.map(worker => worker.id),
+      voiceChannels: [...voiceChannels.entries()]
+        .map(([id, name]) => ({id, name}))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    };
+  }
+
+  private async updateGuildPool(guildId: string, input: unknown) {
+    const reachable = await this.reachableWorkers();
+    const present = reachable.filter(worker => worker.status.guilds.some(guild => guild.id === guildId));
+    if (present.length === 0) {
+      throw new HttpError(404, 'no Muse worker is available in that guild');
+    }
+
+    const config = sanitizeGuildPoolConfig(input, present.map(worker => worker.id));
+
+    const knownVoiceChannels = new Set<string>();
+    for (const worker of present) {
+      const guild = worker.status.guilds.find(candidate => candidate.id === guildId);
+      for (const channel of guild?.voiceChannels ?? []) {
+        knownVoiceChannels.add(channel.id);
+      }
+    }
+
+    for (const group of config.groups) {
+      const unknownChannels = group.voiceChannelIds.filter(channelId => !knownVoiceChannels.has(channelId));
+      if (unknownChannels.length > 0) {
+        throw new HttpError(400, 'unknown voice channels: ' + unknownChannels.join(', '));
+      }
+    }
+
+    return {
+      guildId,
+      config: await this.poolStore.setGuild(guildId, config),
+    };
+  }
+
+  private async assignPoolWorker(sourceWorkerId: string, input: unknown) {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'assignment request must be an object');
+    }
+
+    const body = input as {
+      guildId?: unknown;
+      voiceChannelId?: unknown;
+      mode?: unknown;
+    };
+
+    if (typeof body.guildId !== 'string' || !/^\d{10,32}$/u.test(body.guildId)) {
+      throw new HttpError(400, 'guildId is invalid');
+    }
+
+    if (typeof body.voiceChannelId !== 'string' || !/^\d{10,32}$/u.test(body.voiceChannelId)) {
+      throw new HttpError(400, 'voiceChannelId is invalid');
+    }
+
+    if (body.mode !== 'assign' && body.mode !== 'existing') {
+      throw new HttpError(400, 'mode must be assign or existing');
+    }
+
+    const workers = await this.reachableWorkers();
+    const present = workers.filter(worker => worker.status.guilds.some(guild => guild.id === body.guildId));
+    if (present.length === 0) {
+      throw new HttpError(404, 'no Muse worker is available in that guild');
+    }
+
+    const config = this.poolStore.getGuild(body.guildId, present.length);
+    return this.poolEngine.assign({
+      guildId: body.guildId,
+      voiceChannelId: body.voiceChannelId,
+      currentWorkerId: sourceWorkerId,
+      mode: body.mode as PoolAssignmentMode,
+      config,
+      workers: present,
+    });
+  }
+
   private async updateGuildWorkers(guildId: string, input: unknown) {
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       throw new HttpError(400, 'request body must be an object');
@@ -180,7 +329,7 @@ export default class OrchestratorServer {
       const requestedIds = new Set(body.workerIds as string[]);
       const unknownIds = [...requestedIds].filter(id => !this.workers.some(worker => worker.id === id));
       if (unknownIds.length > 0) {
-        throw new HttpError(400, `unknown workers: ${unknownIds.join(', ')}`);
+        throw new HttpError(400, 'unknown workers: ' + unknownIds.join(', '));
       }
 
       selected = this.workers.filter(worker => requestedIds.has(worker.id));
