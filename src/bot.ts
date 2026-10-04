@@ -15,6 +15,7 @@ import {generateDependencyReport} from '@discordjs/voice';
 import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
+import {getGuildSettings} from './utils/get-guild-settings.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -82,6 +83,21 @@ export default class {
     // eslint-disable-next-line complexity
     this.client.on('interactionCreate', async interaction => {
       try {
+        if (interaction.guildId) {
+          const settings = await getGuildSettings(interaction.guildId);
+          if (!settings.orchestratorEnabled) {
+            if (interaction.isAutocomplete()) {
+              await interaction.respond([]);
+            } else if (interaction.isCommand() || interaction.isButton()) {
+              await interaction.reply({
+                content: errorMsg('this music worker is disabled for this server'),
+                ephemeral: true,
+              });
+            }
+
+            return;
+          }
+        }
         if (interaction.isCommand()) {
           const command = this.commandsByName.get(interaction.commandName);
 
