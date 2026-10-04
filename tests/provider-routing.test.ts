@@ -244,7 +244,10 @@ describe('GetSongs provider routing', () => {
     'http://radio.example/live.m3u8',
     'https://radio.example/live.m3u8',
   ])('propagates an ffprobe rejection for %s without searching the literal URL', async url => {
-    const {getSongs, youtubeAPI} = makeGetSongsHarness();
+    const {getSongs, youtubeAPI} = makeGetSongsHarness({
+      ALLOW_HTTP_STREAMS: true,
+      HTTP_STREAM_ALLOWED_HOSTS: ['radio.example'],
+    });
     const error = new Error('ffprobe failed');
     dependencyMocks.ffprobe.mockImplementation((_url, callback) => callback(error));
     youtubeAPI.search.mockResolvedValue([makeSong('Wrong fallback')]);
