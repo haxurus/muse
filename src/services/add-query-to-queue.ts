@@ -25,7 +25,7 @@ const normalizeSkipError = (error: unknown) => (
 
 @injectable()
 export default class AddQueryToQueue {
-  private readonly sponsorBlock?: SponsorBlock;
+  private readonly sponsorBlock: SponsorBlock;
   private sponsorBlockDisabledUntil?: Date;
   private readonly sponsorBlockTimeoutDelay;
   private readonly cache: KeyValueCacheProvider;
@@ -35,9 +35,7 @@ export default class AddQueryToQueue {
     @inject(TYPES.Config) private readonly config: Config,
     @inject(TYPES.KeyValueCache) cache: KeyValueCacheProvider) {
     this.sponsorBlockTimeoutDelay = config.SPONSORBLOCK_TIMEOUT;
-    this.sponsorBlock = config.ENABLE_SPONSORBLOCK
-      ? new SponsorBlock('muse-sb-integration') // UserID matters only for submissions
-      : undefined;
+    this.sponsorBlock = new SponsorBlock('muse-sb-integration'); // UserID matters only for submissions
     this.cache = cache;
   }
 
@@ -65,7 +63,7 @@ export default class AddQueryToQueue {
 
     const settings = await getGuildSettings(guildId);
 
-    const {playlistLimit, queueAddResponseEphemeral} = settings;
+    const {playlistLimit, queueAddResponseEphemeral, enableSponsorBlock} = settings;
 
     await interaction.deferReply({ephemeral: queueAddResponseEphemeral});
 
@@ -79,7 +77,7 @@ export default class AddQueryToQueue {
       newSongs = shuffle(newSongs);
     }
 
-    if (this.config.ENABLE_SPONSORBLOCK) {
+    if (enableSponsorBlock) {
       newSongs = await Promise.all(newSongs.map(this.skipNonMusicSegments.bind(this)));
     }
 
@@ -163,8 +161,7 @@ export default class AddQueryToQueue {
   }
 
   private async skipNonMusicSegments(song: SongMetadata) {
-    if (!this.sponsorBlock
-          || (this.sponsorBlockDisabledUntil && new Date() < this.sponsorBlockDisabledUntil)
+    if ((this.sponsorBlockDisabledUntil && new Date() < this.sponsorBlockDisabledUntil)
           || song.source !== MediaSource.Youtube
           || !song.url) {
       return song;
