@@ -32,7 +32,7 @@ export default class AddQueryToQueue {
 
   constructor(@inject(TYPES.Services.GetSongs) private readonly getSongs: GetSongs,
     @inject(TYPES.Managers.Player) private readonly playerManager: PlayerManager,
-    @inject(TYPES.Config) private readonly config: Config,
+    @inject(TYPES.Config) config: Config,
     @inject(TYPES.KeyValueCache) cache: KeyValueCacheProvider) {
     this.sponsorBlockTimeoutDelay = config.SPONSORBLOCK_TIMEOUT;
     this.sponsorBlock = new SponsorBlock('muse-sb-integration'); // UserID matters only for submissions
