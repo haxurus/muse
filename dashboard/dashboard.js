@@ -158,7 +158,7 @@ const syncSuggestedValues = () => {
     const input = settingsForm.querySelector(`.setting-input[data-key="${definition.key}"]`);
     if (!input || workers.length === 0) continue;
 
-    const values = workers.map(worker => worker.value?.[definition.key]);
+    const values = workers.map(worker => worker.value?.settings?.[definition.key]);
     const first = values[0];
     const allSame = values.every(value => value === first);
 
@@ -206,8 +206,8 @@ const renderWorkers = () => {
     card.append(
       checkbox,
       el('span', 'worker-status', 'Online'),
-      el('h3', '', worker.workerId),
-      el('div', 'worker-meta', `Volume ${worker.value?.defaultVolume ?? '?'}% · Playlist ${worker.value?.playlistLimit ?? '?'}`),
+      el('h3', '', worker.value?.status?.bot?.username ?? worker.workerId),
+      el('div', 'worker-meta', `${worker.value?.status?.bot?.username ?? worker.workerId} · Volume ${worker.value?.settings?.defaultVolume ?? '?'}% · Playlist ${worker.value?.settings?.playlistLimit ?? '?'}`),
     );
 
     workerGrid.append(card);
