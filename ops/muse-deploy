@@ -96,6 +96,10 @@ deploy_image() {
     old="$(awk -F= '$1=="MUSE_IMAGE"{print substr($0,index($0,"=")+1)}' "$ENV_FILE" | tail -n1)"
   fi
 
+  if [[ ! "$old" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ ]]; then
+    old=""
+  fi
+
   docker pull "$image"
   stop_for_backup
   backup_db
