@@ -3,6 +3,27 @@ import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {WorkerGuildSettings, WorkerStatus} from '../control/types.js';
 import type {PlaybackActionResult} from '../control/playback-types.js';
 import type {WorkerDefinition} from './config.js';
+import {HttpError} from '../control/http.js';
+
+const normalizeWorkerError = (error: unknown): HttpError => {
+  if (typeof error === 'object' && error !== null && 'response' in error) {
+    const response = (error as {response?: {statusCode?: number; body?: unknown}}).response;
+    const statusCode = response?.statusCode && response.statusCode >= 400 && response.statusCode < 500
+      ? response.statusCode
+      : 502;
+
+    if (typeof response?.body === 'string') {
+      try {
+        const parsed = JSON.parse(response.body) as {error?: unknown};
+        if (typeof parsed.error === 'string') {
+          return new HttpError(statusCode, parsed.error);
+        }
+      } catch {}
+    }
+  }
+
+  return new HttpError(502, 'music worker is unavailable');
+};
 
 const requestOptions = (token: string) => ({
   headers: {
@@ -54,10 +75,14 @@ export default class WorkerClient {
   }
 
   async guildChannels(guildId: string): Promise<WorkerGuildChannels> {
-    return got.get(
-      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/channels`,
-      requestOptions(this.worker.token),
-    ).json<WorkerGuildChannels>();
+    try {
+      return await got.get(
+        `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/channels`,
+        requestOptions(this.worker.token),
+      ).json<WorkerGuildChannels>();
+    } catch (error: unknown) {
+      throw normalizeWorkerError(error);
+    }
   }
 
   async playbackAction(
@@ -65,28 +90,36 @@ export default class WorkerClient {
     action: 'play' | 'pause' | 'resume' | 'skip' | 'stop' | 'disconnect' | 'volume',
     body: Record<string, unknown>,
   ): Promise<PlaybackActionResult> {
-    return got.post(
-      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/playback/${action}`,
-      {
-        ...requestOptions(this.worker.token),
-        json: body,
-        timeout: {
-          request: action === 'play' ? 60_000 : 10_000,
+    try {
+      return await got.post(
+        `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/playback/${action}`,
+        {
+          ...requestOptions(this.worker.token),
+          json: body,
+          timeout: {
+            request: action === 'play' ? 60_000 : 10_000,
+          },
         },
-      },
-    ).json<PlaybackActionResult>();
+      ).json<PlaybackActionResult>();
+    } catch (error: unknown) {
+      throw normalizeWorkerError(error);
+    }
   }
 
   async playbackRead(
     guildId: string,
     action: 'queue' | 'now-playing',
   ): Promise<PlaybackActionResult> {
-    return got.get(
-      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/playback/${action}`,
-      {
-        ...requestOptions(this.worker.token),
-        timeout: {request: 10_000},
-      },
-    ).json<PlaybackActionResult>();
+    try {
+      return await got.get(
+        `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/playback/${action}`,
+        {
+          ...requestOptions(this.worker.token),
+          timeout: {request: 10_000},
+        },
+      ).json<PlaybackActionResult>();
+    } catch (error: unknown) {
+      throw normalizeWorkerError(error);
+    }
   }
 }
