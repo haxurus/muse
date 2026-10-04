@@ -113,16 +113,31 @@ export default class DashboardServer {
       }
 
       const segments = routeSegments(request, this.config.publicUrl);
-      if (segments.length === 3 && segments[0] === 'api' && segments[1] === 'guilds') {
+      if (segments[0] === 'api' && segments[1] === 'guilds') {
         const guildId = segments[2];
 
-        if (request.method === 'GET') {
+        if (segments.length === 3 && request.method === 'GET') {
           await this.guildResponse(request, response, guildId);
           return;
         }
 
-        if (request.method === 'PATCH') {
+        if (segments.length === 3 && request.method === 'PATCH') {
           await this.updateGuild(request, response, guildId);
+          return;
+        }
+
+        if (segments.length === 4 && segments[3] === 'groups' && request.method === 'POST') {
+          await this.createGroup(request, response, guildId);
+          return;
+        }
+
+        if (segments.length === 5 && segments[3] === 'groups' && request.method === 'PATCH') {
+          await this.updateGroup(request, response, guildId, segments[4]);
+          return;
+        }
+
+        if (segments.length === 5 && segments[3] === 'groups' && request.method === 'DELETE') {
+          await this.deleteGroup(request, response, guildId, segments[4]);
           return;
         }
       }
@@ -200,6 +215,74 @@ export default class DashboardServer {
       },
       ...details,
     });
+  }
+
+  private async createGroup(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
+    const {session} = await this.assertGuildAccess(request, guildId, true);
+    this.auth.assertCsrf(request, session);
+    this.auth.assertMutationAllowed(session);
+
+    const input = await readJsonBody(request);
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'group body must be an object');
+    }
+
+    const body = input as {name?: unknown; workerIds?: unknown};
+    if (typeof body.name !== 'string'
+      || !Array.isArray(body.workerIds)
+      || body.workerIds.some(workerId => typeof workerId !== 'string')) {
+      throw new HttpError(400, 'group requires a name and workerIds string array');
+    }
+
+    sendJson(response, 201, await this.orchestrator.createGuildGroup(guildId, {
+      name: body.name,
+      workerIds: body.workerIds as string[],
+    }));
+  }
+
+  private async updateGroup(
+    request: IncomingMessage,
+    response: ServerResponse,
+    guildId: string,
+    groupId: string,
+  ): Promise<void> {
+    const {session} = await this.assertGuildAccess(request, guildId, true);
+    this.auth.assertCsrf(request, session);
+    this.auth.assertMutationAllowed(session);
+
+    const input = await readJsonBody(request);
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'group body must be an object');
+    }
+
+    const body = input as {name?: unknown; workerIds?: unknown};
+    if (body.name !== undefined && typeof body.name !== 'string') {
+      throw new HttpError(400, 'group name must be a string');
+    }
+
+    if (body.workerIds !== undefined
+      && (!Array.isArray(body.workerIds)
+        || body.workerIds.some(workerId => typeof workerId !== 'string'))) {
+      throw new HttpError(400, 'workerIds must be a string array');
+    }
+
+    sendJson(response, 200, await this.orchestrator.updateGuildGroup(guildId, groupId, {
+      ...(body.name === undefined ? {} : {name: body.name}),
+      ...(body.workerIds === undefined ? {} : {workerIds: body.workerIds as string[]}),
+    }));
+  }
+
+  private async deleteGroup(
+    request: IncomingMessage,
+    response: ServerResponse,
+    guildId: string,
+    groupId: string,
+  ): Promise<void> {
+    const {session} = await this.assertGuildAccess(request, guildId, true);
+    this.auth.assertCsrf(request, session);
+    this.auth.assertMutationAllowed(session);
+
+    sendJson(response, 200, await this.orchestrator.deleteGuildGroup(guildId, groupId));
   }
 
   private async updateGuild(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {

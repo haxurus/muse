@@ -129,6 +129,7 @@ services:
       MUSE_ORCHESTRATOR_PORT: "3100"
       MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       MUSE_WORKERS_FILE: /config/workers.json
+      MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json
     secrets:
       - orchestrator_api_token
       - control_token_01
@@ -138,6 +139,7 @@ services:
       - control_token_05
     volumes:
       - ./config/workers.json:/config/workers.json:ro
+      - ./data/orchestrator:/state
     networks:
       - dashboard-control
       - control-01

@@ -41,6 +41,7 @@ fi
 install -d -m 700 -o root -g root "$BASE"
 install -d -m 700 -o root -g root "$BASE/secrets" "$BASE/backups" "$BASE/.deploy-state"
 install -d -m 755 -o root -g root "$BASE/config" "$BASE/data"
+install -d -m 700 -o "$RUNTIME_UID" -g "$RUNTIME_GID" "$BASE/data/orchestrator"
 
 for worker in 01 02 03 04 05; do
   install -d -m 700 -o "$RUNTIME_UID" -g "$RUNTIME_GID" "$BASE/data/bot-$worker"

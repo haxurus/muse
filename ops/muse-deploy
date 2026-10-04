@@ -119,15 +119,19 @@ backup_db() {
     done
   done
 
+  if [[ -f "$BASE/data/orchestrator/groups.json" ]]; then
+    files+=("data/orchestrator/groups.json")
+  fi
+
   if [[ "${#files[@]}" -gt 0 ]]; then
     tar -C "$BASE" -czf "$backup" "${files[@]}"
     chmod 600 "$backup"
     printf '%s\n' "$backup" > "$LAST_BACKUP"
     find "$BACKUPS" -type f -name 'muse-*.tar.gz' -mtime +14 -delete
-    echo "Fleet database backup: $backup"
+    echo "Fleet state backup: $backup"
   else
     : > "$LAST_BACKUP"
-    echo "No existing worker databases to back up."
+    echo "No existing worker databases or orchestrator group state to back up."
   fi
 }
 
@@ -141,6 +145,7 @@ restore_backup() {
   for worker in 01 02 03 04 05; do
     rm -f       "$BASE/data/bot-$worker/db.sqlite"       "$BASE/data/bot-$worker/db.sqlite-wal"       "$BASE/data/bot-$worker/db.sqlite-shm"
   done
+  rm -f "$BASE/data/orchestrator/groups.json"
 
   tar -C "$BASE" -xzf "$backup"
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$BASE/data"

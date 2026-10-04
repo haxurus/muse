@@ -10,6 +10,8 @@ describe('dashboard production isolation', () => {
     expect(compose).toContain('dashboard_discord_client_secret');
     expect(compose).toContain('dashboard-control:');
     expect(compose).toContain('dashboard-web:');
+    expect(compose).toContain('MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json');
+    expect(compose).toContain('./data/orchestrator:/state');
     expect(compose).toContain('proxy_net:');
     expect(compose).not.toContain('/var/run/docker.sock');
     expect(compose).not.toMatch(/ports:\s*\n/u);

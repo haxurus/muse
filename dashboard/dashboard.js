@@ -9,11 +9,23 @@ const selectionSummary = document.getElementById('selection-summary');
 const formMessage = document.getElementById('form-message');
 const applyButton = document.getElementById('apply-button');
 const statusPill = document.getElementById('status-pill');
+const groupList = document.getElementById('group-list');
+const groupName = document.getElementById('group-name');
+const groupMessage = document.getElementById('group-message');
+const groupEditorTitle = document.getElementById('group-editor-title');
+const groupEditorHint = document.getElementById('group-editor-hint');
+const groupOfflineRow = document.getElementById('group-offline-row');
+const groupOfflineNote = document.getElementById('group-offline-note');
+const saveGroupButton = document.getElementById('save-group');
+const cancelGroupEditButton = document.getElementById('cancel-group-edit');
+const dropOfflineMembersButton = document.getElementById('drop-offline-members');
 
 let session = null;
 let selectedGuildId = null;
 let guildDetails = null;
 const selectedWorkers = new Set();
+let editingGroupId = null;
+const preservedUnavailableWorkers = new Set();
 
 const SETTINGS = [
   {key: 'defaultVolume', label: 'Volume predefinito', hint: '0-100', type: 'number', min: 0, max: 100},
@@ -219,9 +231,215 @@ const renderWorkers = () => {
   updateSelectionSummary();
 };
 
+const availableWorkerIds = () => new Set(
+  (guildDetails?.workers ?? [])
+    .filter(worker => worker.ok)
+    .map(worker => worker.workerId),
+);
+
+const setWorkerSelection = workerIds => {
+  const available = availableWorkerIds();
+  selectedWorkers.clear();
+
+  for (const workerId of workerIds) {
+    if (available.has(workerId)) {
+      selectedWorkers.add(workerId);
+    }
+  }
+
+  for (const checkbox of workerGrid.querySelectorAll('input[type="checkbox"]')) {
+    checkbox.checked = selectedWorkers.has(checkbox.value);
+  }
+
+  updateSelectionSummary();
+};
+
+const workerDisplayName = workerId => {
+  const worker = guildDetails?.workers.find(candidate => candidate.workerId === workerId);
+  return worker?.value?.status?.bot?.username ?? workerId;
+};
+
+const resetGroupEditor = () => {
+  editingGroupId = null;
+  preservedUnavailableWorkers.clear();
+  groupName.value = '';
+  groupEditorTitle.textContent = 'Nuovo gruppo';
+  groupEditorHint.textContent = 'Seleziona i worker sopra, assegna un nome e salva.';
+  saveGroupButton.textContent = 'Crea gruppo';
+  cancelGroupEditButton.hidden = true;
+  groupOfflineRow.hidden = true;
+  groupOfflineNote.textContent = '';
+};
+
+const selectGroup = group => {
+  const available = availableWorkerIds();
+  const onlineMembers = group.workerIds.filter(workerId => available.has(workerId));
+  const unavailableCount = group.workerIds.length - onlineMembers.length;
+
+  setWorkerSelection(onlineMembers);
+  groupMessage.textContent = unavailableCount === 0
+    ? `Gruppo "${group.name}" selezionato.`
+    : `Gruppo "${group.name}" selezionato: ${unavailableCount} membri non disponibili non sono stati selezionati.`;
+  groupMessage.className = unavailableCount === 0 ? 'success' : 'muted';
+};
+
+const editGroup = group => {
+  resetGroupEditor();
+  editingGroupId = group.id;
+  groupName.value = group.name;
+  groupEditorTitle.textContent = `Modifica ${group.name}`;
+  groupEditorHint.textContent = 'La selezione dei worker sopra rappresenta i membri disponibili del gruppo.';
+  saveGroupButton.textContent = 'Salva modifiche';
+  cancelGroupEditButton.hidden = false;
+
+  const available = availableWorkerIds();
+  for (const workerId of group.workerIds) {
+    if (!available.has(workerId)) {
+      preservedUnavailableWorkers.add(workerId);
+    }
+  }
+
+  setWorkerSelection(group.workerIds);
+
+  if (preservedUnavailableWorkers.size > 0) {
+    groupOfflineRow.hidden = false;
+    groupOfflineNote.textContent = `${preservedUnavailableWorkers.size} membri non disponibili verranno preservati.`;
+  }
+};
+
+const deleteGroup = async group => {
+  if (!window.confirm(`Eliminare il gruppo "${group.name}"? I bot e le loro configurazioni non verranno modificati.`)) {
+    return;
+  }
+
+  try {
+    await api(
+      `/api/guilds/${encodeURIComponent(selectedGuildId)}/groups/${encodeURIComponent(group.id)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'x-csrf-token': session.csrfToken,
+        },
+      },
+    );
+
+    if (editingGroupId === group.id) {
+      resetGroupEditor();
+    }
+
+    await selectGuild(selectedGuildId);
+    groupMessage.textContent = 'Gruppo eliminato.';
+    groupMessage.className = 'success';
+  } catch (error) {
+    groupMessage.textContent = error.message;
+    groupMessage.className = 'error';
+  }
+};
+
+const renderGroups = () => {
+  groupList.replaceChildren();
+  const groups = guildDetails?.groups ?? [];
+  const available = availableWorkerIds();
+
+  if (groups.length === 0) {
+    groupList.append(el('div', 'group-empty', 'Nessun gruppo creato per questo server.'));
+    return;
+  }
+
+  for (const group of groups) {
+    const card = el('article', 'group-card');
+    const copy = el('div', 'group-card-copy');
+    const names = group.workerIds.map(workerDisplayName);
+    const unavailable = group.workerIds.filter(workerId => !available.has(workerId));
+
+    copy.append(
+      el('strong', '', group.name),
+      el('span', '', `${group.workerIds.length} bot · ${names.join(', ')}`),
+    );
+
+    if (unavailable.length > 0) {
+      copy.append(el('span', 'group-warning', `${unavailable.length} non disponibili`));
+    }
+
+    const actions = el('div', 'group-actions');
+    const selectButton = el('button', 'button ghost', 'Seleziona');
+    selectButton.type = 'button';
+    selectButton.addEventListener('click', () => selectGroup(group));
+
+    const editButton = el('button', 'button ghost', 'Modifica');
+    editButton.type = 'button';
+    editButton.addEventListener('click', () => editGroup(group));
+
+    const deleteButton = el('button', 'button danger', 'Elimina');
+    deleteButton.type = 'button';
+    deleteButton.addEventListener('click', () => {
+      void deleteGroup(group);
+    });
+
+    actions.append(selectButton, editButton, deleteButton);
+    card.append(copy, actions);
+    groupList.append(card);
+  }
+};
+
+const saveGroup = async () => {
+  const name = groupName.value.trim();
+  if (!name) {
+    groupMessage.textContent = 'Inserisci un nome per il gruppo.';
+    groupMessage.className = 'error';
+    return;
+  }
+
+  const workerIds = [...new Set([
+    ...selectedWorkers,
+    ...preservedUnavailableWorkers,
+  ])];
+
+  if (workerIds.length === 0) {
+    groupMessage.textContent = 'Seleziona almeno un worker.';
+    groupMessage.className = 'error';
+    return;
+  }
+
+  saveGroupButton.disabled = true;
+  groupMessage.textContent = '';
+  groupMessage.className = 'muted';
+
+  try {
+    const editing = editingGroupId !== null;
+    const endpoint = editing
+      ? `/api/guilds/${encodeURIComponent(selectedGuildId)}/groups/${encodeURIComponent(editingGroupId)}`
+      : `/api/guilds/${encodeURIComponent(selectedGuildId)}/groups`;
+
+    await api(endpoint, {
+      method: editing ? 'PATCH' : 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': session.csrfToken,
+      },
+      body: JSON.stringify({
+        name,
+        workerIds,
+      }),
+    });
+
+    resetGroupEditor();
+    await selectGuild(selectedGuildId);
+    groupMessage.textContent = editing ? 'Gruppo aggiornato.' : 'Gruppo creato.';
+    groupMessage.className = 'success';
+  } catch (error) {
+    groupMessage.textContent = error.message;
+    groupMessage.className = 'error';
+  } finally {
+    saveGroupButton.disabled = false;
+  }
+};
+
 const selectGuild = async guildId => {
   selectedGuildId = guildId;
   formMessage.textContent = '';
+  groupMessage.textContent = '';
+  resetGroupEditor();
   statusPill.textContent = 'Caricamento';
   statusPill.className = 'status-pill';
 
@@ -236,6 +454,7 @@ const selectGuild = async guildId => {
     emptyState.hidden = true;
     guildContent.hidden = false;
     renderWorkers();
+    renderGroups();
     statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online`;
     statusPill.className = 'status-pill ok';
   } catch (error) {
@@ -328,6 +547,17 @@ document.getElementById('select-none').addEventListener('click', () => {
 });
 
 applyButton.addEventListener('click', applySettings);
+saveGroupButton.addEventListener('click', saveGroup);
+
+cancelGroupEditButton.addEventListener('click', () => {
+  resetGroupEditor();
+});
+
+dropOfflineMembersButton.addEventListener('click', () => {
+  preservedUnavailableWorkers.clear();
+  groupOfflineRow.hidden = true;
+  groupOfflineNote.textContent = '';
+});
 
 document.getElementById('logout-button').addEventListener('click', async () => {
   try {

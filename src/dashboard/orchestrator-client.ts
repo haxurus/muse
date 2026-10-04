@@ -11,8 +11,17 @@ export type OrchestratorGuildList = {
   guilds: OrchestratorGuild[];
 };
 
+export type GuildWorkerGroup = {
+  id: string;
+  name: string;
+  workerIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type OrchestratorGuildWorkers = {
   guildId: string;
+  groups: GuildWorkerGroup[];
   workers: Array<{
     workerId: string;
     ok: boolean;
@@ -53,6 +62,37 @@ export default class OrchestratorClient {
       `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/workers`,
       options(this.config.orchestratorToken),
     ).json<OrchestratorGuildWorkers>();
+  }
+
+  async createGuildGroup(guildId: string, body: {name: string; workerIds: string[]}): Promise<unknown> {
+    return got.post(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/groups`,
+      {
+        ...options(this.config.orchestratorToken),
+        json: body,
+      },
+    ).json<unknown>();
+  }
+
+  async updateGuildGroup(
+    guildId: string,
+    groupId: string,
+    body: {name?: string; workerIds?: string[]},
+  ): Promise<unknown> {
+    return got.patch(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/groups/${encodeURIComponent(groupId)}`,
+      {
+        ...options(this.config.orchestratorToken),
+        json: body,
+      },
+    ).json<unknown>();
+  }
+
+  async deleteGuildGroup(guildId: string, groupId: string): Promise<unknown> {
+    return got.delete(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/groups/${encodeURIComponent(groupId)}`,
+      options(this.config.orchestratorToken),
+    ).json<unknown>();
   }
 
   async updateGuildSettings(guildId: string, body: GuildSettingsUpdate): Promise<unknown> {

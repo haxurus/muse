@@ -85,6 +85,7 @@ export type OrchestratorConfig = {
   port: number;
   apiToken: string;
   workers: WorkerDefinition[];
+  groupsFile: string;
 };
 
 export const loadOrchestratorConfig = (): OrchestratorConfig => {
@@ -98,10 +99,16 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     throw new Error('MUSE_ORCHESTRATOR_TOKEN_FILE must point to a mounted secret');
   }
 
+  const groupsFile = process.env.MUSE_ORCHESTRATOR_GROUPS_FILE ?? '/state/groups.json';
+  if (!groupsFile.startsWith('/state/')) {
+    throw new Error('MUSE_ORCHESTRATOR_GROUPS_FILE must be stored under /state');
+  }
+
   return {
     host: process.env.MUSE_ORCHESTRATOR_HOST ?? '127.0.0.1',
     port,
     apiToken: readRequiredFile(tokenFile, 'orchestrator API token'),
     workers: loadWorkerDefinitions(),
+    groupsFile,
   };
 };

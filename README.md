@@ -17,7 +17,8 @@ Production-specific additions include:
 - GHCR image publishing by immutable digest;
 - restricted GitHub Actions -> VPS deployment;
 - five isolated music workers coordinated by an orchestrator;
-- Muse Control web dashboard with Discord OAuth and per-guild authorization.
+- Muse Control web dashboard with Discord OAuth and per-guild authorization;
+- persistent per-server worker groups for arbitrary X+Y bot combinations.
 
 Deployment documentation: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)  
 Dashboard/OAuth: [docs/DASHBOARD.md](docs/DASHBOARD.md)  
