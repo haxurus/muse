@@ -6,22 +6,17 @@ import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
 import {readJsonBody, send, sendJson} from './http.js';
 import OrchestratorClient, {GuildSettingsUpdate} from './orchestrator-client.js';
+import DashboardPoolApi from './pool-api.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
-
-const staticAsset = (fileName: string): string =>
-  readFileSync(path.join(STATIC_ROOT, fileName), 'utf8');
-
+const staticAsset = (fileName: string): string => readFileSync(path.join(STATIC_ROOT, fileName), 'utf8');
 const INDEX_HTML = staticAsset('index.html');
 const DASHBOARD_CSS = staticAsset('dashboard.css');
 const DASHBOARD_JS = staticAsset('dashboard.js');
-
 const avatarUrl = (userId: string, avatar?: string | null): string | null =>
   avatar ? `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128` : null;
-
 const guildIconUrl = (guildId: string, icon?: string | null): string | null =>
   icon ? `https://cdn.discordapp.com/icons/${guildId}/${icon}.png?size=128` : null;
-
 const routeSegments = (request: IncomingMessage, publicUrl: URL): string[] =>
   new URL(request.url ?? '/', publicUrl).pathname.split('/').filter(Boolean);
 
@@ -29,17 +24,18 @@ export default class DashboardServer {
   private server?: Server;
   private readonly auth: DashboardAuth;
   private readonly orchestrator: OrchestratorClient;
+  private readonly poolApi: DashboardPoolApi;
 
   constructor(private readonly config: DashboardConfig) {
     this.auth = new DashboardAuth(config);
     this.orchestrator = new OrchestratorClient(config);
+    this.poolApi = new DashboardPoolApi(config, this.auth, this.orchestrator);
   }
 
   async start(): Promise<void> {
     this.server = createServer((request, response) => {
       void this.handle(request, response);
     });
-
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
       this.server!.listen(this.config.port, this.config.host, () => {
@@ -47,7 +43,6 @@ export default class DashboardServer {
         resolve();
       });
     });
-
     console.log(`Muse dashboard listening on ${this.config.host}:${this.config.port}`);
   }
 
@@ -69,9 +64,12 @@ export default class DashboardServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const {pathname} = new URL(request.url ?? '/', this.config.publicUrl);
-
     try {
+      const {pathname} = new URL(request.url ?? '/', this.config.publicUrl);
+      if (await this.poolApi.handle(request, response)) {
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/health') {
         sendJson(response, 200, {ok: true});
         return;
@@ -115,7 +113,6 @@ export default class DashboardServer {
       const segments = routeSegments(request, this.config.publicUrl);
       if (segments[0] === 'api' && segments[1] === 'guilds') {
         const guildId = segments[2];
-
         if (segments.length === 3 && request.method === 'GET') {
           await this.guildResponse(request, response, guildId);
           return;
@@ -146,9 +143,8 @@ export default class DashboardServer {
     } catch (error: unknown) {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
       const message = error instanceof HttpError ? error.message : 'request failed';
-
       if (!(error instanceof HttpError)) {
-        console.error(`Dashboard request failed: ${request.method ?? 'UNKNOWN'} ${pathname}`);
+        console.error('Dashboard request failed');
       }
 
       sendJson(response, statusCode, {error: message});
@@ -158,32 +154,20 @@ export default class DashboardServer {
   private async sessionResponse(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const session = this.auth.requireSession(request);
     const [discordGuilds, orchestratorGuilds] = await Promise.all([
-      this.auth.manageableGuilds(session),
-      this.orchestrator.guilds(),
+      this.auth.manageableGuilds(session), this.orchestrator.guilds(),
     ]);
-
     const availableById = new Map(orchestratorGuilds.guilds.map(guild => [guild.id, guild]));
-    const guilds = discordGuilds
-      .filter(guild => availableById.has(guild.id))
-      .map(guild => ({
-        id: guild.id,
-        name: guild.name,
-        iconUrl: guildIconUrl(guild.id, guild.icon),
-        owner: guild.owner,
-        availableWorkers: availableById.get(guild.id)!.availableWorkers,
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name));
-
+    const guilds = discordGuilds.filter(guild => availableById.has(guild.id)).map(guild => ({
+      id: guild.id, name: guild.name, iconUrl: guildIconUrl(guild.id, guild.icon),
+      owner: guild.owner, availableWorkers: availableById.get(guild.id)!.availableWorkers,
+    })).sort((left, right) => left.name.localeCompare(right.name));
     sendJson(response, 200, {
       user: {
-        id: session.user.id,
-        username: session.user.username,
+        id: session.user.id, username: session.user.username,
         displayName: session.user.global_name ?? session.user.username,
         avatarUrl: avatarUrl(session.user.id, session.user.avatar),
       },
-      csrfToken: session.csrfToken,
-      expiresAt: new Date(session.expiresAt).toISOString(),
-      guilds,
+      csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString(), guilds,
     });
   }
 
@@ -206,14 +190,8 @@ export default class DashboardServer {
   private async guildResponse(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
     const {guild} = await this.assertGuildAccess(request, guildId, false);
     const details = await this.orchestrator.guildWorkers(guildId);
-
     sendJson(response, 200, {
-      guild: {
-        id: guild.id,
-        name: guild.name,
-        iconUrl: guildIconUrl(guild.id, guild.icon),
-      },
-      ...details,
+      guild: {id: guild.id, name: guild.name, iconUrl: guildIconUrl(guild.id, guild.icon)}, ...details,
     });
   }
 
@@ -221,35 +199,28 @@ export default class DashboardServer {
     const {session} = await this.assertGuildAccess(request, guildId, true);
     this.auth.assertCsrf(request, session);
     this.auth.assertMutationAllowed(session);
-
     const input = await readJsonBody(request);
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       throw new HttpError(400, 'group body must be an object');
     }
 
     const body = input as {name?: unknown; workerIds?: unknown};
-    if (typeof body.name !== 'string'
-      || !Array.isArray(body.workerIds)
+    if (typeof body.name !== 'string' || !Array.isArray(body.workerIds)
       || body.workerIds.some(workerId => typeof workerId !== 'string')) {
       throw new HttpError(400, 'group requires a name and workerIds string array');
     }
 
     sendJson(response, 201, await this.orchestrator.createGuildGroup(guildId, {
-      name: body.name,
-      workerIds: body.workerIds as string[],
+      name: body.name, workerIds: body.workerIds as string[],
     }));
   }
 
   private async updateGroup(
-    request: IncomingMessage,
-    response: ServerResponse,
-    guildId: string,
-    groupId: string,
+    request: IncomingMessage, response: ServerResponse, guildId: string, groupId: string,
   ): Promise<void> {
     const {session} = await this.assertGuildAccess(request, guildId, true);
     this.auth.assertCsrf(request, session);
     this.auth.assertMutationAllowed(session);
-
     const input = await readJsonBody(request);
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       throw new HttpError(400, 'group body must be an object');
@@ -260,9 +231,8 @@ export default class DashboardServer {
       throw new HttpError(400, 'group name must be a string');
     }
 
-    if (body.workerIds !== undefined
-      && (!Array.isArray(body.workerIds)
-        || body.workerIds.some(workerId => typeof workerId !== 'string'))) {
+    if (body.workerIds !== undefined && (!Array.isArray(body.workerIds)
+      || body.workerIds.some(workerId => typeof workerId !== 'string'))) {
       throw new HttpError(400, 'workerIds must be a string array');
     }
 
@@ -273,15 +243,11 @@ export default class DashboardServer {
   }
 
   private async deleteGroup(
-    request: IncomingMessage,
-    response: ServerResponse,
-    guildId: string,
-    groupId: string,
+    request: IncomingMessage, response: ServerResponse, guildId: string, groupId: string,
   ): Promise<void> {
     const {session} = await this.assertGuildAccess(request, guildId, true);
     this.auth.assertCsrf(request, session);
     this.auth.assertMutationAllowed(session);
-
     sendJson(response, 200, await this.orchestrator.deleteGuildGroup(guildId, groupId));
   }
 
@@ -289,16 +255,14 @@ export default class DashboardServer {
     const {session} = await this.assertGuildAccess(request, guildId, true);
     this.auth.assertCsrf(request, session);
     this.auth.assertMutationAllowed(session);
-
     const input = await readJsonBody(request);
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       throw new HttpError(400, 'request body must be an object');
     }
 
     const candidate = input as {workerIds?: unknown; settings?: unknown};
-    if (candidate.workerIds !== undefined
-      && (!Array.isArray(candidate.workerIds)
-        || candidate.workerIds.some(workerId => typeof workerId !== 'string'))) {
+    if (candidate.workerIds !== undefined && (!Array.isArray(candidate.workerIds)
+      || candidate.workerIds.some(workerId => typeof workerId !== 'string'))) {
       throw new HttpError(400, 'workerIds must be an array of strings');
     }
 
@@ -310,7 +274,6 @@ export default class DashboardServer {
       ...(candidate.workerIds === undefined ? {} : {workerIds: candidate.workerIds as string[]}),
       settings: candidate.settings as Record<string, unknown>,
     };
-
     sendJson(response, 200, await this.orchestrator.updateGuildSettings(guildId, body));
   }
 }

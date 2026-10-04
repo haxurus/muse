@@ -5,6 +5,8 @@ import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
 import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
+import type PoolWorker from '../pool/worker.js';
+import {isDiscordId, parseEnvelope} from '../pool/protocol.js';
 
 export default class WorkerControlServer {
   private server?: Server;
@@ -13,6 +15,7 @@ export default class WorkerControlServer {
     private readonly config: Config,
     private readonly client: Client,
     private readonly playerManager: PlayerManager,
+    private readonly playback?: PoolWorker,
   ) {}
 
   async start(): Promise<void> {
@@ -76,6 +79,27 @@ export default class WorkerControlServer {
         return;
       }
 
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'playback') {
+        if (!this.playback || !isDiscordId(segments[2])) {
+          throw new HttpError(503, 'Pool worker non disponibile.');
+        }
+
+        if (request.method === 'GET') {
+          sendJson(response, 200, this.playback.state(segments[2]));
+          return;
+        }
+
+        if (request.method === 'POST') {
+          const envelope = parseEnvelope(await readJsonBody(request));
+          if (envelope.command.guildId !== segments[2]) {
+            throw new HttpError(400, 'Discord guild mismatch.');
+          }
+
+          sendJson(response, 200, await this.playback.execute(envelope));
+          return;
+        }
+      }
+
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'settings') {
         const guildId = segments[2];
         if (!this.client.guilds.cache.has(guildId)) {
@@ -99,7 +123,7 @@ export default class WorkerControlServer {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
       const message = error instanceof HttpError ? error.message : 'internal server error';
       if (!(error instanceof HttpError)) {
-        console.error('Worker control API error:', error);
+        console.error('Worker control API error');
       }
 
       sendJson(response, statusCode, {error: message});
@@ -110,16 +134,8 @@ export default class WorkerControlServer {
     return {
       workerId: this.config.WORKER_ID,
       discordReady: this.client.isReady(),
-      bot: this.client.user
-        ? {
-          id: this.client.user.id,
-          username: this.client.user.username,
-        }
-        : null,
-      guilds: this.client.guilds.cache.map(guild => ({
-        id: guild.id,
-        name: guild.name,
-      })),
+      bot: this.client.user ? {id: this.client.user.id, username: this.client.user.username} : null,
+      guilds: this.client.guilds.cache.map(guild => ({id: guild.id, name: guild.name})),
       players: this.playerManager.snapshot(),
       uptimeSeconds: Math.floor(process.uptime()),
     };

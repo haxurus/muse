@@ -1,7 +1,6 @@
 import {existsSync, unlinkSync, writeFileSync} from 'node:fs';
 import {Client, Guild, ChatInputCommandInteraction, SlashCommandBuilder, PermissionFlagsBits, VoiceChannel} from 'discord.js';
 import Config from '../services/config.js';
-import PlayerManager from '../managers/player.js';
 import handleVoiceStateUpdate from '../events/voice-state-update.js';
 import {HttpError} from '../control/http.js';
 import {poolRole, poolSecret} from './runtime.js';
@@ -39,7 +38,7 @@ export default class PoolDiscordGateway {
   private readonly budgets = new Map<string, {start: number; count: number}>();
   private initialized = false;
 
-  constructor(private readonly config: Config, private readonly client: Client, private readonly players: PlayerManager) {}
+  constructor(private readonly config: Config, private readonly client: Client, private readonly invalidate: (guildId: string) => void) {}
 
   async register(): Promise<void> {
     this.setReady(false);
@@ -56,7 +55,7 @@ export default class PoolDiscordGateway {
       if (newState.id === this.client.user?.id && oldState.channelId && oldState.channelId !== newState.channelId) {
         // Administrative moves terminate the old lease rather than moving a
         // private room's queue into another channel.
-        this.players.get(newState.guild.id).stop();
+        this.invalidate(newState.guild.id);
       }
 
       void handleVoiceStateUpdate(oldState, newState).catch(() => {
@@ -69,7 +68,7 @@ export default class PoolDiscordGateway {
       });
     });
     this.client.on('guildDelete', guild => {
-      this.players.get(guild.id).stop();
+      this.invalidate(guild.id);
     });
     this.client.on('shardDisconnect', () => {
       this.setReady(false);

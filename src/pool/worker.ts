@@ -36,16 +36,9 @@ export default class PoolWorker {
     const channelId = actualChannelId ?? player?.channelId ?? (busy ? lease?.channelId ?? null : null);
     const status = player?.status === 'PLAYING' ? 'PLAYING' : player?.status === 'PAUSED' ? 'PAUSED' : 'IDLE';
     return {
-      workerId: this.workerId,
-      guildId,
-      instanceId: this.instanceId,
-      present: client.guilds.cache.has(guildId),
-      ready: client.isReady() && !this.closed,
-      connected,
-      busy,
-      channelId,
-      leaseId: lease?.id ?? null,
-      status,
+      workerId: this.workerId, guildId, instanceId: this.instanceId,
+      present: client.guilds.cache.has(guildId), ready: client.isReady() && !this.closed,
+      connected, busy, channelId, leaseId: lease?.id ?? null, status,
     };
   }
 
@@ -53,6 +46,11 @@ export default class PoolWorker {
     const envelope = parseEnvelope(input);
     const {command} = envelope;
     return this.replay.run(`${command.guildId}/${command.id}`, JSON.stringify(envelope), async () => this.claim(envelope));
+  }
+
+  invalidate(guildId: string): void {
+    this.leases.delete(guildId);
+    this.dependencies.players.get(guildId).stop();
   }
 
   close(): void {
