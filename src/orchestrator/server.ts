@@ -222,10 +222,20 @@ export default class OrchestratorServer {
       }
     }
 
+    const config = this.poolStore.getGuild(guildId, present.length);
+    const configuredWorkerIds = new Set(config.groups.flatMap(group => group.workerIds));
+    const visibleWorkerIds = this.workers
+      .map(worker => worker.id)
+      .filter(workerId => (
+        present.some(worker => worker.id === workerId)
+        || configuredWorkerIds.has(workerId)
+      ));
+
     return {
       guildId,
-      config: this.poolStore.getGuild(guildId, present.length),
-      availableWorkerIds: present.map(worker => worker.id),
+      config,
+      availableWorkerIds: visibleWorkerIds,
+      onlineWorkerIds: present.map(worker => worker.id),
       voiceChannels: [...voiceChannels.entries()]
         .map(([id, name]) => ({id, name}))
         .sort((left, right) => left.name.localeCompare(right.name)),
@@ -239,7 +249,7 @@ export default class OrchestratorServer {
       throw new HttpError(404, 'no Muse worker is available in that guild');
     }
 
-    const config = sanitizeGuildPoolConfig(input, present.map(worker => worker.id));
+    const config = sanitizeGuildPoolConfig(input, this.workers.map(worker => worker.id));
 
     const knownVoiceChannels = new Set<string>();
     for (const worker of present) {
