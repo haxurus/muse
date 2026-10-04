@@ -10,6 +10,6 @@ The dashboard uses a separate Discord OAuth application credential. The orchestr
 
 Each worker also has an independent control authentication key. The orchestrator has the five control keys so it can sign private configuration requests; an individual worker receives only its own control key.
 
-The installer creates the expected files with host ownership `root:root` and mode `600`.
+The installer keeps the secrets directory root-only and creates individual credential files as `root:muse-secrets` with mode `640`. Only containers explicitly granted the installer-selected supplemental group can read the files; the host administrative user is not added to that group.
 
 Never commit production credential contents.
