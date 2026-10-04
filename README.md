@@ -1,3 +1,27 @@
+# Haxurus Muse
+
+This fork keeps the upstream Muse music features while adding a hardened production profile for VPS deployment.
+
+Production branch: `main`  
+Upstream tracking branch: `master`
+
+Production-specific additions include:
+
+- non-root/read-only Docker runtime;
+- mounted file secrets;
+- Discord readiness health checks;
+- graceful shutdown;
+- secure direct-stream allowlisting;
+- isolated Docker egress network;
+- SQLite backup and automatic rollback;
+- GHCR image publishing by immutable digest;
+- restricted GitHub Actions -> VPS deployment.
+
+Deployment documentation: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)  
+Upstream synchronization: [docs/UPSTREAM.md](docs/UPSTREAM.md)
+
+> The upstream instructions below are retained for project compatibility. For VPS01 production, use the deployment guide above rather than the upstream `docker run` example.
+
 <p align="center">
   <img width="250" height="250" src="https://raw.githubusercontent.com/museofficial/muse/master/.github/logo.png">
 </p>
