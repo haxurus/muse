@@ -2,6 +2,7 @@ import OrchestratorConfig from './config.js';
 import {getPoolSnapshot, selectAvailableWorker} from './store.js';
 import {executeWorkerCommand} from './worker-client.js';
 import {RemoteCommandRequest, RemoteCommandResult} from '../worker-control/commands.js';
+import {prisma} from '../utils/db.js';
 
 export type PoolIngressRequest = RemoteCommandRequest & {
   guildName: string;
@@ -16,6 +17,7 @@ export type PoolIngressResult = RemoteCommandResult & {
 const REMOTE_PLAYER_COMMANDS = new Set([
   'clear',
   'disconnect',
+  'favorites',
   'fseek',
   'loop-queue',
   'loop',
@@ -104,10 +106,133 @@ const chooseExistingWorker = async (
   throw new Error('there is no active player to control');
 };
 
+const requireStringOption = (request: PoolIngressRequest, name: string) => {
+  const value = request.options[name];
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`missing ${name}`);
+  }
+
+  return value.trim();
+};
+
+const routeFavoriteCommand = async (
+  request: PoolIngressRequest,
+  config: OrchestratorConfig,
+): Promise<PoolIngressResult> => {
+  const subcommand = request.options.subcommand;
+  if (typeof subcommand !== 'string') {
+    throw new Error('missing favorites subcommand');
+  }
+
+  if (subcommand === 'create') {
+    const name = requireStringOption(request, 'name');
+    const query = requireStringOption(request, 'query');
+    const existing = await prisma.favoriteQuery.findFirst({where: {guildId: request.guildId, name}});
+    if (existing) {
+      throw new Error('a favorite with that name already exists');
+    }
+
+    await prisma.favoriteQuery.create({
+      data: {
+        guildId: request.guildId,
+        authorId: request.userId,
+        name,
+        query,
+      },
+    });
+
+    return {workerId: config.INGRESS_WORKER_ID, workerLabel: 'Muse Control', response: '👍 favorite created'};
+  }
+
+  if (subcommand === 'remove') {
+    const name = requireStringOption(request, 'name');
+    const favorite = await prisma.favoriteQuery.findFirst({where: {guildId: request.guildId, name}});
+    if (!favorite) {
+      throw new Error('no favorite with that name exists');
+    }
+
+    if (favorite.authorId !== request.userId && request.guildOwnerId !== request.userId) {
+      throw new Error('you can only remove your own favorites');
+    }
+
+    await prisma.favoriteQuery.delete({where: {id: favorite.id}});
+    return {workerId: config.INGRESS_WORKER_ID, workerLabel: 'Muse Control', response: '👍 favorite removed'};
+  }
+
+  if (subcommand === 'list') {
+    const favorites = await prisma.favoriteQuery.findMany({
+      where: {guildId: request.guildId},
+      orderBy: {name: 'asc'},
+    });
+    if (favorites.length === 0) {
+      return {workerId: config.INGRESS_WORKER_ID, workerLabel: 'Muse Control', response: 'there aren\'t any favorites yet'};
+    }
+
+    const lines = favorites.map(favorite => `**${favorite.name}** - ${favorite.query} (<@${favorite.authorId}>)`);
+    let content = lines.join('\n');
+    if (content.length > 1900) {
+      content = `${content.slice(0, 1870)}\n… more favorites are available`;
+    }
+
+    return {workerId: config.INGRESS_WORKER_ID, workerLabel: 'Muse Control', response: content};
+  }
+
+  if (subcommand === 'use') {
+    const name = requireStringOption(request, 'name');
+    const favorite = await prisma.favoriteQuery.findFirst({where: {guildId: request.guildId, name}});
+    if (!favorite) {
+      throw new Error('no favorite with that name exists');
+    }
+
+    return routePoolIngressCommand({
+      ...request,
+      commandName: 'play',
+      options: {
+        query: favorite.query,
+        immediate: request.options.immediate === true,
+        shuffle: request.options.shuffle === true,
+        split: request.options.split === true,
+        skip: request.options.skip === true,
+      },
+    }, config);
+  }
+
+  throw new Error('unknown favorites subcommand');
+};
+
+export const getFavoriteAutocomplete = async (
+  request: Pick<PoolIngressRequest, 'guildId' | 'guildOwnerId' | 'userId'> & {
+    subcommand: string;
+    query: string;
+  },
+) => {
+  if (!['use', 'remove'].includes(request.subcommand)) {
+    return [];
+  }
+
+  const favorites = await prisma.favoriteQuery.findMany({
+    where: {guildId: request.guildId},
+    orderBy: {name: 'asc'},
+  });
+  const query = request.query.trim().toLowerCase();
+  const filtered = favorites
+    .filter(favorite => query === '' || favorite.name.toLowerCase().startsWith(query))
+    .filter(favorite => request.subcommand !== 'remove'
+      || favorite.authorId === request.userId
+      || request.guildOwnerId === request.userId)
+    .slice(0, 25);
+
+  return filtered.map(favorite => ({name: favorite.name, value: favorite.name}));
+};
+
 export const routePoolIngressCommand = async (
   request: PoolIngressRequest,
   config: OrchestratorConfig,
 ): Promise<PoolIngressResult> => {
+  if (request.commandName === 'favorites') {
+    return routeFavoriteCommand(request, config);
+  }
+
   const selected = request.commandName === 'play'
     ? await selectAvailableWorker({
       guildId: request.guildId,
