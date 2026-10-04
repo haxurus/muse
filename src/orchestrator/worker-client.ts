@@ -22,6 +22,10 @@ export default class WorkerClient {
     return this.worker.id;
   }
 
+  get token(): string {
+    return this.worker.token;
+  }
+
   async status(): Promise<WorkerStatus> {
     return got.get(
       `${this.worker.baseUrl}/v1/status`,
