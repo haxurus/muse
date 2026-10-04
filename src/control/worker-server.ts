@@ -1,4 +1,4 @@
-import {createServer, Server} from 'node:http';
+import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
 import {Client} from 'discord.js';
 import Config from '../services/config.js';
 import PlayerManager from '../managers/player.js';
@@ -54,7 +54,7 @@ export default class WorkerControlServer {
     this.server = undefined;
   }
 
-  private async handle(request: Parameters<ReturnType<typeof createServer>['emit']>[1] & any, response: any): Promise<void> {
+  private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       if (request.method === 'GET' && request.url === '/health') {
         sendJson(response, 200, {
