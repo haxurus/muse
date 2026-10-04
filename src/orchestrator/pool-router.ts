@@ -90,13 +90,15 @@ const chooseExistingWorker = async (
   }
 
   const withSession = candidates.filter(worker => worker.player?.currentTitle);
+  const [onlySession] = withSession;
   if (withSession.length === 1) {
-    return withSession[0];
+    return onlySession;
   }
 
   const active = candidates.filter(worker => worker.player?.voiceChannelId);
+  const [onlyActive] = active;
   if (active.length === 1) {
-    return active[0];
+    return onlyActive;
   }
 
   if (active.length > 1 || withSession.length > 1) {
