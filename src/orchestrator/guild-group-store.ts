@@ -80,6 +80,12 @@ export default class GuildGroupStore {
       .map(group => ({...group, workerIds: [...group.workerIds]}));
   }
 
+  get(guildId: string, groupId: string): GuildWorkerGroup | undefined {
+    validateGuildId(guildId);
+    const group = (this.data.guilds[guildId] ?? []).find(candidate => candidate.id === groupId);
+    return group ? {...group, workerIds: [...group.workerIds]} : undefined;
+  }
+
   create(guildId: string, input: unknown): GuildWorkerGroup {
     validateGuildId(guildId);
     const body = this.objectBody(input);
