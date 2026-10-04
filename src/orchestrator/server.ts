@@ -96,12 +96,19 @@ export default class OrchestratorServer {
         return;
       }
 
-      if (!hasBearerToken(request, this.config.apiToken)) {
+      const segments = getPathSegments(request);
+      const isPlaybackRoute = segments.length >= 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'playback';
+      const isAdmin = hasBearerToken(request, this.config.apiToken);
+      const isController = isPlaybackRoute
+        && hasBearerToken(request, this.config.controllerToken);
+
+      if (!isAdmin && !isController) {
         sendJson(response, 401, {error: 'unauthorized'});
         return;
       }
-
-      const segments = getPathSegments(request);
       if (request.method === 'GET' && segments.join('/') === 'v1/workers') {
         sendJson(response, 200, {workers: await this.workerStatuses()});
         return;
