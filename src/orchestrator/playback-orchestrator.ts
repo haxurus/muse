@@ -117,7 +117,7 @@ export default class PlaybackOrchestrator {
       this.updateLeaseFromPlayback(allocation.lease, result);
       return {...result, lease: this.leases.get(guildId, voiceChannelId) ?? allocation.lease};
     } catch (error: unknown) {
-      if (wasNewLease) {
+      if (wasNewLease || (error instanceof HttpError && error.statusCode === 502)) {
         this.leases.release(guildId, voiceChannelId);
       }
 
