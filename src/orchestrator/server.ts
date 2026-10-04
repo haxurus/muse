@@ -1,4 +1,4 @@
-import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
+import {createServer, IncomingMessage, ServerResponse} from 'node:http';
 import {randomBytes} from 'node:crypto';
 import OrchestratorConfig from './config.js';
 import {
@@ -320,7 +320,9 @@ export const startOrchestratorServer = (config: OrchestratorConfig) => {
 
     reconciling = true;
     void reconcileAllGuilds(config.WORKERS)
-      .catch(error => console.error('Orchestrator reconciliation failed:', error))
+      .catch(error => {
+        console.error('Orchestrator reconciliation failed:', error);
+      })
       .finally(() => {
         reconciling = false;
       });
@@ -336,7 +338,14 @@ export const startOrchestratorServer = (config: OrchestratorConfig) => {
     close: async () => {
       clearInterval(reconcileTimer);
       await new Promise<void>((resolve, reject) => {
-        server.close(error => error ? reject(error) : resolve());
+        server.close(error => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
       });
     },
   };
