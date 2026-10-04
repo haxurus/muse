@@ -11,12 +11,17 @@ BASE=/srv/docker/muse
 DEPLOY_USER=muse-deploy
 PUBLIC_KEY_PATH="${1:-}"
 
-for cmd in docker install sshd systemctl iptables; do
+for cmd in docker install sshd systemctl iptables openssl visudo; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required command: $cmd" >&2; exit 1; }
 done
 
 if ! docker compose version >/dev/null 2>&1; then
   echo "Docker Compose plugin is required." >&2
+  exit 1
+fi
+
+if ! docker network inspect proxy_net >/dev/null 2>&1; then
+  echo "Required Docker network proxy_net does not exist." >&2
   exit 1
 fi
 
@@ -33,21 +38,37 @@ fi
 
 install -d -m 700 -o root -g root "$BASE"
 install -d -m 700 -o root -g root "$BASE/secrets" "$BASE/backups" "$BASE/.deploy-state"
-install -d -m 700 -o 1000 -g 1000 "$BASE/data"
+install -d -m 700 -o 1000 -g 1000 "$BASE/control"
+
+for worker in muse-01 muse-02 muse-03 muse-04 muse-05; do
+  install -d -m 700 -o 1000 -g 1000 "$BASE/data/$worker"
+done
 
 install -m 600 -o root -g root "$REPO_ROOT/deploy/docker-compose.prod.yml" "$BASE/docker-compose.yml"
+install -m 600 -o root -g root "$REPO_ROOT/deploy/workers.json" "$BASE/workers.json"
+install -m 600 -o root -g root "$REPO_ROOT/deploy/nginx.conf" "$BASE/nginx.conf"
 
 if [[ ! -f "$BASE/.env" ]]; then
   install -m 600 -o root -g root "$REPO_ROOT/deploy/.env.production.example" "$BASE/.env"
 fi
 
-for secret in discord_token youtube_api_key spotify_client_id spotify_client_secret; do
+for secret in   discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05   youtube_api_key spotify_client_id spotify_client_secret orchestrator_discord_client_secret; do
   if [[ ! -e "$BASE/secrets/$secret" ]]; then
     install -m 600 -o root -g root /dev/null "$BASE/secrets/$secret"
   else
     chmod 600 "$BASE/secrets/$secret"
     chown root:root "$BASE/secrets/$secret"
   fi
+done
+
+for number in 01 02 03 04 05; do
+  secret="$BASE/secrets/worker_control_$number"
+  if [[ ! -s "$secret" ]]; then
+    umask 077
+    openssl rand -hex 32 > "$secret"
+  fi
+  chmod 600 "$secret"
+  chown root:root "$secret"
 done
 
 install -m 750 -o root -g root "$REPO_ROOT/ops/muse-deploy" /usr/local/sbin/muse-deploy
@@ -71,7 +92,7 @@ if [[ -n "$PUBLIC_KEY_PATH" ]]; then
   public_key="$(tr -d '\r\n' < "$PUBLIC_KEY_PATH")"
   [[ "$public_key" == ssh-ed25519 * ]] || { echo "Only an ssh-ed25519 deploy key is accepted." >&2; exit 1; }
 
-  printf 'restrict,command="/usr/local/libexec/muse-deploy-entrypoint" %s\n' "$public_key"     > "$DEPLOY_HOME/.ssh/authorized_keys"
+  printf 'restrict,command="/usr/local/libexec/muse-deploy-entrypoint" %s\n' "$public_key" > "$DEPLOY_HOME/.ssh/authorized_keys"
   chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_HOME/.ssh/authorized_keys"
   chmod 600 "$DEPLOY_HOME/.ssh/authorized_keys"
 elif [[ ! -s "$DEPLOY_HOME/.ssh/authorized_keys" ]]; then
@@ -84,10 +105,13 @@ systemctl enable muse-firewall.service >/dev/null
 /usr/local/sbin/muse-host-firewall
 
 echo
-echo "Muse production infrastructure installed in $BASE."
-echo "Next:"
-echo "  1. Fill $BASE/secrets/discord_token"
-echo "  2. Fill $BASE/secrets/youtube_api_key"
-echo "  3. Optionally fill both Spotify secret files"
-echo "  4. Review $BASE/.env"
-echo "  5. Configure GitHub production environment and ENABLE_VPS_DEPLOY=true"
+echo "Muse fleet infrastructure installed in $BASE."
+echo "Before the first deployment:"
+echo "  1. Fill the five Discord worker credential files"
+echo "  2. Fill the YouTube API credential file"
+echo "  3. Optionally fill both Spotify credential files"
+echo "  4. Fill the dashboard Discord OAuth client credential file"
+echo "  5. Set ORCHESTRATOR_PUBLIC_BASE_URL and ORCHESTRATOR_DISCORD_CLIENT_ID in $BASE/.env"
+echo "  6. Configure NPM to proxy the dashboard hostname to muse-edge:8080"
+echo "  7. Configure the GitHub production environment"
+echo "  8. Set ENABLE_VPS_DEPLOY=true only after all checks pass"
