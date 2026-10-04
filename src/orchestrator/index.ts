@@ -26,4 +26,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   });
 }
 
-await server.start();
+void server.start().catch((error: unknown) => {
+  console.error('Failed to start orchestrator:', error);
+  process.exit(1);
+});
