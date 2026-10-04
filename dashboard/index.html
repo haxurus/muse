@@ -62,6 +62,38 @@
         <section class="panel">
           <div class="panel-heading">
             <div>
+              <p class="section-label">POOL AUTOMATICO</p>
+              <h2>Gruppi e quote</h2>
+              <p class="muted">Dividi i music bot in gruppi, assegna vocali specifiche e limita i player simultanei.</p>
+            </div>
+            <button id="save-pool" class="button primary" type="button">Salva pool</button>
+          </div>
+
+          <div class="pool-summary">
+            <label class="quota-field">
+              <span>Player simultanei nel server</span>
+              <input id="guild-quota" type="number" min="0" step="1">
+            </label>
+            <div>
+              <strong id="pool-usage-label">Pool automatico</strong>
+              <p class="muted">Se non crei gruppi, tutti i worker disponibili formano un unico pool.</p>
+            </div>
+          </div>
+
+          <div id="groups-container" class="groups-container"></div>
+
+          <div class="apply-row">
+            <div>
+              <strong>Gruppi personalizzati</strong>
+              <p id="pool-message" class="muted"></p>
+            </div>
+            <button id="add-group" class="button ghost" type="button">Aggiungi gruppo</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
               <p class="section-label">WORKER</p>
               <h2>Music bot disponibili</h2>
             </div>
