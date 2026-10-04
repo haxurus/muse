@@ -2,6 +2,7 @@ import got from 'got';
 import {signControlRequest} from '../control/signature.js';
 import {GuildSettingsValues} from '../control/settings.js';
 import {WorkerDefinition} from './config.js';
+import {RemoteCommandRequest, RemoteCommandResult} from '../worker-control/commands.js';
 
 export type WorkerStatus = {
   workerId: string;
@@ -75,4 +76,14 @@ export const disconnectWorkerFromGuild = async (worker: WorkerDefinition, guildI
   'POST',
   `/v1/guilds/${guildId}/disconnect`,
   {},
+);
+
+export const executeWorkerCommand = async (
+  worker: WorkerDefinition,
+  request: RemoteCommandRequest,
+) => requestWorker<RemoteCommandResult>(
+  worker,
+  'POST',
+  `/v1/guilds/${request.guildId}/commands`,
+  request,
 );
