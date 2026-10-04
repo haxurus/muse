@@ -1,17 +1,15 @@
-# Runtime secrets
+# Production credential files
 
-Production secrets live only on the VPS under `/srv/docker/muse/secrets`.
+Runtime credential files are stored only on the VPS in the Muse secrets directory.
 
-Required:
+The five music workers use independent Discord identities. Each worker receives only the credential file for its own identity.
 
-- `discord_token`
-- `youtube_api_key`
+Shared media-provider configuration can be mounted to all workers when required.
 
-Optional Spotify credentials:
+The dashboard uses a separate Discord OAuth application credential. The orchestrator does not receive any music-bot credential.
 
-- `spotify_client_id`
-- `spotify_client_secret`
+Each worker also has an independent control authentication key. The orchestrator has the five control keys so it can sign private configuration requests; an individual worker receives only its own control key.
 
-If Spotify is disabled, keep both Spotify files empty.
+The installer creates the expected files with host ownership `root:root` and mode `600`.
 
-The deployment installer creates these files with root-only host permissions. Never commit their contents.
+Never commit production credential contents.
