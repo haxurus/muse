@@ -1,6 +1,6 @@
 import {inject, injectable} from 'inversify';
 import {TYPES} from '../types.js';
-import Player from '../services/player.js';
+import Player, {STATUS} from '../services/player.js';
 import FileCacheProvider from '../services/file-cache.js';
 import type YoutubeAPI from '../services/youtube-api.js';
 
@@ -15,6 +15,15 @@ export default class {
     this.guildPlayers = new Map();
     this.fileCache = fileCache;
     this.youtubeAPI = youtubeAPI;
+  }
+
+  snapshot(): Array<{guildId: string; connected: boolean; channelId: string | null; status: string}> {
+    return [...this.guildPlayers.entries()].map(([guildId, player]) => ({
+      guildId,
+      connected: player.voiceConnection !== null,
+      channelId: player.voiceConnection?.joinConfig.channelId ?? null,
+      status: STATUS[player.status],
+    }));
   }
 
   cleanup(): void {

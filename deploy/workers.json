@@ -1,0 +1,27 @@
+[
+  {
+    "id": "muse-01",
+    "baseUrl": "http://muse-01:3101",
+    "tokenFile": "/run/secrets/control_token_01"
+  },
+  {
+    "id": "muse-02",
+    "baseUrl": "http://muse-02:3101",
+    "tokenFile": "/run/secrets/control_token_02"
+  },
+  {
+    "id": "muse-03",
+    "baseUrl": "http://muse-03:3101",
+    "tokenFile": "/run/secrets/control_token_03"
+  },
+  {
+    "id": "muse-04",
+    "baseUrl": "http://muse-04:3101",
+    "tokenFile": "/run/secrets/control_token_04"
+  },
+  {
+    "id": "muse-05",
+    "baseUrl": "http://muse-05:3101",
+    "tokenFile": "/run/secrets/control_token_05"
+  }
+]

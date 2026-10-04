@@ -1,43 +1,182 @@
+x-worker-environment: &worker-environment
+  NODE_ENV: production
+  DATA_DIR: /data
+  YOUTUBE_API_KEY_FILE: /run/secrets/youtube_api_key
+  SPOTIFY_CLIENT_ID_FILE: /run/secrets/spotify_client_id
+  SPOTIFY_CLIENT_SECRET_FILE: /run/secrets/spotify_client_secret
+  MUSE_READY_FILE: /tmp/muse-ready
+  MUSE_CONTROL_HOST: 0.0.0.0
+  MUSE_CONTROL_PORT: "3101"
+  YT_DLP_AUTO_UPDATE: "false"
+
+x-worker-common: &worker-common
+  image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+  restart: unless-stopped
+  env_file:
+    - .env
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m
+  pids_limit: 256
+  mem_limit: ${MUSE_WORKER_MEM_LIMIT:-768m}
+  cpus: ${MUSE_WORKER_CPUS:-1.0}
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
 services:
-  muse:
+  orchestrator:
     image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+    command: ["node", "--enable-source-maps", "dist/orchestrator/index.js"]
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
       NODE_ENV: production
-      DATA_DIR: /data
-      DISCORD_TOKEN_FILE: /run/secrets/discord_token
-      YOUTUBE_API_KEY_FILE: /run/secrets/youtube_api_key
-      SPOTIFY_CLIENT_ID_FILE: /run/secrets/spotify_client_id
-      SPOTIFY_CLIENT_SECRET_FILE: /run/secrets/spotify_client_secret
-      MUSE_READY_FILE: /tmp/muse-ready
-      YT_DLP_AUTO_UPDATE: "false"
+      MUSE_ORCHESTRATOR_HOST: 0.0.0.0
+      MUSE_ORCHESTRATOR_PORT: "3100"
+      MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
+      MUSE_WORKERS_FILE: /config/workers.json
     secrets:
-      - discord_token
-      - youtube_api_key
-      - spotify_client_id
-      - spotify_client_secret
+      - orchestrator_api_token
+      - control_token_01
+      - control_token_02
+      - control_token_03
+      - control_token_04
+      - control_token_05
     volumes:
-      - ./data:/data
+      - ./config/workers.json:/config/workers.json:ro
     networks:
-      - egress
+      - control-01
+      - control-02
+      - control-03
+      - control-04
+      - control-05
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=128m
-    pids_limit: 256
-    mem_limit: 1024m
-    cpus: 2.0
-    stop_grace_period: 30s
+      - /tmp:rw,noexec,nosuid,size=32m
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: "3"
+
+  muse-01:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      MUSE_WORKER_ID: muse-01
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_01
+      MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_01
+    secrets:
+      - discord_token_01
+      - control_token_01
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+    volumes:
+      - ./data/bot-01:/data
+    networks:
+      - egress
+      - control-01
+
+  muse-02:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      MUSE_WORKER_ID: muse-02
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_02
+      MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_02
+    secrets:
+      - discord_token_02
+      - control_token_02
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+    volumes:
+      - ./data/bot-02:/data
+    networks:
+      - egress
+      - control-02
+
+  muse-03:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      MUSE_WORKER_ID: muse-03
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_03
+      MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_03
+    secrets:
+      - discord_token_03
+      - control_token_03
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+    volumes:
+      - ./data/bot-03:/data
+    networks:
+      - egress
+      - control-03
+
+  muse-04:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      MUSE_WORKER_ID: muse-04
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_04
+      MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_04
+    secrets:
+      - discord_token_04
+      - control_token_04
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+    volumes:
+      - ./data/bot-04:/data
+    networks:
+      - egress
+      - control-04
+
+  muse-05:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      MUSE_WORKER_ID: muse-05
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_05
+      MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_05
+    secrets:
+      - discord_token_05
+      - control_token_05
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+    volumes:
+      - ./data/bot-05:/data
+    networks:
+      - egress
+      - control-05
 
 networks:
   egress:
@@ -45,10 +184,55 @@ networks:
     driver_opts:
       com.docker.network.bridge.name: muse-eg
       com.docker.network.bridge.enable_icc: "false"
+  control-01:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-c01
+  control-02:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-c02
+  control-03:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-c03
+  control-04:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-c04
+  control-05:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-c05
 
 secrets:
-  discord_token:
-    file: ./secrets/discord_token
+  orchestrator_api_token:
+    file: ./secrets/orchestrator_api_token
+  discord_token_01:
+    file: ./secrets/discord_token_01
+  discord_token_02:
+    file: ./secrets/discord_token_02
+  discord_token_03:
+    file: ./secrets/discord_token_03
+  discord_token_04:
+    file: ./secrets/discord_token_04
+  discord_token_05:
+    file: ./secrets/discord_token_05
+  control_token_01:
+    file: ./secrets/control_token_01
+  control_token_02:
+    file: ./secrets/control_token_02
+  control_token_03:
+    file: ./secrets/control_token_03
+  control_token_04:
+    file: ./secrets/control_token_04
+  control_token_05:
+    file: ./secrets/control_token_05
   youtube_api_key:
     file: ./secrets/youtube_api_key
   spotify_client_id:
