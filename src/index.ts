@@ -31,7 +31,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
 
   try {
     poolWorker?.close();
-    await bot.shutdown();
+    bot.shutdown();
     await workerControlServer?.close();
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
 

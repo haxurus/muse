@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {describe, it} from 'vitest';
+import {describe, it, vi} from 'vitest';
 import {HttpError} from '../src/control/http.js';
 import PoolCoordinator, {type PoolTransport} from '../src/pool/coordinator.js';
-import {parsePoolCommand, type PlaybackEnvelope, type PlaybackReply, type PlaybackState, type PoolCommand} from '../src/pool/protocol.js';
+import {parsePoolCommand, RESERVATION_TTL_MS, type PlaybackEnvelope, type PlaybackReply, type PlaybackState, type PoolCommand} from '../src/pool/protocol.js';
 
 const GUILD = '123456789012345678';
 const OTHER_GUILD = '223456789012345678';
@@ -26,9 +26,12 @@ const hasCode = (code: number) => (error: unknown) => error instanceof HttpError
 
 class FakeTransport implements PoolTransport {
   readonly calls: Array<{workerId: string; envelope: PlaybackEnvelope}> = [];
+  readonly claims: Array<{workerId: string; envelope: PlaybackEnvelope}> = [];
   readonly states = new Map<string, PlaybackState>();
+  readonly expiry = new Map<string, number>();
   failWorker?: string;
   ambiguous = false;
+  ambiguousReserve = false;
 
   async state(workerId: string, guildId: string): Promise<PlaybackState> {
     if (this.failWorker === workerId) throw new Error('offline');
@@ -39,7 +42,26 @@ class FakeTransport implements PoolTransport {
         connected: false, busy: false, channelId: null, leaseId: null, status: 'IDLE'};
       this.states.set(key, value);
     }
+    if (!value.connected && !value.busy && (this.expiry.get(key) ?? Infinity) <= Date.now()) {
+      value.channelId = null;
+      value.leaseId = null;
+    }
     return {...value};
+  }
+
+  async reserve(workerId: string, envelope: PlaybackEnvelope): Promise<PlaybackState> {
+    const request = envelope.command;
+    await this.state(workerId, request.guildId);
+    const key = `${request.guildId}/${workerId}`;
+    const state = this.states.get(key)!;
+    assert.equal(envelope.instanceId, state.instanceId);
+    assert.ok(state.leaseId === null || state.leaseId === envelope.leaseId);
+    state.channelId = request.voiceChannelId;
+    state.leaseId = envelope.leaseId;
+    this.expiry.set(key, Date.now() + RESERVATION_TTL_MS);
+    this.claims.push({workerId, envelope});
+    if (this.ambiguousReserve) throw new Error('reserve response lost');
+    return {...state};
   }
 
   async execute(workerId: string, envelope: PlaybackEnvelope): Promise<PlaybackReply> {
@@ -48,9 +70,8 @@ class FakeTransport implements PoolTransport {
     const {command: request} = envelope;
     const state = this.states.get(`${request.guildId}/${workerId}`)!;
     assert.equal(envelope.instanceId, state.instanceId);
+    assert.equal(envelope.leaseId, state.leaseId);
     state.busy = true;
-    state.channelId = request.voiceChannelId;
-    state.leaseId = envelope.leaseId;
     await new Promise(resolve => setTimeout(resolve, 5));
     state.busy = false;
     state.connected = !['stop', 'disconnect'].includes(request.action);
@@ -73,6 +94,7 @@ describe('pool allocation and playback boundary', () => {
     const results = await Promise.all([pool.execute(command()), pool.execute(command({voiceChannelId: OTHER_VOICE}))]);
     assert.equal(new Set(results.map(result => result.workerId)).size, 2);
     assert.equal(transport.calls.length, 2);
+    assert.equal(transport.claims.length, 2);
   });
   it('serializes the same voice channel and reuses its worker and lease', async () => {
     const {pool, transport} = fixture();
@@ -99,8 +121,7 @@ describe('pool allocation and playback boundary', () => {
     const {pool} = fixture();
     await pool.execute(command());
     await pool.execute(command({action: 'pause'}));
-    const result = await pool.execute(command({voiceChannelId: OTHER_VOICE}));
-    assert.equal(result.workerId, 'muse-02');
+    assert.equal((await pool.execute(command({voiceChannelId: OTHER_VOICE}))).workerId, 'muse-02');
   });
   it('releases a disconnected worker and never creates a player for skip', async () => {
     const {pool, transport} = fixture();
@@ -112,9 +133,8 @@ describe('pool allocation and playback boundary', () => {
   });
   it('blocks a second assignment after an ambiguous timeout until expiry and confirmed idle', async () => {
     const {pool, transport} = fixture();
-    const now = Date.now;
-    let time = now();
-    Date.now = () => time;
+    let time = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => time);
     try {
       transport.ambiguous = true;
       await assert.rejects(pool.execute(command()), hasCode(503));
@@ -125,8 +145,18 @@ describe('pool allocation and playback boundary', () => {
       await pool.execute(command());
       assert.equal(transport.calls.length, 2);
     } finally {
-      Date.now = now;
+      clock.mockRestore();
     }
+  });
+  it('does not send audio when the reservation acknowledgement is lost', async () => {
+    const {pool, transport} = fixture();
+    transport.ambiguousReserve = true;
+    await assert.rejects(pool.execute(command()), hasCode(503));
+    assert.equal(transport.calls.length, 0);
+    const restarted = new PoolCoordinator(WORKERS, transport, () => WORKERS);
+    transport.ambiguousReserve = false;
+    await assert.rejects(restarted.execute(command()), hasCode(409));
+    assert.equal(transport.claims.length, 1);
   });
   it('does not allocate while an unreachable worker may still own a channel', async () => {
     const {pool, transport} = fixture();

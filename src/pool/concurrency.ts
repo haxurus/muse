@@ -37,7 +37,7 @@ type ReplayEntry<T> = {fingerprint: string; promise: Promise<T>; expiresAt: numb
 export class ReplayGuard<T> {
   private readonly records = new Map<string, ReplayEntry<T>>();
 
-  run(key: string, fingerprint: string, work: () => Promise<T>): Promise<T> {
+  async run(key: string, fingerprint: string, work: () => Promise<T>): Promise<T> {
     for (const [id, record] of this.records) {
       if (record.expiresAt <= Date.now()) {
         this.records.delete(id);
@@ -47,22 +47,22 @@ export class ReplayGuard<T> {
     const existing = this.records.get(key);
     if (existing) {
       if (existing.fingerprint !== fingerprint) {
-        return Promise.reject(new HttpError(409, 'Identificativo richiesta gia utilizzato.'));
+        throw new HttpError(409, 'Identificativo richiesta gia utilizzato.');
       }
 
       return existing.promise;
     }
 
     if (this.records.size >= 4096) {
-      return Promise.reject(new HttpError(429, 'Limite richieste raggiunto. Riprova piu tardi.'));
+      throw new HttpError(429, 'Limite richieste raggiunto. Riprova piu tardi.');
     }
 
     const entry: ReplayEntry<T> = {fingerprint, expiresAt: Infinity, promise: Promise.resolve().then(work)};
     entry.promise = entry.promise.then(value => {
-      entry.expiresAt = Date.now() + 15 * 60_000;
+      entry.expiresAt = Date.now() + (15 * 60_000);
       return value;
     }, (error: unknown) => {
-      entry.expiresAt = Date.now() + 15 * 60_000;
+      entry.expiresAt = Date.now() + (15 * 60_000);
       throw error;
     });
     this.records.set(key, entry);

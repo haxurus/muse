@@ -5,6 +5,7 @@ import {COMMAND_TTL_MS, parsePoolCommand, type PlaybackEnvelope, type PlaybackRe
 
 export type PoolTransport = {
   state: (workerId: string, guildId: string) => Promise<PlaybackState>;
+  reserve: (workerId: string, envelope: PlaybackEnvelope) => Promise<PlaybackState>;
   execute: (workerId: string, envelope: PlaybackEnvelope) => Promise<PlaybackReply>;
 };
 type Reservation = {envelope: PlaybackEnvelope; inFlight: boolean};
@@ -22,7 +23,7 @@ export default class PoolCoordinator {
     private readonly eligibleWorkers: (command: PoolCommand) => readonly string[],
   ) {}
 
-  execute(input: unknown): Promise<PlaybackReply> {
+  async execute(input: unknown): Promise<PlaybackReply> {
     const command = parsePoolCommand(input);
     return this.replay.run(`${command.guildId}/${command.id}`, JSON.stringify(command), async () => {
       if (command.action === 'players') {
@@ -49,10 +50,18 @@ export default class PoolCoordinator {
   }
 
   private async dispatch(command: PoolCommand): Promise<PlaybackReply> {
-    const allocation = await this.guildLocks.run(command.guildId, async () => this.allocate(command));
-    const {workerId, envelope} = allocation;
+    const {workerId, envelope} = await this.guildLocks.run(command.guildId, async () => this.allocate(command));
     const key = `${command.guildId}/${workerId}`;
     try {
+      // A worker-side reservation is acknowledged before any audio command is
+      // sent. A restarted coordinator can discover this claim independently.
+      const claimed = await this.transport.reserve(workerId, envelope);
+      if (claimed.workerId !== workerId || claimed.guildId !== command.guildId
+        || claimed.instanceId !== envelope.instanceId || claimed.leaseId !== envelope.leaseId
+        || claimed.channelId !== command.voiceChannelId || !claimed.ready) {
+        throw new Error('Invalid reservation acknowledgement');
+      }
+
       const result = await this.transport.execute(workerId, envelope);
       if (result.requestId !== command.id || result.guildId !== command.guildId || result.workerId !== workerId) {
         throw new Error('Invalid worker result');
@@ -61,7 +70,6 @@ export default class PoolCoordinator {
       this.reservations.delete(key);
       return result;
     } catch (error: unknown) {
-      // A confirmed client rejection has no work still running at the worker.
       if (error instanceof HttpError && error.statusCode < 500) {
         this.reservations.delete(key);
         throw error;
@@ -81,14 +89,14 @@ export default class PoolCoordinator {
     const observed = await this.observe(command.guildId);
     this.reconcile(command.guildId, observed);
     const claims = observed.filter(item => item.state?.channelId === command.voiceChannelId
-      && (item.state.connected || item.state.busy));
+      && (item.state.connected || item.state.busy || item.state.leaseId !== null));
     if (claims.length > 1) {
       throw new HttpError(409, 'Piu player risultano assegnati alla stessa vocale. Serve una verifica amministrativa.');
     }
 
     let selected: Observed | undefined = claims[0];
     if (selected) {
-      if (!selected.state?.ready || selected.state.busy || !selected.state.leaseId) {
+      if (!selected.state?.ready || selected.state.busy || !selected.state.connected || !selected.state.leaseId) {
         throw new HttpError(409, 'Il player della vocale non e ancora disponibile.');
       }
     } else {
@@ -103,15 +111,14 @@ export default class PoolCoordinator {
         throw new HttpError(404, 'Nessun player attivo nella tua vocale. Usa /play o /join.');
       }
 
-      // Following an orchestrator restart an unreachable worker might still own
-      // this voice channel. Prefer a visible error over double allocation.
+      // An unreachable worker may still own this voice channel after restart.
       if (observed.some(item => !item.state || !item.state.ready)) {
         throw new HttpError(503, 'Stato del pool incompleto. Nuove assegnazioni sospese fino al recupero dei worker.');
       }
 
       const eligible = new Set(this.eligibleWorkers(command));
       selected = observed.find(item => eligible.has(item.workerId) && item.state?.present
-        && !item.state.connected && !item.state.busy
+        && !item.state.connected && !item.state.busy && item.state.leaseId === null
         && !this.reservations.has(`${command.guildId}/${item.workerId}`));
       if (!selected) {
         throw new HttpError(409, 'Nessun bot libero nel gruppo previsto per questa vocale.');
@@ -144,7 +151,7 @@ export default class PoolCoordinator {
 
       const expired = Date.now() > reservation.envelope.deadline;
       const restarted = item.state.instanceId !== reservation.envelope.instanceId;
-      if (restarted || (expired && !item.state.busy && !item.state.connected)) {
+      if (restarted || (expired && !item.state.busy && !item.state.connected && item.state.leaseId === null)) {
         this.reservations.delete(key);
       }
     }
@@ -156,12 +163,11 @@ export default class PoolCoordinator {
     const lines = observed.map(({workerId, state}) => {
       let status = 'UNAVAILABLE';
       if (state?.ready && state.present) {
-        status = state.busy || this.reservations.has(`${command.guildId}/${workerId}`)
+        status = state.busy || (!state.connected && state.leaseId !== null) || this.reservations.has(`${command.guildId}/${workerId}`)
           ? 'RESERVED'
           : state.connected ? state.status : 'FREE';
       }
 
-      // Do not disclose the IDs/names of somebody else's private voice channel.
       const here = state?.channelId === command.voiceChannelId ? ' (questa vocale)' : '';
       return `${workerId}: ${status}${here}`;
     });

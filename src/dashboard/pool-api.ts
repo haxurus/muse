@@ -62,7 +62,7 @@ export default class DashboardPoolApi {
     });
     if (result.statusCode !== 200) {
       const status = [400, 403, 404, 409, 429].includes(result.statusCode) ? result.statusCode : 503;
-      const error = objectBody(result.body).error;
+      const {error} = objectBody(result.body);
       throw new HttpError(status, typeof error === 'string' ? error.slice(0, 300) : 'Regole del pool non disponibili.');
     }
 

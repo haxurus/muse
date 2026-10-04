@@ -60,11 +60,7 @@ export default class WorkerControlServer {
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       if (request.method === 'GET' && request.url === '/health') {
-        sendJson(response, 200, {
-          ok: true,
-          workerId: this.config.WORKER_ID,
-          discordReady: this.client.isReady(),
-        });
+        sendJson(response, 200, {ok: true, workerId: this.config.WORKER_ID, discordReady: this.client.isReady()});
         return;
       }
 
@@ -79,25 +75,8 @@ export default class WorkerControlServer {
         return;
       }
 
-      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'playback') {
-        if (!this.playback || !isDiscordId(segments[2])) {
-          throw new HttpError(503, 'Pool worker non disponibile.');
-        }
-
-        if (request.method === 'GET') {
-          sendJson(response, 200, this.playback.state(segments[2]));
-          return;
-        }
-
-        if (request.method === 'POST') {
-          const envelope = parseEnvelope(await readJsonBody(request));
-          if (envelope.command.guildId !== segments[2]) {
-            throw new HttpError(400, 'Discord guild mismatch.');
-          }
-
-          sendJson(response, 200, await this.playback.execute(envelope));
-          return;
-        }
+      if (await this.handlePlayback(request, response, segments)) {
+        return;
       }
 
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'settings') {
@@ -128,6 +107,34 @@ export default class WorkerControlServer {
 
       sendJson(response, statusCode, {error: message});
     }
+  }
+
+  private async handlePlayback(request: IncomingMessage, response: ServerResponse, segments: string[]): Promise<boolean> {
+    const reserve = segments.length === 5 && segments[4] === 'reserve';
+    if ((!reserve && segments.length !== 4) || segments[0] !== 'v1' || segments[1] !== 'guilds' || segments[3] !== 'playback') {
+      return false;
+    }
+
+    if (!this.playback || !isDiscordId(segments[2])) {
+      throw new HttpError(503, 'Pool worker non disponibile.');
+    }
+
+    if (request.method === 'GET' && !reserve) {
+      sendJson(response, 200, this.playback.state(segments[2]));
+      return true;
+    }
+
+    if (request.method !== 'POST') {
+      throw new HttpError(405, 'Metodo non consentito.');
+    }
+
+    const envelope = parseEnvelope(await readJsonBody(request));
+    if (envelope.command.guildId !== segments[2]) {
+      throw new HttpError(400, 'Discord guild mismatch.');
+    }
+
+    sendJson(response, 200, reserve ? await this.playback.reserve(envelope) : await this.playback.execute(envelope));
+    return true;
   }
 
   private status() {

@@ -1,6 +1,7 @@
 import {HttpError} from '../control/http.js';
 
 export const COMMAND_TTL_MS = 180_000;
+export const RESERVATION_TTL_MS = 30_000;
 export const isDiscordId = (value: unknown): value is string => typeof value === 'string' && /^\d{10,32}$/u.test(value);
 export const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/u.test(value);
 export const ACTIONS = ['join', 'play', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'queue', 'volume', 'players'] as const;
@@ -92,10 +93,10 @@ export const parsePoolCommand = (input: unknown): PoolCommand => {
     userId: body.userId as string,
     textChannelId: body.textChannelId as string,
     voiceChannelId: body.voiceChannelId as string,
-    categoryId: body.categoryId as string | null,
+    categoryId: body.categoryId,
     action: body.action as PoolAction,
-    ...(body.query === undefined ? {} : {query: (body.query as string).trim()}),
-    ...(body.volume === undefined ? {} : {volume: body.volume as number}),
+    ...(body.query === undefined ? {} : {query: body.query.trim()}),
+    ...(body.volume === undefined ? {} : {volume: body.volume}),
   };
 };
 

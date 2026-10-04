@@ -6,15 +6,16 @@ import AddQueryToQueue from '../services/add-query-to-queue.js';
 import {STATUS} from '../services/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {ReplayGuard} from './concurrency.js';
-import {parseEnvelope, type PlaybackEnvelope, type PlaybackReply, type PlaybackState, type PoolCommand} from './protocol.js';
+import {RESERVATION_TTL_MS, parseEnvelope, type PlaybackEnvelope, type PlaybackReply, type PlaybackState, type PoolCommand} from './protocol.js';
 
-type Lease = {id: string; channelId: string};
+type Lease = {id: string; channelId: string; requestId: string; expiresAt: number; started: boolean};
 type WorkerDependencies = {client: Client; players: PlayerManager; media: AddQueryToQueue};
 const displayTitle = (title: string): string => title.replace(/[\r\n`*_~<>]/gu, ' ').slice(0, 100);
 
 export default class PoolWorker {
   private readonly instanceId = randomUUID();
   private readonly replay = new ReplayGuard<PlaybackReply>();
+  private readonly reservationReplay = new ReplayGuard<PlaybackState>();
   private readonly leases = new Map<string, Lease>();
   private readonly busy = new Set<string>();
   private closed = false;
@@ -26,14 +27,15 @@ export default class PoolWorker {
     const player = players.snapshot().find(candidate => candidate.guildId === guildId);
     const guild = client.guilds.cache.get(guildId);
     const actualChannelId = client.user ? guild?.voiceStates.cache.get(client.user.id)?.channelId ?? null : null;
-    const connected = Boolean(player?.connected || actualChannelId);
+    const connected = Boolean(player?.connected) || actualChannelId !== null;
     const busy = this.busy.has(guildId);
-    if (!busy && !connected) {
+    const existing = this.leases.get(guildId);
+    if (existing && !busy && !connected && (existing.started || existing.expiresAt <= Date.now())) {
       this.leases.delete(guildId);
     }
 
     const lease = this.leases.get(guildId);
-    const channelId = actualChannelId ?? player?.channelId ?? (busy ? lease?.channelId ?? null : null);
+    const channelId = actualChannelId ?? player?.channelId ?? lease?.channelId ?? null;
     const status = player?.status === 'PLAYING' ? 'PLAYING' : player?.status === 'PAUSED' ? 'PAUSED' : 'IDLE';
     return {
       workerId: this.workerId, guildId, instanceId: this.instanceId,
@@ -42,7 +44,50 @@ export default class PoolWorker {
     };
   }
 
-  execute(input: unknown): Promise<PlaybackReply> {
+  async reserve(input: unknown): Promise<PlaybackState> {
+    const envelope = parseEnvelope(input);
+    const {command} = envelope;
+    // Replaying a reserve cannot extend its TTL or revive an expired lease.
+    return this.reservationReplay.run(`${command.guildId}/${command.id}`, JSON.stringify(envelope), async () => {
+      const state = this.state(command.guildId);
+      const guild = this.dependencies.client.guilds.cache.get(command.guildId);
+      if (!state.ready || !state.present || envelope.instanceId !== this.instanceId || envelope.deadline <= Date.now()) {
+        throw new HttpError(409, 'Worker non pronto oppure prenotazione scaduta.');
+      }
+
+      if (command.action === 'players' || this.busy.has(command.guildId)
+        || (state.channelId !== null && state.channelId !== command.voiceChannelId)
+        || (state.leaseId !== null && state.leaseId !== envelope.leaseId)
+        || (state.connected && state.leaseId === null)
+        || guild?.voiceStates.cache.get(command.userId)?.channelId !== command.voiceChannelId) {
+        throw new HttpError(409, 'Contesto vocale o prenotazione non disponibile.');
+      }
+
+      const previous = this.leases.get(command.guildId);
+      if (previous && !state.connected && previous.requestId !== command.id) {
+        throw new HttpError(409, 'Un altro comando ha gia prenotato questo player.');
+      }
+
+      if (!state.connected && command.action !== 'play' && command.action !== 'join') {
+        throw new HttpError(409, 'Nessun player attivo nella vocale.');
+      }
+
+      if (!previous && this.leases.size >= 4096) {
+        throw new HttpError(429, 'Limite sessioni del worker raggiunto.');
+      }
+
+      this.leases.set(command.guildId, {
+        id: envelope.leaseId,
+        channelId: command.voiceChannelId,
+        requestId: command.id,
+        expiresAt: Math.min(envelope.deadline, Date.now() + RESERVATION_TTL_MS),
+        started: state.connected,
+      });
+      return this.state(command.guildId);
+    });
+  }
+
+  async execute(input: unknown): Promise<PlaybackReply> {
     const envelope = parseEnvelope(input);
     const {command} = envelope;
     return this.replay.run(`${command.guildId}/${command.id}`, JSON.stringify(envelope), async () => this.claim(envelope));
@@ -63,22 +108,15 @@ export default class PoolWorker {
   private async claim(envelope: PlaybackEnvelope): Promise<PlaybackReply> {
     const {command} = envelope;
     const state = this.state(command.guildId);
-    if (!state.ready || envelope.instanceId !== this.instanceId) {
-      throw new HttpError(409, 'Il worker e stato riavviato o non e pronto.');
-    }
-
-    if (envelope.deadline <= Date.now()) {
-      throw new HttpError(409, 'Prenotazione scaduta.');
+    const lease = this.leases.get(command.guildId);
+    if (!state.ready || envelope.instanceId !== this.instanceId || envelope.deadline <= Date.now()
+      || !lease || lease.id !== envelope.leaseId || lease.requestId !== command.id) {
+      throw new HttpError(409, 'Prenotazione assente, scaduta o appartenente a un altro comando.');
     }
 
     if (this.busy.size >= 32 || this.busy.has(command.guildId)
-      || (state.channelId !== null && state.channelId !== command.voiceChannelId)
-      || (state.connected && state.leaseId !== envelope.leaseId)) {
+      || state.channelId !== command.voiceChannelId || command.action === 'players') {
       throw new HttpError(409, 'Il worker e occupato o appartiene a un altro canale.');
-    }
-
-    if (command.action === 'players') {
-      throw new HttpError(400, 'Comando riservato al coordinatore.');
     }
 
     const newlyAssigned = !state.connected;
@@ -86,7 +124,7 @@ export default class PoolWorker {
       throw new HttpError(409, 'La sessione vocale e terminata.');
     }
 
-    this.leases.set(command.guildId, {id: envelope.leaseId, channelId: command.voiceChannelId});
+    lease.started = true;
     this.busy.add(command.guildId);
     try {
       return await this.perform(envelope, newlyAssigned);
@@ -99,7 +137,6 @@ export default class PoolWorker {
         throw error;
       }
 
-      // Media/library errors can contain provider URLs or credentials.
       throw new HttpError(422, 'Riproduzione non riuscita. Controlla /queue prima di ripetere la richiesta.');
     } finally {
       this.busy.delete(command.guildId);
@@ -127,7 +164,7 @@ export default class PoolWorker {
     const voice = guild.channels.cache.get(command.voiceChannelId);
     const text = guild.channels.cache.get(command.textChannelId);
     const member = await guild.members.fetch(command.userId);
-    const me = guild.members.me;
+    const {me} = guild.members;
     this.assertActive(envelope);
     if (!(voice instanceof VoiceChannel) || voice.parentId !== command.categoryId
       || !text?.isTextBased() || member.user.bot || !me
@@ -145,8 +182,13 @@ export default class PoolWorker {
     const voice = await this.context(envelope);
     const player = this.dependencies.players.get(command.guildId);
     if (newlyAssigned) {
-      // Never carry a disconnected room's queue into somebody else's channel.
+      // A new room never inherits a disconnected room's queue or loop flags.
       player.stop();
+      player.loopCurrentSong = false;
+      player.loopCurrentQueue = false;
+      const settings = await getGuildSettings(command.guildId);
+      this.assertActive(envelope);
+      player.setVolume(settings.defaultVolume ?? 100);
     }
 
     let message: string;
@@ -162,10 +204,10 @@ export default class PoolWorker {
         throw new HttpError(409, 'Limite di 1000 brani per sessione raggiunto.');
       }
 
-      if (!player.voiceConnection) {
-        await player.connect(voice);
-      } else {
+      if (player.voiceConnection) {
         await player.ensureVoiceConnectionReady();
+      } else {
+        await player.connect(voice);
       }
 
       this.assertActive(envelope);
@@ -182,6 +224,11 @@ export default class PoolWorker {
     } else if (command.action === 'join') {
       if (!player.voiceConnection) {
         await player.connect(voice);
+      }
+
+      // /join reserves a room without starting audio; the next /play must start.
+      if (!player.getCurrent()) {
+        player.status = STATUS.IDLE;
       }
 
       this.assertActive(envelope);

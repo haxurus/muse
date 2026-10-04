@@ -39,7 +39,7 @@ const parseRouting = (input: unknown): GuildRouting => {
   }
 
   return {
-    defaultGroupId: body.defaultGroupId as string | null,
+    defaultGroupId: body.defaultGroupId,
     channelGroups: mappings(body.channelGroups),
     categoryGroups: mappings(body.categoryGroups),
   };
@@ -130,18 +130,21 @@ export default class PoolRoutingStore {
 
   private persist(data: RoutingFile): void {
     const temporary = `${this.filePath}.${randomUUID()}.tmp`;
-    const fd = openSync(temporary, 'wx', 0o600);
     try {
-      writeFileSync(fd, `${JSON.stringify(data)}\n`, 'utf8');
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+      const fd = openSync(temporary, 'wx', 0o600);
+      try {
+        writeFileSync(fd, `${JSON.stringify(data)}\n`, 'utf8');
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
 
-    try {
       renameSync(temporary, this.filePath);
     } catch (error: unknown) {
-      unlinkSync(temporary);
+      try {
+        unlinkSync(temporary);
+      } catch {}
+
       throw error;
     }
   }

@@ -15,10 +15,17 @@ export default class PoolApi {
 
   constructor(private readonly config: OrchestratorConfig, groups: GuildGroupStore) {
     const workerIds = config.workers.map(worker => worker.id);
-    this.routing = new PoolRoutingStore(path.join(path.dirname(config.groupsFile), 'pool-routes.json'),
-      guildId => groups.list(guildId), workerIds);
+    this.routing = new PoolRoutingStore(
+      path.join(path.dirname(config.groupsFile), 'pool-routes.json'),
+      guildId => groups.list(guildId),
+      workerIds,
+    );
     if (process.env.MUSE_POOL_ENABLED === 'true') {
       this.clientToken = poolSecret();
+      if (this.clientToken === config.apiToken) {
+        throw new Error('Pool playback and administrative credentials must be distinct');
+      }
+
       this.coordinator = new PoolCoordinator(workerIds, new WorkerPoolTransport(config.workers), command => this.routing.eligible(command));
     }
   }
@@ -52,7 +59,6 @@ export default class PoolApi {
       return false;
     }
 
-    // The controller playback credential is deliberately insufficient here.
     if (!hasBearerToken(request, this.config.apiToken)) {
       throw new HttpError(401, 'unauthorized');
     }

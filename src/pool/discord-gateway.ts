@@ -53,8 +53,6 @@ export default class PoolDiscordGateway {
     });
     this.client.on('voiceStateUpdate', (oldState, newState) => {
       if (newState.id === this.client.user?.id && oldState.channelId && oldState.channelId !== newState.channelId) {
-        // Administrative moves terminate the old lease rather than moving a
-        // private room's queue into another channel.
         this.invalidate(newState.guild.id);
       }
 
@@ -89,16 +87,18 @@ export default class PoolDiscordGateway {
     await ready;
   }
 
-  async shutdown(): Promise<void> {
+  shutdown(): void {
     this.initialized = false;
     this.setReady(false);
-    await this.client.destroy();
+    this.client.destroy();
   }
 
   private async initialize(): Promise<void> {
     const definitions = this.role === 'controller' && this.config.REGISTER_COMMANDS_ON_BOT ? poolCommands().map(command => command.toJSON()) : [];
     await this.client.application!.commands.set(definitions);
     for (const guild of this.client.guilds.cache.values()) {
+      // Sequential registration avoids flooding Discord with guild REST writes.
+      // eslint-disable-next-line no-await-in-loop
       await this.registerGuild(guild);
     }
 
@@ -113,7 +113,6 @@ export default class PoolDiscordGateway {
 
   private async registerGuild(guild: Guild): Promise<void> {
     const commands = this.role === 'controller' && !this.config.REGISTER_COMMANDS_ON_BOT ? poolCommands().map(command => command.toJSON()) : [];
-    // This also removes legacy worker-specific slash commands.
     await guild.commands.set(commands);
   }
 
@@ -142,8 +141,8 @@ export default class PoolDiscordGateway {
         throw new HttpError(400, 'Usa i comandi del bot principale in un server.');
       }
 
-      this.budget(`${interaction.guildId}/${interaction.user.id}`);
-      const guild = interaction.guild;
+      const {guild} = interaction;
+      this.budget(`${guild.id}/${interaction.user.id}`);
       const member = await guild.members.fetch(interaction.user.id);
       const voice = guild.voiceStates.cache.get(member.id)?.channel;
       if (!(voice instanceof VoiceChannel)
