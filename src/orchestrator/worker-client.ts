@@ -7,7 +7,7 @@ import {HttpError} from '../control/http.js';
 
 const normalizeWorkerError = (error: unknown): HttpError => {
   if (typeof error === 'object' && error !== null && 'response' in error) {
-    const response = (error as {response?: {statusCode?: number; body?: unknown}}).response;
+    const {response} = error as {response?: {statusCode?: number; body?: unknown}};
     const statusCode = response?.statusCode && response.statusCode >= 400 && response.statusCode < 500
       ? response.statusCode
       : 502;
