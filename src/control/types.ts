@@ -10,6 +10,8 @@ export type WorkerPlayerStatus = {
   connected: boolean;
   channelId: string | null;
   status: string;
+  hasCurrent: boolean;
+  queueSize: number;
 };
 
 export type WorkerStatus = {
