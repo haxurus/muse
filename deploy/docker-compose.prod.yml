@@ -7,6 +7,7 @@ x-worker-environment: &worker-environment
   MUSE_READY_FILE: /tmp/muse-ready
   MUSE_CONTROL_HOST: 0.0.0.0
   MUSE_CONTROL_PORT: "3101"
+  MUSE_ORCHESTRATOR_URL: http://orchestrator:3100
   YT_DLP_AUTO_UPDATE: "false"
 
 x-worker-common: &worker-common
@@ -129,6 +130,7 @@ services:
       MUSE_ORCHESTRATOR_PORT: "3100"
       MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       MUSE_WORKERS_FILE: /config/workers.json
+      MUSE_ORCHESTRATOR_DATA_DIR: /data
     secrets:
       - orchestrator_api_token
       - control_token_01
@@ -138,6 +140,7 @@ services:
       - control_token_05
     volumes:
       - ./config/workers.json:/config/workers.json:ro
+      - ./data/orchestrator:/data
     networks:
       - dashboard-control
       - control-01
