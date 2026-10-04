@@ -9,6 +9,10 @@ STATE="$BASE/.deploy-state"
 CURRENT="$STATE/current-image"
 PREVIOUS="$STATE/previous-image"
 LAST_BACKUP="$STATE/last-backup"
+RUNTIME_UID=10001
+RUNTIME_GID=10001
+SERVICES=(orchestrator muse-01 muse-02 muse-03 muse-04 muse-05)
+WORKERS=(muse-01 muse-02 muse-03 muse-04 muse-05)
 
 compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE" "$@"
@@ -36,51 +40,78 @@ set_env_key() {
 }
 
 wait_healthy() {
-  local deadline=$((SECONDS + 150)) cid status
+  local deadline=$((SECONDS + 240)) service cid status all_healthy
   while (( SECONDS < deadline )); do
-    cid="$(compose ps -q muse || true)"
-    if [[ -n "$cid" ]]; then
+    all_healthy=1
+    for service in "${SERVICES[@]}"; do
+      cid="$(compose ps -q "$service" || true)"
+      if [[ -z "$cid" ]]; then
+        all_healthy=0
+        continue
+      fi
+
       status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
-      [[ "$status" == "healthy" ]] && return 0
-      [[ "$status" == "exited" || "$status" == "dead" ]] && return 1
-    fi
+      if [[ "$status" == "exited" || "$status" == "dead" ]]; then
+        echo "$service entered $status state." >&2
+        return 1
+      fi
+
+      [[ "$status" == "healthy" ]] || all_healthy=0
+    done
+
+    [[ "$all_healthy" -eq 1 ]] && return 0
     sleep 3
   done
+
   return 1
 }
 
 stop_for_backup() {
-  compose stop -t 30 muse >/dev/null 2>&1 || true
+  compose stop -t 30 "${SERVICES[@]}" >/dev/null 2>&1 || true
 }
 
 backup_db() {
   mkdir -p "$BACKUPS" "$STATE"
   chmod 700 "$BACKUPS" "$STATE"
-  local stamp backup
+
+  local stamp backup worker file
+  local files=()
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup="$BACKUPS/muse-$stamp.tar.gz"
 
-  if [[ -f "$BASE/data/db.sqlite" ]]; then
-    tar -C "$BASE/data" -czf "$backup" db.sqlite \
-      $(find "$BASE/data" -maxdepth 1 -type f \( -name 'db.sqlite-wal' -o -name 'db.sqlite-shm' \) -printf '%f ')
+  for worker in 01 02 03 04 05; do
+    for file in db.sqlite db.sqlite-wal db.sqlite-shm; do
+      if [[ -f "$BASE/data/bot-$worker/$file" ]]; then
+        files+=("data/bot-$worker/$file")
+      fi
+    done
+  done
+
+  if [[ "${#files[@]}" -gt 0 ]]; then
+    tar -C "$BASE" -czf "$backup" "${files[@]}"
     chmod 600 "$backup"
     printf '%s\n' "$backup" > "$LAST_BACKUP"
     find "$BACKUPS" -type f -name 'muse-*.tar.gz' -mtime +14 -delete
-    echo "Database backup: $backup"
+    echo "Fleet database backup: $backup"
   else
     : > "$LAST_BACKUP"
-    echo "No existing database to back up."
+    echo "No existing worker databases to back up."
   fi
 }
 
 restore_backup() {
   [[ -s "$LAST_BACKUP" ]] || return 0
-  local backup
+
+  local backup worker
   backup="$(cat "$LAST_BACKUP")"
   [[ -f "$backup" ]] || return 0
-  rm -f "$BASE/data/db.sqlite" "$BASE/data/db.sqlite-wal" "$BASE/data/db.sqlite-shm"
-  tar -C "$BASE/data" -xzf "$backup"
-  chown -R 1000:1000 "$BASE/data"
+
+  for worker in 01 02 03 04 05; do
+    rm -f       "$BASE/data/bot-$worker/db.sqlite"       "$BASE/data/bot-$worker/db.sqlite-wal"       "$BASE/data/bot-$worker/db.sqlite-shm"
+  done
+
+  tar -C "$BASE" -xzf "$backup"
+  chown -R "$RUNTIME_UID:$RUNTIME_GID" "$BASE/data"
 }
 
 deploy_image() {
@@ -114,21 +145,21 @@ deploy_image() {
   if wait_healthy; then
     printf '%s\n' "$image" > "$CURRENT"
     chmod 600 "$CURRENT" "$PREVIOUS" 2>/dev/null || true
-    echo "Muse deployed successfully."
+    echo "Muse orchestrator and all five workers deployed successfully."
     return 0
   fi
 
-  echo "New release failed health checks." >&2
-  compose logs --tail=120 muse >&2 || true
-  compose stop -t 15 muse >/dev/null 2>&1 || true
+  echo "New fleet release failed health checks." >&2
+  compose logs --tail=120 "${SERVICES[@]}" >&2 || true
+  compose stop -t 15 "${SERVICES[@]}" >/dev/null 2>&1 || true
 
   if [[ -n "$old" ]]; then
-    echo "Restoring previous application and database." >&2
+    echo "Restoring previous application image and worker databases." >&2
     restore_backup
     set_env_key MUSE_IMAGE "$old"
     compose up -d --remove-orphans
     wait_healthy || {
-      echo "Automatic rollback also failed." >&2
+      echo "Automatic fleet rollback also failed." >&2
       exit 1
     }
     printf '%s\n' "$old" > "$CURRENT"
@@ -139,6 +170,7 @@ deploy_image() {
 
 rollback() {
   [[ -s "$PREVIOUS" ]] || { echo "No previous image recorded." >&2; exit 1; }
+
   local target current
   target="$(cat "$PREVIOUS")"
   current="$(cat "$CURRENT" 2>/dev/null || true)"
@@ -149,11 +181,14 @@ rollback() {
   backup_db
   set_env_key MUSE_IMAGE "$target"
   compose up -d --remove-orphans
-  wait_healthy || { compose logs --tail=120 muse >&2 || true; exit 1; }
+  wait_healthy || {
+    compose logs --tail=120 "${SERVICES[@]}" >&2 || true
+    exit 1
+  }
 
   printf '%s\n' "$target" > "$CURRENT"
   [[ -n "$current" ]] && printf '%s\n' "$current" > "$PREVIOUS"
-  echo "Muse rollback completed."
+  echo "Muse fleet rollback completed."
 }
 
 status() {
