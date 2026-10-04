@@ -71,14 +71,14 @@ export default class PoolEngine {
 
     const activeCount = active.length + reservedWorkerIds.size;
     if (activeCount >= config.maxConcurrentPlayers) {
-      throw new HttpError(409, 'server player quota reached (' + config.maxConcurrentPlayers + ')');
+      throw new HttpError(409, `server player quota reached (${config.maxConcurrentPlayers})`);
     }
 
     if (group) {
       const groupBusy = active.filter(assignment => group.workerIds.includes(assignment.worker.id)).length
         + [...reservedWorkerIds].filter(workerId => group.workerIds.includes(workerId)).length;
       if (groupBusy >= group.maxConcurrentPlayers) {
-        throw new HttpError(409, 'group player quota reached for ' + group.name + ' (' + group.maxConcurrentPlayers + ')');
+        throw new HttpError(409, `group player quota reached for ${group.name} (${group.maxConcurrentPlayers})`);
       }
     }
 
