@@ -1,10 +1,7 @@
 import {HttpError} from '../control/http.js';
 import type {
   PlaybackActionResult,
-  PlaybackChannelRequest,
   PlaybackPlayRequest,
-  PlaybackSkipRequest,
-  PlaybackVolumeRequest,
 } from '../control/playback-types.js';
 import type {WorkerStatus} from '../control/types.js';
 import GuildGroupStore from './guild-group-store.js';
