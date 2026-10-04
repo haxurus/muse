@@ -217,5 +217,4 @@ export default class {
       unlinkSync(readyFile);
     }
   }
-
 }
