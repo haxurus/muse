@@ -6,6 +6,8 @@ import {normalizeSettingsPatch, resolveEffectiveSettings} from '../control/setti
 import {verifyControlRequest} from '../control/signature.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {prisma} from '../utils/db.js';
+import Command from '../commands/index.js';
+import {executeRemoteCommand, RemoteCommandRequest} from './commands.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -77,10 +79,12 @@ export const startWorkerControlServer = ({
   config,
   client,
   playerManager,
+  commands,
 }: {
   config: Config;
   client: Client;
   playerManager: PlayerManager;
+  commands: ReadonlyMap<string, Command>;
 }): Server | null => {
   if (!config.WORKER_CONTROL_ENABLED) {
     return null;
