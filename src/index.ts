@@ -5,9 +5,44 @@ import {TYPES} from './types.js';
 import Bot from './bot.js';
 import Config from './services/config.js';
 import FileCacheProvider from './services/file-cache.js';
+import PlayerManager from './managers/player.js';
+import ThirdParty from './services/third-party.js';
 import prepareYtDlp from './utils/prepare-yt-dlp.js';
+import {prisma} from './utils/db.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
+let shuttingDown = false;
+
+const shutdown = async (signal: NodeJS.Signals) => {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down...`);
+
+  try {
+    bot.shutdown();
+    container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
+
+    if (container.isBound(TYPES.ThirdParty)) {
+      container.get<ThirdParty>(TYPES.ThirdParty).cleanup();
+    }
+
+    await prisma.$disconnect();
+  } catch (error: unknown) {
+    console.error('Graceful shutdown failed:', error);
+    process.exitCode = 1;
+  }
+};
+
+const installSignalHandlers = () => {
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => {
+      void shutdown(signal).finally(() => process.exit());
+    });
+  }
+};
 
 const startBot = async () => {
   // Create data directories if necessary
@@ -20,6 +55,7 @@ const startBot = async () => {
   await container.get<FileCacheProvider>(TYPES.FileCache).cleanup();
   await prepareYtDlp(config);
 
+  installSignalHandlers();
   await bot.register();
 };
 
