@@ -46,6 +46,9 @@ const CONFIG_MAP = {
   SPOTIFY_CLIENT_ID: readSecret('SPOTIFY_CLIENT_ID', true),
   SPOTIFY_CLIENT_SECRET: readSecret('SPOTIFY_CLIENT_SECRET', true),
   REGISTER_COMMANDS_ON_BOT: process.env.REGISTER_COMMANDS_ON_BOT === 'true',
+  ENABLE_DISCORD_COMMANDS: process.env.ENABLE_DISCORD_COMMANDS !== 'false',
+  POOL_INGRESS_ENABLED: process.env.POOL_INGRESS_ENABLED === 'true',
+  ORCHESTRATOR_INTERNAL_URL: process.env.ORCHESTRATOR_INTERNAL_URL ?? '',
   DATA_DIR,
   CACHE_DIR: path.join(DATA_DIR, 'cache'),
   CACHE_LIMIT_IN_BYTES: xbytes.parseSize(process.env.CACHE_LIMIT ?? '2GB'),
@@ -81,6 +84,9 @@ export default class Config {
   readonly SPOTIFY_CLIENT_ID!: string;
   readonly SPOTIFY_CLIENT_SECRET!: string;
   readonly REGISTER_COMMANDS_ON_BOT!: boolean;
+  readonly ENABLE_DISCORD_COMMANDS!: boolean;
+  readonly POOL_INGRESS_ENABLED!: boolean;
+  readonly ORCHESTRATOR_INTERNAL_URL!: string;
   readonly DATA_DIR!: string;
   readonly CACHE_DIR!: string;
   readonly CACHE_LIMIT_IN_BYTES!: number;
@@ -137,6 +143,23 @@ export default class Config {
         this[key as ConditionalKeys<typeof CONFIG_MAP, boolean>] = value;
       } else {
         throw new Error(`Unsupported type for ${key}`);
+      }
+    }
+
+    if (this.POOL_INGRESS_ENABLED) {
+      if (!this.ENABLE_DISCORD_COMMANDS) {
+        throw new Error('POOL_INGRESS_ENABLED requires ENABLE_DISCORD_COMMANDS');
+      }
+
+      let orchestratorUrl: URL;
+      try {
+        orchestratorUrl = new URL(this.ORCHESTRATOR_INTERNAL_URL);
+      } catch {
+        throw new Error('ORCHESTRATOR_INTERNAL_URL must be a valid URL when pool ingress is enabled');
+      }
+
+      if (orchestratorUrl.protocol !== 'http:' || orchestratorUrl.username || orchestratorUrl.password) {
+        throw new Error('ORCHESTRATOR_INTERNAL_URL must be a plain internal HTTP URL');
       }
     }
 
