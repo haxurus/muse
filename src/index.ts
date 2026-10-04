@@ -12,6 +12,7 @@ import {prisma} from './utils/db.js';
 import {Client} from 'discord.js';
 import {Server} from 'node:http';
 import {startWorkerControlServer} from './worker-control/server.js';
+import Command from './commands/index.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
@@ -75,10 +76,17 @@ const startBot = async () => {
   await prepareYtDlp(config);
 
   if (config.WORKER_CONTROL_ENABLED) {
+    const commands = new Map(
+      container.getAll<Command>(TYPES.Command)
+        .filter(command => Boolean(command.slashCommand.name))
+        .map(command => [command.slashCommand.name!, command]),
+    );
+
     workerControlServer = startWorkerControlServer({
       config,
       client: container.get<Client>(TYPES.Client),
       playerManager: container.get<PlayerManager>(TYPES.Managers.Player),
+      commands,
     });
   }
 
