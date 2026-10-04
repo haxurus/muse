@@ -89,6 +89,15 @@ export default class PlaybackControl {
       existingPlayer.stop();
     }
 
+    const assignedChannelId = existingPlayer?.voiceConnection?.joinConfig.channelId
+      ?? existingPlayer?.getLastVoiceChannelId()
+      ?? null;
+    if (existingPlayer?.getCurrent()
+      && assignedChannelId
+      && assignedChannelId !== channel.id) {
+      throw new HttpError(409, 'this worker is assigned to another voice channel');
+    }
+
     const result = await this.addQueryToQueue.addRequest({
       guildId,
       targetVoiceChannel: channel,
