@@ -288,7 +288,7 @@ export default class implements Command {
           'Default queue page size': config.defaultQueuePageSize,
           'Reduce volume when people speak': config.turnDownVolumeWhenPeopleSpeak ? 'yes' : 'no',
           'Reduce volume when people speak target': config.turnDownVolumeWhenPeopleSpeakTarget,
-          'SponsorBlock': config.enableSponsorBlock ? 'yes' : 'no',
+          SponsorBlock: config.enableSponsorBlock ? 'yes' : 'no',
         };
 
         let description = '';
