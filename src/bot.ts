@@ -50,8 +50,8 @@ export default class {
     this.client = client;
     this.config = config;
     this.shouldRegisterCommandsOnBot = config.REGISTER_COMMANDS_ON_BOT;
-    this.commandsEnabled = config.ENABLE_DISCORD_COMMANDS !== false;
-    this.poolIngressEnabled = config.POOL_INGRESS_ENABLED === true;
+    this.commandsEnabled = config.ENABLE_DISCORD_COMMANDS;
+    this.poolIngressEnabled = config.POOL_INGRESS_ENABLED;
     this.commandsByName = new Collection();
     this.commandsByButtonId = new Collection();
   }
@@ -91,6 +91,7 @@ export default class {
         if (!this.commandsEnabled) {
           return;
         }
+
         if (interaction.guildId) {
           const settings = await getGuildSettings(interaction.guildId);
           if (!settings.orchestratorEnabled) {
