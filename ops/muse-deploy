@@ -122,6 +122,9 @@ backup_db() {
   if [[ -f "$BASE/data/orchestrator/groups.json" ]]; then
     files+=("data/orchestrator/groups.json")
   fi
+  if [[ -f "$BASE/data/orchestrator/routing.json" ]]; then
+    files+=("data/orchestrator/routing.json")
+  fi
 
   if [[ "${#files[@]}" -gt 0 ]]; then
     tar -C "$BASE" -czf "$backup" "${files[@]}"
@@ -145,7 +148,7 @@ restore_backup() {
   for worker in 01 02 03 04 05; do
     rm -f       "$BASE/data/bot-$worker/db.sqlite"       "$BASE/data/bot-$worker/db.sqlite-wal"       "$BASE/data/bot-$worker/db.sqlite-shm"
   done
-  rm -f "$BASE/data/orchestrator/groups.json"
+  rm -f "$BASE/data/orchestrator/groups.json" "$BASE/data/orchestrator/routing.json"
 
   tar -C "$BASE" -xzf "$backup"
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$BASE/data"
