@@ -116,6 +116,7 @@ PATCH  /api/guilds/:guildId
 POST   /api/guilds/:guildId/groups
 PATCH  /api/guilds/:guildId/groups/:groupId
 DELETE /api/guilds/:guildId/groups/:groupId
+PUT    /api/guilds/:guildId/routing
 ```
 
 The dashboard also exposes persistent worker groups scoped to the selected Discord server. An administrator can create any combination, edit membership, delete a group, or select a group and then apply a settings patch to its currently available workers.
@@ -151,3 +152,18 @@ muse-dashboard:8080
 Use HTTP between NPM and the edge container. TLS terminates at NPM/Cloudflare according to the VPS01 proxy design.
 
 Do not proxy the dashboard container, orchestrator, or worker control ports directly.
+
+
+## Playback routing editor
+
+The dashboard can turn X+Y groups into actual playback pools.
+
+For each Discord server an administrator can set:
+
+- one default group;
+- category-level group mappings;
+- voice-channel-specific group mappings.
+
+Voice-channel mappings override category mappings, which override the default group. If no route applies, all available workers in that server are candidates.
+
+The guild page also receives live lease state from the orchestrator and displays the number of active/reserved sessions in the status pill.
