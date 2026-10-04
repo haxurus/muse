@@ -9,11 +9,23 @@ const selectionSummary = document.getElementById('selection-summary');
 const formMessage = document.getElementById('form-message');
 const applyButton = document.getElementById('apply-button');
 const statusPill = document.getElementById('status-pill');
+const groupList = document.getElementById('group-list');
+const groupName = document.getElementById('group-name');
+const groupMessage = document.getElementById('group-message');
+const groupEditorTitle = document.getElementById('group-editor-title');
+const groupEditorHint = document.getElementById('group-editor-hint');
+const groupOfflineRow = document.getElementById('group-offline-row');
+const groupOfflineNote = document.getElementById('group-offline-note');
+const saveGroupButton = document.getElementById('save-group');
+const cancelGroupEditButton = document.getElementById('cancel-group-edit');
+const dropOfflineMembersButton = document.getElementById('drop-offline-members');
 
 let session = null;
 let selectedGuildId = null;
 let guildDetails = null;
 const selectedWorkers = new Set();
+let editingGroupId = null;
+const preservedUnavailableWorkers = new Set();
 
 const SETTINGS = [
   {key: 'defaultVolume', label: 'Volume predefinito', hint: '0-100', type: 'number', min: 0, max: 100},
