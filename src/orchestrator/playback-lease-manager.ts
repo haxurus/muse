@@ -23,14 +23,15 @@ export default class PlaybackLeaseManager {
     const current = new Promise<void>(resolve => {
       release = resolve;
     });
-    this.guildLocks.set(guildId, previous.then(() => current));
+    const chained = previous.then(() => current);
+    this.guildLocks.set(guildId, chained);
 
     await previous;
     try {
       return await callback();
     } finally {
       release();
-      if (this.guildLocks.get(guildId) === current) {
+      if (this.guildLocks.get(guildId) === chained) {
         this.guildLocks.delete(guildId);
       }
     }
