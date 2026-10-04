@@ -45,9 +45,7 @@ export default class OrchestratorServer {
       });
     });
 
-    console.log('Muse orchestrator listening on '
-      + this.config.host + ':' + this.config.port
-      + ' with ' + this.workers.length + ' workers');
+    console.log(`Muse orchestrator listening on ${this.config.host}:${this.config.port} with ${this.workers.length} workers`);
   }
 
   async close(): Promise<void> {
