@@ -1,0 +1,57 @@
+services:
+  muse:
+    image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token
+      YOUTUBE_API_KEY_FILE: /run/secrets/youtube_api_key
+      SPOTIFY_CLIENT_ID_FILE: /run/secrets/spotify_client_id
+      SPOTIFY_CLIENT_SECRET_FILE: /run/secrets/spotify_client_secret
+      MUSE_READY_FILE: /tmp/muse-ready
+      YT_DLP_AUTO_UPDATE: "false"
+    secrets:
+      - discord_token
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+    volumes:
+      - ./data:/data
+    networks:
+      - egress
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    pids_limit: 256
+    mem_limit: 1024m
+    cpus: 2.0
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  egress:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-eg
+      com.docker.network.bridge.enable_icc: "false"
+
+secrets:
+  discord_token:
+    file: ./secrets/discord_token
+  youtube_api_key:
+    file: ./secrets/youtube_api_key
+  spotify_client_id:
+    file: ./secrets/spotify_client_id
+  spotify_client_secret:
+    file: ./secrets/spotify_client_secret
