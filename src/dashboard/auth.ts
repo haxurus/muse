@@ -100,7 +100,7 @@ export default class DashboardAuth {
   }
 
   assertCsrf(request: IncomingMessage, session: DashboardSession): void {
-    const origin = request.headers.origin;
+    const {origin} = request.headers;
     if (origin !== this.config.publicUrl.origin) {
       throw new HttpError(403, 'invalid request origin');
     }
