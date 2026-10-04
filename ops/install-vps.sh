@@ -9,9 +9,10 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE=/srv/docker/muse
 DEPLOY_USER=muse-deploy
+SECRETS_GROUP=muse-secrets
 PUBLIC_KEY_PATH="${1:-}"
 
-for cmd in docker install sshd systemctl iptables openssl visudo; do
+for cmd in docker install sshd systemctl iptables openssl visudo getent groupadd; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Missing required command: $cmd" >&2; exit 1; }
 done
 
@@ -36,8 +37,13 @@ if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "$DEPLOY_USER"
 fi
 
+if ! getent group "$SECRETS_GROUP" >/dev/null 2>&1; then
+  groupadd --system "$SECRETS_GROUP"
+fi
+SECRETS_GID="$(getent group "$SECRETS_GROUP" | cut -d: -f3)"
+
 install -d -m 700 -o root -g root "$BASE"
-install -d -m 700 -o root -g root "$BASE/secrets" "$BASE/backups" "$BASE/.deploy-state"
+install -d -m 700 -o root -g root "$BASE/secrets" "$BASE/backups" "$BASE/.deploy-state" "$BASE/data"
 install -d -m 700 -o 1000 -g 1000 "$BASE/control"
 
 for worker in muse-01 muse-02 muse-03 muse-04 muse-05; do
@@ -45,19 +51,27 @@ for worker in muse-01 muse-02 muse-03 muse-04 muse-05; do
 done
 
 install -m 600 -o root -g root "$REPO_ROOT/deploy/docker-compose.prod.yml" "$BASE/docker-compose.yml"
-install -m 600 -o root -g root "$REPO_ROOT/deploy/workers.json" "$BASE/workers.json"
-install -m 600 -o root -g root "$REPO_ROOT/deploy/nginx.conf" "$BASE/nginx.conf"
+install -m 640 -o root -g "$SECRETS_GROUP" "$REPO_ROOT/deploy/workers.json" "$BASE/workers.json"
+install -m 644 -o root -g root "$REPO_ROOT/deploy/nginx.conf" "$BASE/nginx.conf"
 
 if [[ ! -f "$BASE/.env" ]]; then
   install -m 600 -o root -g root "$REPO_ROOT/deploy/.env.production.example" "$BASE/.env"
 fi
 
+if grep -q '^MUSE_SECRET_GID=' "$BASE/.env"; then
+  sed -i "s/^MUSE_SECRET_GID=.*/MUSE_SECRET_GID=$SECRETS_GID/" "$BASE/.env"
+else
+  printf '\nMUSE_SECRET_GID=%s\n' "$SECRETS_GID" >> "$BASE/.env"
+fi
+chmod 600 "$BASE/.env"
+chown root:root "$BASE/.env"
+
 for secret in   discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05   youtube_api_key spotify_client_id spotify_client_secret orchestrator_discord_client_secret; do
   if [[ ! -e "$BASE/secrets/$secret" ]]; then
-    install -m 600 -o root -g root /dev/null "$BASE/secrets/$secret"
+    install -m 640 -o root -g "$SECRETS_GROUP" /dev/null "$BASE/secrets/$secret"
   else
-    chmod 600 "$BASE/secrets/$secret"
-    chown root:root "$BASE/secrets/$secret"
+    chmod 640 "$BASE/secrets/$secret"
+    chown "root:$SECRETS_GROUP" "$BASE/secrets/$secret"
   fi
 done
 
@@ -67,8 +81,8 @@ for number in 01 02 03 04 05; do
     umask 077
     openssl rand -hex 32 > "$secret"
   fi
-  chmod 600 "$secret"
-  chown root:root "$secret"
+  chmod 640 "$secret"
+  chown "root:$SECRETS_GROUP" "$secret"
 done
 
 install -m 750 -o root -g root "$REPO_ROOT/ops/muse-deploy" /usr/local/sbin/muse-deploy
