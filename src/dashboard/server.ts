@@ -270,7 +270,7 @@ export default class DashboardServer {
     sendJson(response, 200, await this.orchestrator.updateGuildRouting(guildId, {
       ...(body.defaultGroupId === undefined
         ? {}
-        : {defaultGroupId: body.defaultGroupId as string | null}),
+        : {defaultGroupId: body.defaultGroupId}),
       ...(body.categoryGroups === undefined
         ? {}
         : {categoryGroups: body.categoryGroups}),
