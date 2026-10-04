@@ -11,7 +11,6 @@ import {
   disconnectWorkerFromGuild,
   getWorkerStatus,
   putWorkerGuildSettings,
-  WorkerStatus,
 } from './worker-client.js';
 
 const parseJsonPatch = (value: string) => parseStoredSettingsPatch(value);
@@ -122,11 +121,14 @@ export const patchGuildControl = async ({
   }
 
   if (typeof maxConcurrentPlayers !== 'undefined') {
-    if (!Number.isInteger(maxConcurrentPlayers) || Number(maxConcurrentPlayers) < 1 || Number(maxConcurrentPlayers) > workerCount) {
+    if (typeof maxConcurrentPlayers !== 'number'
+      || !Number.isInteger(maxConcurrentPlayers)
+      || maxConcurrentPlayers < 1
+      || maxConcurrentPlayers > workerCount) {
       throw new Error(`maxConcurrentPlayers must be between 1 and ${workerCount}`);
     }
 
-    data.maxConcurrentPlayers = Number(maxConcurrentPlayers);
+    data.maxConcurrentPlayers = maxConcurrentPlayers;
   }
 
   return prisma.managedGuild.update({where: {guildId}, data});
@@ -217,11 +219,14 @@ export const patchWorkerAssignment = async ({
   }
 
   if (typeof input.preferredOrder !== 'undefined') {
-    if (!Number.isInteger(input.preferredOrder) || Number(input.preferredOrder) < 1 || Number(input.preferredOrder) > 1000) {
+    if (typeof input.preferredOrder !== 'number'
+      || !Number.isInteger(input.preferredOrder)
+      || input.preferredOrder < 1
+      || input.preferredOrder > 1000) {
       throw new Error('preferredOrder must be an integer between 1 and 1000');
     }
 
-    data.preferredOrder = Number(input.preferredOrder);
+    data.preferredOrder = input.preferredOrder;
   }
 
   if (typeof input.groupId !== 'undefined') {
@@ -236,7 +241,7 @@ export const patchWorkerAssignment = async ({
       }
     }
 
-    data.groupId = input.groupId as string | null;
+    data.groupId = input.groupId;
   }
 
   if (typeof input.settings !== 'undefined') {
@@ -275,14 +280,13 @@ export const patchWorkersBulk = async ({
     throw new Error('workerIds contains an unknown worker');
   }
 
-  for (const workerId of uniqueIds as string[]) {
-    await patchWorkerAssignment({
-      guildId,
-      workerId,
-      workerIds: knownWorkerIds,
-      input,
-    });
-  }
+  const typedIds = uniqueIds.filter((workerId): workerId is string => typeof workerId === 'string');
+  await Promise.all(typedIds.map(async workerId => patchWorkerAssignment({
+    guildId,
+    workerId,
+    workerIds: knownWorkerIds,
+    input,
+  })));
 };
 
 export const reconcileGuild = async (
@@ -394,7 +398,5 @@ export const selectAvailableWorker = async ({
 
 export const reconcileAllGuilds = async (workers: WorkerDefinition[]) => {
   const guilds = await prisma.managedGuild.findMany();
-  for (const guild of guilds) {
-    await reconcileGuild(guild.guildId, guild.name, workers);
-  }
+  await Promise.all(guilds.map(async guild => reconcileGuild(guild.guildId, guild.name, workers)));
 };
