@@ -7,14 +7,19 @@ import Config from './services/config.js';
 import FileCacheProvider from './services/file-cache.js';
 import PlayerManager from './managers/player.js';
 import ThirdParty from './services/third-party.js';
+import AddQueryToQueue from './services/add-query-to-queue.js';
 import prepareYtDlp from './utils/prepare-yt-dlp.js';
 import {prisma} from './utils/db.js';
 import {Client} from 'discord.js';
 import WorkerControlServer from './control/worker-server.js';
+import PoolWorker from './pool/worker.js';
+import PoolDiscordGateway from './pool/discord-gateway.js';
+import {poolRole} from './pool/runtime.js';
 
-const bot = container.get<Bot>(TYPES.Bot);
+let bot: Bot | PoolDiscordGateway = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
 let workerControlServer: WorkerControlServer | undefined;
+let poolWorker: PoolWorker | undefined;
 
 const shutdown = async (signal: NodeJS.Signals) => {
   if (shuttingDown) {
@@ -25,6 +30,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
   console.log(`Received ${signal}, shutting down...`);
 
   try {
+    poolWorker?.close();
     bot.shutdown();
     await workerControlServer?.close();
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
@@ -49,21 +55,35 @@ const installSignalHandlers = () => {
 };
 
 const startBot = async () => {
-  // Create data directories if necessary
   const config = container.get<Config>(TYPES.Config);
-
   await makeDir(config.DATA_DIR);
   await makeDir(config.CACHE_DIR);
   await makeDir(path.join(config.CACHE_DIR, 'tmp'));
-
   await container.get<FileCacheProvider>(TYPES.FileCache).cleanup();
   await prepareYtDlp(config);
+
+  if (poolRole() !== 'off') {
+    if (!config.WORKER_ID || !config.CONTROL_TOKEN) {
+      throw new Error('Pool mode requires a managed worker identity and control token');
+    }
+
+    const client = container.get<Client>(TYPES.Client);
+    poolWorker = new PoolWorker(config.WORKER_ID, {
+      client,
+      players: container.get<PlayerManager>(TYPES.Managers.Player),
+      media: container.get<AddQueryToQueue>(TYPES.Services.AddQueryToQueue),
+    });
+    bot = new PoolDiscordGateway(config, client, guildId => {
+      poolWorker!.invalidate(guildId);
+    });
+  }
 
   if (config.WORKER_ID) {
     workerControlServer = new WorkerControlServer(
       config,
       container.get<Client>(TYPES.Client),
       container.get<PlayerManager>(TYPES.Managers.Player),
+      poolWorker,
     );
     await workerControlServer.start();
   }

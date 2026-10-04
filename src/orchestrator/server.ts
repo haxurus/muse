@@ -4,6 +4,7 @@ import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
+import PoolApi from '../pool/api.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -21,6 +22,7 @@ export default class OrchestratorServer {
   private server?: Server;
   private readonly workers: WorkerClient[];
   private readonly groups: GuildGroupStore;
+  private readonly poolApi: PoolApi;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
@@ -28,6 +30,7 @@ export default class OrchestratorServer {
       config.groupsFile,
       new Set(config.workers.map(worker => worker.id)),
     );
+    this.poolApi = new PoolApi(config, this.groups);
   }
 
   async start(): Promise<void> {
@@ -67,6 +70,10 @@ export default class OrchestratorServer {
     try {
       if (request.method === 'GET' && request.url === '/health') {
         sendJson(response, 200, {ok: true, workersConfigured: this.workers.length});
+        return;
+      }
+
+      if (await this.poolApi.handle(request, response)) {
         return;
       }
 
@@ -139,6 +146,7 @@ export default class OrchestratorServer {
         && segments[1] === 'guilds'
         && segments[3] === 'groups'
         && request.method === 'DELETE') {
+        this.poolApi.assertGroupUnused(segments[2], segments[4]);
         this.groups.delete(segments[2], segments[4]);
         sendJson(response, 200, {guildId: segments[2], deletedGroupId: segments[4]});
         return;
@@ -149,7 +157,7 @@ export default class OrchestratorServer {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
       const message = error instanceof HttpError ? error.message : 'internal server error';
       if (!(error instanceof HttpError)) {
-        console.error('Orchestrator API error:', error);
+        console.error('Orchestrator API error');
       }
 
       sendJson(response, statusCode, {error: message});
@@ -193,7 +201,14 @@ export default class OrchestratorServer {
 
       const worker = this.workers.find(candidate => candidate.id === result.workerId)!;
       return this.wrap(worker.id, worker.guildSettings(guildId).then(settings => ({
-        status: result.value,
+        status: {
+          workerId: result.value.workerId,
+          discordReady: result.value.discordReady,
+          bot: result.value.bot,
+          guilds: result.value.guilds.filter(guild => guild.id === guildId),
+          players: result.value.players.filter(player => player.guildId === guildId),
+          uptimeSeconds: result.value.uptimeSeconds,
+        },
         settings,
       })));
     }));
@@ -212,7 +227,6 @@ export default class OrchestratorServer {
 
     const body = input as {workerIds?: unknown; settings?: unknown};
     const patch = sanitizeGuildSettingsPatch(body.settings);
-
     let selected: WorkerClient[];
     if (body.workerIds === undefined) {
       const statuses = await this.workerStatuses();
@@ -221,8 +235,7 @@ export default class OrchestratorServer {
         .map(result => result.workerId));
       selected = this.workers.filter(worker => presentIds.has(worker.id));
     } else {
-      if (!Array.isArray(body.workerIds)
-        || body.workerIds.length === 0
+      if (!Array.isArray(body.workerIds) || body.workerIds.length === 0
         || body.workerIds.some(workerId => typeof workerId !== 'string')) {
         throw new HttpError(400, 'workerIds must be a non-empty string array');
       }
@@ -240,11 +253,7 @@ export default class OrchestratorServer {
       throw new HttpError(404, 'no matching workers are available in that guild');
     }
 
-    const results = await Promise.all(selected.map(async worker => this.wrap(
-      worker.id,
-      worker.updateGuildSettings(guildId, patch),
-    )));
-
+    const results = await Promise.all(selected.map(async worker => this.wrap(worker.id, worker.updateGuildSettings(guildId, patch))));
     return {
       guildId,
       requestedWorkers: selected.map(worker => worker.id),
@@ -255,17 +264,9 @@ export default class OrchestratorServer {
 
   private async wrap<T>(workerId: string, promise: Promise<T>): Promise<WorkerResult<T>> {
     try {
-      return {
-        workerId,
-        ok: true,
-        value: await promise,
-      };
+      return {workerId, ok: true, value: await promise};
     } catch (error: unknown) {
-      return {
-        workerId,
-        ok: false,
-        error: errorLabel(error),
-      };
+      return {workerId, ok: false, error: errorLabel(error)};
     }
   }
 }

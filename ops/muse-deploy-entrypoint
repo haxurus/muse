@@ -10,8 +10,13 @@ case "$command_line" in
   rollback)
     exec sudo -n /usr/local/sbin/muse-deploy rollback
     ;;
-  deploy ghcr.io/haxurus/muse@sha256:*)
+  "deploy ghcr.io/haxurus/muse@sha256:"*)
     image=${command_line#deploy }
+    digest=${image#ghcr.io/haxurus/muse@sha256:}
+    [ "${#digest}" -eq 64 ] || exit 64
+    case "$digest" in
+      *[!0123456789abcdef]*) exit 64 ;;
+    esac
     exec sudo -n /usr/local/sbin/muse-deploy deploy "$image"
     ;;
   *)

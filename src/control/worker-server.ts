@@ -5,6 +5,8 @@ import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
 import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
+import type PoolWorker from '../pool/worker.js';
+import {isDiscordId, parseEnvelope} from '../pool/protocol.js';
 
 export default class WorkerControlServer {
   private server?: Server;
@@ -13,6 +15,7 @@ export default class WorkerControlServer {
     private readonly config: Config,
     private readonly client: Client,
     private readonly playerManager: PlayerManager,
+    private readonly playback?: PoolWorker,
   ) {}
 
   async start(): Promise<void> {
@@ -57,11 +60,7 @@ export default class WorkerControlServer {
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       if (request.method === 'GET' && request.url === '/health') {
-        sendJson(response, 200, {
-          ok: true,
-          workerId: this.config.WORKER_ID,
-          discordReady: this.client.isReady(),
-        });
+        sendJson(response, 200, {ok: true, workerId: this.config.WORKER_ID, discordReady: this.client.isReady()});
         return;
       }
 
@@ -73,6 +72,10 @@ export default class WorkerControlServer {
       const segments = getPathSegments(request);
       if (request.method === 'GET' && segments.join('/') === 'v1/status') {
         sendJson(response, 200, this.status());
+        return;
+      }
+
+      if (await this.handlePlayback(request, response, segments)) {
         return;
       }
 
@@ -99,27 +102,47 @@ export default class WorkerControlServer {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
       const message = error instanceof HttpError ? error.message : 'internal server error';
       if (!(error instanceof HttpError)) {
-        console.error('Worker control API error:', error);
+        console.error('Worker control API error');
       }
 
       sendJson(response, statusCode, {error: message});
     }
   }
 
+  private async handlePlayback(request: IncomingMessage, response: ServerResponse, segments: string[]): Promise<boolean> {
+    const reserve = segments.length === 5 && segments[4] === 'reserve';
+    if ((!reserve && segments.length !== 4) || segments[0] !== 'v1' || segments[1] !== 'guilds' || segments[3] !== 'playback') {
+      return false;
+    }
+
+    if (!this.playback || !isDiscordId(segments[2])) {
+      throw new HttpError(503, 'Pool worker non disponibile.');
+    }
+
+    if (request.method === 'GET' && !reserve) {
+      sendJson(response, 200, this.playback.state(segments[2]));
+      return true;
+    }
+
+    if (request.method !== 'POST') {
+      throw new HttpError(405, 'Metodo non consentito.');
+    }
+
+    const envelope = parseEnvelope(await readJsonBody(request));
+    if (envelope.command.guildId !== segments[2]) {
+      throw new HttpError(400, 'Discord guild mismatch.');
+    }
+
+    sendJson(response, 200, reserve ? await this.playback.reserve(envelope) : await this.playback.execute(envelope));
+    return true;
+  }
+
   private status() {
     return {
       workerId: this.config.WORKER_ID,
       discordReady: this.client.isReady(),
-      bot: this.client.user
-        ? {
-          id: this.client.user.id,
-          username: this.client.user.username,
-        }
-        : null,
-      guilds: this.client.guilds.cache.map(guild => ({
-        id: guild.id,
-        name: guild.name,
-      })),
+      bot: this.client.user ? {id: this.client.user.id, username: this.client.user.username} : null,
+      guilds: this.client.guilds.cache.map(guild => ({id: guild.id, name: guild.name})),
       players: this.playerManager.snapshot(),
       uptimeSeconds: Math.floor(process.uptime()),
     };

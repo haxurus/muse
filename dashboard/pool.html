@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Muse Control - Regole del pool</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+  <main class="main">
+    <header class="topbar">
+      <div><p class="eyebrow">MUSE CONTROL</p><h1>Regole del pool</h1></div>
+      <a class="button ghost" href="/">Torna ai bot e ai gruppi</a>
+    </header>
+    <section class="panel">
+      <label for="pool-guild">Server Discord</label>
+      <select id="pool-guild" class="text-input" disabled aria-label="Server Discord"></select>
+      <p class="muted">Ogni server conserva le proprie regole. Le modifiche richiedono i permessi di amministrazione Discord.</p>
+      <p class="muted">Le associazioni diventano operative quando il gestore della piattaforma abilita il pool. Gli ID di vocali e categorie si copiano dalla modalita sviluppatore di Discord.</p>
+    </section>
+    <div id="guild-content"></div>
+  </main>
+  <script src="/assets/pool-routing.js" defer></script>
+</body>
+</html>

@@ -13,7 +13,7 @@
       <div class="brand-mark">M</div>
       <p class="eyebrow">MUSE CONTROL</p>
       <h1>Gestisci i tuoi music bot</h1>
-      <p class="muted">Accedi con Discord. Vedrai soltanto i server che puoi amministrare e nei quali Muse è disponibile.</p>
+      <p class="muted">Accedi con Discord. Vedrai soltanto i server che puoi amministrare e nei quali Muse e disponibile.</p>
       <a class="button primary" href="/auth/discord">Accedi con Discord</a>
     </section>
   </div>
@@ -22,22 +22,15 @@
     <aside class="sidebar">
       <div class="brand-row">
         <div class="brand-mark small">M</div>
-        <div>
-          <strong>Muse Control</strong>
-          <span>Orchestrator</span>
-        </div>
+        <div><strong>Muse Control</strong><span>Orchestrator</span></div>
       </div>
-
+      <a class="button ghost" href="/pool">Regole del pool</a>
       <div class="section-label">SERVER</div>
       <nav id="guild-list" class="guild-list" aria-label="Server Discord"></nav>
-
       <div class="sidebar-footer">
         <div class="user-row">
           <img id="user-avatar" class="avatar" alt="">
-          <div class="user-copy">
-            <strong id="user-name"></strong>
-            <span id="user-username"></span>
-          </div>
+          <div class="user-copy"><strong id="user-name"></strong><span id="user-username"></span></div>
         </div>
         <button id="logout-button" class="button ghost full">Esci</button>
       </div>
@@ -52,19 +45,14 @@
         </div>
         <div id="status-pill" class="status-pill">In attesa</div>
       </header>
-
       <section id="empty-state" class="panel empty-state">
         <h2>Nessun server selezionato</h2>
         <p class="muted">Qui potrai gestire i worker Muse singolarmente, a gruppi temporanei o tutti insieme.</p>
       </section>
-
       <div id="guild-content" hidden>
         <section class="panel">
           <div class="panel-heading">
-            <div>
-              <p class="section-label">WORKER</p>
-              <h2>Music bot disponibili</h2>
-            </div>
+            <div><p class="section-label">WORKER</p><h2>Music bot disponibili</h2></div>
             <div class="button-row">
               <button id="select-all" class="button ghost">Seleziona tutti</button>
               <button id="select-none" class="button ghost">Nessuno</button>
@@ -72,24 +60,20 @@
           </div>
           <div id="worker-grid" class="worker-grid"></div>
         </section>
-
         <section class="panel">
           <div class="panel-heading">
             <div>
-              <p class="section-label">GRUPPI</p>
-              <h2>Gruppi worker del server</h2>
+              <p class="section-label">GRUPPI</p><h2>Gruppi worker del server</h2>
               <p class="muted">Crea combinazioni riutilizzabili come 3+2, 4+1 o qualsiasi gruppo sovrapposto.</p>
             </div>
           </div>
-
           <div id="group-list" class="group-list"></div>
-
           <div class="group-editor">
             <div class="group-editor-copy">
               <strong id="group-editor-title">Nuovo gruppo</strong>
               <span id="group-editor-hint" class="muted">Seleziona i worker sopra, assegna un nome e salva.</span>
             </div>
-            <input id="group-name" class="text-input" type="text" maxlength="48" autocomplete="off" placeholder="Es. Principali">
+            <input id="group-name" class="text-input" type="text" maxlength="48" autocomplete="off" placeholder="Es. Principali" aria-label="Nome del gruppo">
             <div id="group-offline-row" class="offline-row" hidden>
               <span id="group-offline-note" class="muted"></span>
               <button id="drop-offline-members" class="button ghost" type="button">Rimuovi non disponibili</button>
@@ -99,24 +83,20 @@
               <button id="save-group" class="button primary" type="button">Crea gruppo</button>
             </div>
           </div>
-          <p id="group-message" class="muted"></p>
+          <p id="group-message" class="muted" role="status"></p>
         </section>
-
         <section class="panel">
           <div class="panel-heading">
             <div>
-              <p class="section-label">CONFIGURAZIONE</p>
-              <h2>Impostazioni selezionate</h2>
+              <p class="section-label">CONFIGURAZIONE</p><h2>Impostazioni selezionate</h2>
               <p class="muted">Attiva solo i campi che vuoi modificare. Le altre impostazioni restano invariate.</p>
             </div>
           </div>
-
           <form id="settings-form" class="settings-grid"></form>
-
           <div class="apply-row">
             <div>
               <strong id="selection-summary">0 worker selezionati</strong>
-              <p id="form-message" class="muted"></p>
+              <p id="form-message" class="muted" role="status"></p>
             </div>
             <button id="apply-button" class="button primary" type="button">Applica configurazione</button>
           </div>
@@ -124,7 +104,6 @@
       </div>
     </main>
   </div>
-
   <script src="/assets/dashboard.js" defer></script>
 </body>
 </html>

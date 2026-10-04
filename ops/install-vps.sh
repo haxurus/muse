@@ -81,6 +81,7 @@ for worker in 01 02 03 04 05; do
 done
 
 ensure_generated_secret orchestrator_api_token
+ensure_generated_secret pool_client_token
 ensure_runtime_secret dashboard_discord_client_secret
 ensure_runtime_secret youtube_api_key
 ensure_runtime_secret spotify_client_id
@@ -105,9 +106,9 @@ install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "$DEPLOY_HOME/.ssh"
 if [[ -n "$PUBLIC_KEY_PATH" ]]; then
   [[ -f "$PUBLIC_KEY_PATH" ]] || { echo "Public key not found: $PUBLIC_KEY_PATH" >&2; exit 1; }
   public_key="$(tr -d '\r\n' < "$PUBLIC_KEY_PATH")"
-  [[ "$public_key" == ssh-ed25519 * ]] || { echo "Only an ssh-ed25519 deploy key is accepted." >&2; exit 1; }
+  [[ "$public_key" == "ssh-ed25519 "* ]] || { echo "Only an ssh-ed25519 deploy key is accepted." >&2; exit 1; }
 
-  printf 'restrict,command="/usr/local/libexec/muse-deploy-entrypoint" %s\n' "$public_key"     > "$DEPLOY_HOME/.ssh/authorized_keys"
+  printf 'restrict,command="/usr/local/libexec/muse-deploy-entrypoint" %s\n' "$public_key" > "$DEPLOY_HOME/.ssh/authorized_keys"
   chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_HOME/.ssh/authorized_keys"
   chmod 600 "$DEPLOY_HOME/.ssh/authorized_keys"
 elif [[ ! -s "$DEPLOY_HOME/.ssh/authorized_keys" ]]; then
@@ -129,4 +130,5 @@ echo "  4. Set MUSE_DASHBOARD_PUBLIC_URL and MUSE_DASHBOARD_DISCORD_CLIENT_ID in
 echo "  5. Register <public-url>/auth/discord/callback in the Discord OAuth application"
 echo "  6. Optionally fill both Spotify secret files"
 echo "  7. Configure NPM to proxy the dashboard hostname to muse-dashboard:8080"
-echo "  8. Do not enable automatic production deploy until validation is complete"
+echo "  8. Review docs/POOL.md before enabling MUSE_POOL_ENABLED=true"
+echo "  9. Do not enable automatic production deploy until staging validation is complete"

@@ -7,6 +7,8 @@ x-worker-environment: &worker-environment
   MUSE_READY_FILE: /tmp/muse-ready
   MUSE_CONTROL_HOST: 0.0.0.0
   MUSE_CONTROL_PORT: "3101"
+  MUSE_POOL_ENABLED: ${MUSE_POOL_ENABLED:-false}
+  MUSE_POOL_ROLE: worker
   YT_DLP_AUTO_UPDATE: "false"
 
 x-worker-common: &worker-common
@@ -130,8 +132,11 @@ services:
       MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       MUSE_WORKERS_FILE: /config/workers.json
       MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json
+      MUSE_POOL_ENABLED: ${MUSE_POOL_ENABLED:-false}
+      MUSE_POOL_CLIENT_TOKEN_FILE: /run/secrets/pool_client_token
     secrets:
       - orchestrator_api_token
+      - pool_client_token
       - control_token_01
       - control_token_02
       - control_token_03
@@ -178,11 +183,14 @@ services:
     environment:
       <<: *worker-environment
       MUSE_WORKER_ID: muse-01
+      MUSE_POOL_ROLE: controller
+      MUSE_POOL_CLIENT_TOKEN_FILE: /run/secrets/pool_client_token
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_01
       MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_01
     secrets:
       - discord_token_01
       - control_token_01
+      - pool_client_token
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
@@ -319,6 +327,8 @@ networks:
       com.docker.network.bridge.name: muse-c05
 
 secrets:
+  pool_client_token:
+    file: ./secrets/pool_client_token
   dashboard_discord_client_secret:
     file: ./secrets/dashboard_discord_client_secret
   orchestrator_api_token:

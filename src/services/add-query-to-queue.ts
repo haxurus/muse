@@ -36,9 +36,18 @@ export default class AddQueryToQueue {
     @inject(TYPES.KeyValueCache) cache: KeyValueCacheProvider) {
     this.sponsorBlockTimeoutDelay = config.SPONSORBLOCK_TIMEOUT;
     this.sponsorBlock = config.ENABLE_SPONSORBLOCK
-      ? new SponsorBlock('muse-sb-integration') // UserID matters only for submissions
+      ? new SponsorBlock('muse-sb-integration')
       : undefined;
     this.cache = cache;
+  }
+
+  // Pool playback reuses provider handling without fabricating a Discord interaction
+  // or transferring an interaction token to another container.
+  public async resolveForPool(query: string, playlistLimit: number): Promise<SongMetadata[]> {
+    const [songs] = await this.getSongs.getSongs(query, playlistLimit, false);
+    return this.config.ENABLE_SPONSORBLOCK
+      ? Promise.all(songs.map(this.skipNonMusicSegments.bind(this)))
+      : songs;
   }
 
   public async addToQueue({
@@ -109,7 +118,6 @@ export default class AddQueryToQueue {
     let shouldShowPlayingEmbed = false;
 
     if (needsConnection) {
-      // Resume / start playback
       await player.play();
 
       if (wasPlayingSong) {
@@ -118,7 +126,6 @@ export default class AddQueryToQueue {
 
       shouldShowPlayingEmbed = true;
     } else if (player.status === STATUS.IDLE) {
-      // Player is idle, start playback instead
       await player.play();
     }
 
@@ -127,9 +134,7 @@ export default class AddQueryToQueue {
     }
 
     if (shouldShowPlayingEmbed) {
-      await interaction.editReply({
-        embeds: [buildPlayingMessageEmbed(player)],
-      });
+      await interaction.editReply({embeds: [buildPlayingMessageEmbed(player)]});
     }
 
     let didSkipCurrentTrack = false;
@@ -142,13 +147,10 @@ export default class AddQueryToQueue {
       }
     }
 
-    // Build response message
-    if (statusMsg !== '') {
-      if (extraMsg === '') {
-        extraMsg = statusMsg;
-      } else {
-        extraMsg = `${statusMsg}, ${extraMsg}`;
-      }
+    if (extraMsg !== '' && statusMsg !== '') {
+      extraMsg = `${statusMsg}, ${extraMsg}`;
+    } else if (statusMsg !== '') {
+      extraMsg = statusMsg;
     }
 
     if (extraMsg !== '') {
@@ -173,10 +175,7 @@ export default class AddQueryToQueue {
     try {
       const segments = await this.cache.wrap(
         async () => this.sponsorBlock?.getSegments(song.url, ['music_offtopic']),
-        {
-          key: song.url, // Value is too short for hashing
-          expiresIn: ONE_HOUR_IN_SECONDS,
-        },
+        {key: song.url, expiresIn: ONE_HOUR_IN_SECONDS},
       ) ?? [];
       const originalStart = song.offset;
       const originalEnd = song.offset + song.length;
@@ -185,7 +184,6 @@ export default class AddQueryToQueue {
         .sort((a, b) => a.startTime - b.startTime)
         .reduce((acc: Array<{startTime: number; endTime: number}>, {startTime, endTime}) => {
           const previousSegment = acc[acc.length - 1];
-          // If segments overlap merge
           if (previousSegment && previousSegment.endTime > startTime) {
             acc[acc.length - 1].endTime = Math.max(previousSegment.endTime, endTime);
           } else {
@@ -197,8 +195,6 @@ export default class AddQueryToQueue {
 
       const intro = skipSegments[0];
       const outro = skipSegments.at(-1);
-      // SponsorBlock timestamps refer to the full source, including when this
-      // queue entry is only a chapter. Clamp both trims to that entry's interval.
       const start = intro && intro.startTime <= originalStart + 2
         ? Math.min(originalEnd, Math.max(originalStart, Math.floor(intro.endTime)))
         : originalStart;
@@ -207,7 +203,6 @@ export default class AddQueryToQueue {
         : originalEnd;
       song.offset = start;
       song.length = Math.max(0, end - start);
-
       return song;
     } catch (e) {
       if (!(e instanceof Error)) {
@@ -216,12 +211,10 @@ export default class AddQueryToQueue {
       }
 
       if (!e.message.includes('404')) {
-        // Don't log 404 response, it just means that there are no segments for given video
         console.warn(`Could not fetch skip segments for "${song.url}" :`, e);
       }
 
       if (e.message.includes('504')) {
-        // Stop fetching SponsorBlock data when servers are down
         this.sponsorBlockDisabledUntil = new Date(new Date().getTime() + (this.sponsorBlockTimeoutDelay * 60_000));
       }
 

@@ -31,7 +31,7 @@ env_value() {
 }
 
 validate_runtime_config() {
-  local secret client_id public_url
+  local secret client_id public_url pool_token
 
   for secret in \
     discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
@@ -42,6 +42,22 @@ validate_runtime_config() {
       exit 64
     }
   done
+
+  [[ -f "$BASE/secrets/pool_client_token" ]] || {
+    echo "Missing pool_client_token mount. Rerun the current VPS installer." >&2
+    exit 64
+  }
+  if [[ "$(env_value MUSE_POOL_ENABLED)" == "true" ]]; then
+    pool_token="$(tr -d '\r\n' < "$BASE/secrets/pool_client_token")"
+    [[ "$pool_token" =~ ^[a-f0-9]{64}$ ]] || {
+      echo "Invalid pool_client_token; expected 32 random bytes encoded as hex." >&2
+      exit 64
+    }
+    [[ "$pool_token" != "$(tr -d '\r\n' < "$BASE/secrets/orchestrator_api_token")" ]] || {
+      echo "Playback and administrative credentials must be distinct." >&2
+      exit 64
+    }
+  fi
 
   client_id="$(env_value MUSE_DASHBOARD_DISCORD_CLIENT_ID)"
   public_url="$(env_value MUSE_DASHBOARD_PUBLIC_URL)"
@@ -99,7 +115,7 @@ wait_healthy() {
 }
 
 stop_for_backup() {
-  compose stop -t 30 "${SERVICES[@]}" >/dev/null 2>&1 || true
+  compose stop -t 30 "${SERVICES[@]}"
 }
 
 backup_db() {
@@ -119,9 +135,11 @@ backup_db() {
     done
   done
 
-  if [[ -f "$BASE/data/orchestrator/groups.json" ]]; then
-    files+=("data/orchestrator/groups.json")
-  fi
+  for file in groups.json pool-routes.json; do
+    if [[ -f "$BASE/data/orchestrator/$file" ]]; then
+      files+=("data/orchestrator/$file")
+    fi
+  done
 
   if [[ "${#files[@]}" -gt 0 ]]; then
     tar -C "$BASE" -czf "$backup" "${files[@]}"
@@ -131,7 +149,7 @@ backup_db() {
     echo "Fleet state backup: $backup"
   else
     : > "$LAST_BACKUP"
-    echo "No existing worker databases or orchestrator group state to back up."
+    echo "No existing worker databases or orchestrator state to back up."
   fi
 }
 
@@ -140,12 +158,12 @@ restore_backup() {
 
   local backup worker
   backup="$(cat "$LAST_BACKUP")"
-  [[ -f "$backup" ]] || return 0
+  [[ -f "$backup" ]] || { echo "Recorded backup is missing." >&2; return 1; }
 
   for worker in 01 02 03 04 05; do
-    rm -f       "$BASE/data/bot-$worker/db.sqlite"       "$BASE/data/bot-$worker/db.sqlite-wal"       "$BASE/data/bot-$worker/db.sqlite-shm"
+    rm -f "$BASE/data/bot-$worker/db.sqlite" "$BASE/data/bot-$worker/db.sqlite-wal" "$BASE/data/bot-$worker/db.sqlite-shm"
   done
-  rm -f "$BASE/data/orchestrator/groups.json"
+  rm -f "$BASE/data/orchestrator/groups.json" "$BASE/data/orchestrator/pool-routes.json"
 
   tar -C "$BASE" -xzf "$backup"
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$BASE/data"
@@ -178,9 +196,7 @@ deploy_image() {
   fi
 
   set_env_key MUSE_IMAGE "$image"
-  compose up -d --remove-orphans
-
-  if wait_healthy; then
+  if compose up -d --remove-orphans && wait_healthy; then
     printf '%s\n' "$image" > "$CURRENT"
     chmod 600 "$CURRENT" "$PREVIOUS" 2>/dev/null || true
     echo "Muse dashboard, orchestrator and all five workers deployed successfully."
@@ -189,10 +205,10 @@ deploy_image() {
 
   echo "New fleet release failed health checks." >&2
   compose logs --tail=120 "${SERVICES[@]}" >&2 || true
-  compose stop -t 15 "${SERVICES[@]}" >/dev/null 2>&1 || true
+  compose stop -t 30 "${SERVICES[@]}"
 
   if [[ -n "$old" ]]; then
-    echo "Restoring previous application image and worker databases." >&2
+    echo "Restoring previous application image and backed-up state." >&2
     restore_backup
     set_env_key MUSE_IMAGE "$old"
     compose up -d --remove-orphans
@@ -226,7 +242,7 @@ rollback() {
 
   printf '%s\n' "$target" > "$CURRENT"
   [[ -n "$current" ]] && printf '%s\n' "$current" > "$PREVIOUS"
-  echo "Muse fleet rollback completed."
+  echo "Muse fleet image rollback completed. Current databases and routes were retained."
 }
 
 status() {
