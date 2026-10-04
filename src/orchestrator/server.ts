@@ -293,6 +293,10 @@ export default class OrchestratorServer {
       throw new HttpError(404, 'no Muse worker is available in that guild');
     }
 
+    if (!present.some(worker => worker.id === sourceWorkerId)) {
+      throw new HttpError(403, 'source worker is not a member of that guild');
+    }
+
     const config = this.poolStore.getGuild(body.guildId, present.length);
     return this.poolEngine.assign({
       guildId: body.guildId,
