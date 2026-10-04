@@ -1,4 +1,5 @@
 import {Client, Collection, User} from 'discord.js';
+import {existsSync, unlinkSync, writeFileSync} from 'node:fs';
 import {inject, injectable} from 'inversify';
 import ora from 'ora';
 import {TYPES} from './types.js';
@@ -49,7 +50,24 @@ export default class {
     this.commandsByButtonId = new Collection();
   }
 
+  private setReady(ready: boolean): void {
+    if (ready) {
+      writeFileSync(this.config.READY_FILE, 'ready\n', {mode: 0o600});
+      return;
+    }
+
+    if (existsSync(this.config.READY_FILE)) {
+      unlinkSync(this.config.READY_FILE);
+    }
+  }
+
+  public shutdown(): void {
+    this.setReady(false);
+    this.client.destroy();
+  }
+
   public async register(): Promise<void> {
+    this.setReady(false);
     // Load in commands
     for (const command of container.getAll<Command>(TYPES.Command)) {
       // Make sure we can serialize to JSON without errors
@@ -182,10 +200,13 @@ export default class {
       });
 
       spinner.succeed(`Ready! Invite the bot with https://discordapp.com/oauth2/authorize?client_id=${this.client.user?.id ?? ''}&scope=bot%20applications.commands&permissions=36700160`);
+      this.setReady(true);
     });
 
     this.client.on('error', console.error);
     this.client.on('debug', debug);
+    this.client.on('shardDisconnect', () => this.setReady(false));
+    this.client.on('shardResume', () => this.setReady(true));
 
     this.client.on('guildCreate', handleGuildCreate);
     this.client.on('voiceStateUpdate', handleVoiceStateUpdate);
