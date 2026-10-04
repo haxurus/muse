@@ -68,11 +68,12 @@ export default class RemoteCommandRouter {
           throw new Error('gotta be in a voice channel');
         }
 
+        await interaction.deferReply();
         const result = await this.client.action(guildId, interaction.commandName, {
           voiceChannelId: voiceChannel.id,
           requesterId,
         });
-        await interaction.reply(result.message);
+        await interaction.editReply(result.message);
         return;
       }
 
@@ -99,16 +100,18 @@ export default class RemoteCommandRouter {
           throw new Error('gotta be in a voice channel');
         }
 
+        await interaction.deferReply();
         const result = await this.client.action(guildId, 'volume', {
           voiceChannelId: voiceChannel.id,
           requesterId,
           level: interaction.options.getInteger('level', true),
         });
-        await interaction.reply(result.message);
+        await interaction.editReply(result.message);
         return;
       }
 
       case 'queue': {
+        await interaction.deferReply();
         const result = await this.client.read(guildId, 'queue', voiceChannel?.id ?? null);
         const page = interaction.options.getInteger('page') ?? 1;
         const pageSize = interaction.options.getInteger('page-size') ?? 10;
@@ -128,16 +131,17 @@ export default class RemoteCommandRouter {
           : 'Nothing is currently playing.';
         const body = entries.length > 0 ? `${current}\n\n${entries.join('\n')}` : current;
 
-        await interaction.reply({
-          content: `${body}\n\nPage ${page}/${totalPages} · Worker ${result.lease?.workerId ?? 'unknown'}`,
-        });
+        await interaction.editReply(
+          `${body}\n\nPage ${page}/${totalPages} · Worker ${result.lease?.workerId ?? 'unknown'}`,
+        );
         return;
       }
 
       case 'now-playing': {
+        await interaction.deferReply();
         const result = await this.client.read(guildId, 'now-playing', voiceChannel?.id ?? null);
         const current = result.playback.current!;
-        await interaction.reply(
+        await interaction.editReply(
           `**${songLabel(current)}** · ${prettyTime(result.playback.positionSeconds)} / ${prettyTime(current.length)} · Worker ${result.lease?.workerId ?? 'unknown'}`,
         );
         return;
