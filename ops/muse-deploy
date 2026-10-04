@@ -35,7 +35,7 @@ validate_runtime_config() {
 
   for secret in \
     discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
-    youtube_api_key dashboard_discord_client_secret orchestrator_api_token \
+    youtube_api_key dashboard_discord_client_secret orchestrator_api_token orchestrator_controller_token \
     control_token_01 control_token_02 control_token_03 control_token_04 control_token_05; do
     [[ -s "$BASE/secrets/$secret" ]] || {
       echo "Required secret is empty: $secret" >&2
