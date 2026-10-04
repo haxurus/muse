@@ -76,6 +76,31 @@
         <section class="panel">
           <div class="panel-heading">
             <div>
+              <p class="section-label">GRUPPI</p>
+              <h2>Gruppi worker del server</h2>
+              <p class="muted">Crea combinazioni riutilizzabili come 3+2, 4+1 o qualsiasi gruppo sovrapposto.</p>
+            </div>
+          </div>
+
+          <div id="group-list" class="group-list"></div>
+
+          <div class="group-editor">
+            <div class="group-editor-copy">
+              <strong id="group-editor-title">Nuovo gruppo</strong>
+              <span id="group-editor-hint" class="muted">Seleziona i worker sopra, assegna un nome e salva.</span>
+            </div>
+            <input id="group-name" class="text-input" type="text" maxlength="48" autocomplete="off" placeholder="Es. Principali">
+            <div class="button-row">
+              <button id="cancel-group-edit" class="button ghost" type="button" hidden>Annulla</button>
+              <button id="save-group" class="button primary" type="button">Crea gruppo</button>
+            </div>
+          </div>
+          <p id="group-message" class="muted"></p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
               <p class="section-label">CONFIGURAZIONE</p>
               <h2>Impostazioni selezionate</h2>
               <p class="muted">Attiva solo i campi che vuoi modificare. Le altre impostazioni restano invariate.</p>
