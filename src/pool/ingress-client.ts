@@ -1,5 +1,5 @@
 import got from 'got';
-import {ChatInputCommandInteraction, GuildMember} from 'discord.js';
+import {AutocompleteInteraction, ChatInputCommandInteraction, GuildMember} from 'discord.js';
 import Config from '../services/config.js';
 import {getMemberVoiceChannel} from '../utils/channels.js';
 import {signControlRequest} from '../control/signature.js';
@@ -75,4 +75,44 @@ export const routePoolCommand = async (
     retry: {limit: 0},
     followRedirect: false,
   }).json<PoolCommandResult>();
+};
+
+export const routePoolFavoriteAutocomplete = async (
+  config: Config,
+  interaction: AutocompleteInteraction,
+) => {
+  if (!interaction.guild || !interaction.guildId) {
+    return [];
+  }
+
+  const body = JSON.stringify({
+    guildId: interaction.guildId,
+    guildOwnerId: interaction.guild.ownerId,
+    userId: interaction.user.id,
+    subcommand: interaction.options.getSubcommand(),
+    query: interaction.options.getString('name') ?? '',
+  });
+  const requestPath = '/internal/v1/autocomplete';
+  const {timestamp, signature} = signControlRequest(
+    config.WORKER_CONTROL_SECRET,
+    'POST',
+    requestPath,
+    body,
+  );
+
+  const result = await got(`${config.ORCHESTRATOR_INTERNAL_URL.replace(/\/$/u, '')}${requestPath}`, {
+    method: 'POST',
+    body,
+    headers: {
+      'content-type': 'application/json',
+      'x-muse-worker-id': config.WORKER_ID,
+      'x-muse-timestamp': timestamp,
+      'x-muse-signature': signature,
+    },
+    timeout: {request: 5000},
+    retry: {limit: 0},
+    followRedirect: false,
+  }).json<{choices: Array<{name: string; value: string}>}>();
+
+  return result.choices;
 };
