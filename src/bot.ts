@@ -16,6 +16,7 @@ import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
 import {getGuildSettings} from './utils/get-guild-settings.js';
+import {routePoolCommand} from './pool/ingress-client.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -40,6 +41,8 @@ export default class {
   private readonly client: Client;
   private readonly config: Config;
   private readonly shouldRegisterCommandsOnBot: boolean;
+  private readonly commandsEnabled: boolean;
+  private readonly poolIngressEnabled: boolean;
   private readonly commandsByName!: Collection<string, Command>;
   private readonly commandsByButtonId!: Collection<string, Command>;
 
@@ -47,6 +50,8 @@ export default class {
     this.client = client;
     this.config = config;
     this.shouldRegisterCommandsOnBot = config.REGISTER_COMMANDS_ON_BOT;
+    this.commandsEnabled = config.ENABLE_DISCORD_COMMANDS !== false;
+    this.poolIngressEnabled = config.POOL_INGRESS_ENABLED === true;
     this.commandsByName = new Collection();
     this.commandsByButtonId = new Collection();
   }
@@ -83,6 +88,9 @@ export default class {
     // eslint-disable-next-line complexity
     this.client.on('interactionCreate', async interaction => {
       try {
+        if (!this.commandsEnabled) {
+          return;
+        }
         if (interaction.guildId) {
           const settings = await getGuildSettings(interaction.guildId);
           if (!settings.orchestratorEnabled) {
@@ -118,6 +126,32 @@ export default class {
           }
 
           if (command.execute) {
+            if (this.poolIngressEnabled) {
+              if (interaction.commandName === 'config') {
+                await interaction.reply({
+                  content: 'Server music configuration is managed from the Muse Control dashboard.',
+                  ephemeral: true,
+                });
+                return;
+              }
+
+              if (interaction.commandName !== 'favorites') {
+                const ephemeralCommands = new Set(['play', 'resume', 'skip', 'unskip']);
+                await interaction.deferReply({ephemeral: ephemeralCommands.has(interaction.commandName)});
+                const result = await routePoolCommand(this.config, interaction);
+                const response = typeof result.response === 'object'
+                  && result.response !== null
+                  && !Array.isArray(result.response)
+                  ? Object.fromEntries(
+                    Object.entries(result.response as Record<string, unknown>)
+                      .filter(([key]) => key !== 'ephemeral'),
+                  )
+                  : result.response;
+                await interaction.editReply(response as never);
+                return;
+              }
+            }
+
             await command.execute(interaction);
           }
         } else if (interaction.isButton()) {
@@ -170,7 +204,18 @@ export default class {
 
       // Update commands
       const rest = new REST({version: '10'}).setToken(this.config.DISCORD_TOKEN);
-      if (this.shouldRegisterCommandsOnBot) {
+      if (!this.commandsEnabled) {
+        spinner.text = '📡 removing commands from audio-only worker...';
+        await Promise.all([
+          ...this.client.guilds.cache.map(async guild => {
+            await rest.put(
+              Routes.applicationGuildCommands(this.client.user!.id, guild.id),
+              {body: []},
+            );
+          }),
+          rest.put(Routes.applicationCommands(this.client.user!.id), {body: []}),
+        ]);
+      } else if (this.shouldRegisterCommandsOnBot) {
         spinner.text = '📡 updating commands on bot...';
         await rest.put(
           Routes.applicationCommands(this.client.user!.id),
