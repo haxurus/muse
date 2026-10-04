@@ -518,3 +518,13 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+
+.group-select-row {
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.group-select-row:empty {
+  display: none;
+}
