@@ -121,19 +121,25 @@ export const startWorkerControlServer = ({
 
       const settingsMatch = /^\/v1\/guilds\/(\d+)\/settings$/u.exec(requestUrl.pathname);
       if (settingsMatch && request.method === 'GET') {
-        sendJson(response, 200, {settings: await settingsResponse(settingsMatch[1])});
+        sendJson(response, 200, {settings: await settingsResponse(settingsMatch[1]), enabled: (await getGuildSettings(settingsMatch[1])).orchestratorEnabled});
         return;
       }
 
       if (settingsMatch && request.method === 'PUT') {
-        const payload = JSON.parse(body) as {settings?: unknown};
+        const payload = JSON.parse(body) as {settings?: unknown; enabled?: unknown};
         const patch = normalizeSettingsPatch(payload.settings);
         const effective = resolveEffectiveSettings(patch);
+        if (typeof payload.enabled !== 'undefined' && typeof payload.enabled !== 'boolean') {
+          throw new Error('enabled must be a boolean');
+        }
 
         await getGuildSettings(settingsMatch[1]);
         await prisma.setting.update({
           where: {guildId: settingsMatch[1]},
-          data: effective,
+          data: {
+            ...effective,
+            ...(typeof payload.enabled === 'boolean' ? {orchestratorEnabled: payload.enabled} : {}),
+          },
         });
 
         sendJson(response, 200, {settings: await settingsResponse(settingsMatch[1])});
