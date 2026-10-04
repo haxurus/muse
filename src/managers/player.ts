@@ -17,6 +17,15 @@ export default class {
     this.youtubeAPI = youtubeAPI;
   }
 
+  snapshot(): Array<{guildId: string; connected: boolean; channelId: string | null; status: string}> {
+    return [...this.guildPlayers.entries()].map(([guildId, player]) => ({
+      guildId,
+      connected: player.voiceConnection !== null,
+      channelId: player.voiceConnection?.joinConfig.channelId ?? null,
+      status: player.status,
+    }));
+  }
+
   cleanup(): void {
     for (const player of this.guildPlayers.values()) {
       player.stop();
