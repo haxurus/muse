@@ -189,7 +189,7 @@ export default class GuildGroupStore {
       return parsed;
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return structuredClone(EMPTY_STORE);
+        return {version: EMPTY_STORE.version, guilds: {}};
       }
 
       throw error;
