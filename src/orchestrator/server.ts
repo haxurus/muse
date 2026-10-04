@@ -3,6 +3,7 @@ import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from
 import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
+import GuildGroupStore from './guild-group-store.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -19,9 +20,14 @@ const errorLabel = (error: unknown): string => error instanceof Error ? error.na
 export default class OrchestratorServer {
   private server?: Server;
   private readonly workers: WorkerClient[];
+  private readonly groups: GuildGroupStore;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
+    this.groups = new GuildGroupStore(
+      config.groupsFile,
+      new Set(config.workers.map(worker => worker.id)),
+    );
   }
 
   async start(): Promise<void> {
@@ -95,6 +101,49 @@ export default class OrchestratorServer {
         return;
       }
 
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'groups'
+        && request.method === 'GET') {
+        sendJson(response, 200, {guildId: segments[2], groups: this.groups.list(segments[2])});
+        return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'groups'
+        && request.method === 'POST') {
+        sendJson(response, 201, {
+          guildId: segments[2],
+          group: this.groups.create(segments[2], await readJsonBody(request)),
+        });
+        return;
+      }
+
+      if (segments.length === 5
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'groups'
+        && request.method === 'PATCH') {
+        sendJson(response, 200, {
+          guildId: segments[2],
+          group: this.groups.update(segments[2], segments[4], await readJsonBody(request)),
+        });
+        return;
+      }
+
+      if (segments.length === 5
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'groups'
+        && request.method === 'DELETE') {
+        this.groups.delete(segments[2], segments[4]);
+        sendJson(response, 200, {guildId: segments[2], deletedGroupId: segments[4]});
+        return;
+      }
+
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
@@ -152,6 +201,7 @@ export default class OrchestratorServer {
     return {
       guildId,
       workers,
+      groups: this.groups.list(guildId),
     };
   }
 
