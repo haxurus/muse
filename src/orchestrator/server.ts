@@ -295,6 +295,13 @@ export default class OrchestratorServer {
       throw new HttpError(403, 'source worker is not a member of that guild');
     }
 
+    const knownVoiceChannel = present.some(worker => worker.status.guilds
+      .find(guild => guild.id === body.guildId)
+      ?.voiceChannels.some(channel => channel.id === body.voiceChannelId));
+    if (!knownVoiceChannel) {
+      throw new HttpError(400, 'voiceChannelId is not a known voice channel in that guild');
+    }
+
     const config = this.poolStore.getGuild(body.guildId, present.length);
     return this.poolEngine.assign({
       guildId: body.guildId,
