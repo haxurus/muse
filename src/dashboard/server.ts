@@ -205,6 +205,7 @@ export default class DashboardServer {
   private async updateGuild(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
     const {session} = await this.assertGuildAccess(request, guildId, true);
     this.auth.assertCsrf(request, session);
+    this.auth.assertMutationAllowed(session);
 
     const input = await readJsonBody(request);
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
