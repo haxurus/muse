@@ -1,0 +1,7 @@
+[
+  {"id":"muse-01","label":"Music 1","url":"http://muse-01:3001","secretFile":"/run/secrets/worker_control_01"},
+  {"id":"muse-02","label":"Music 2","url":"http://muse-02:3001","secretFile":"/run/secrets/worker_control_02"},
+  {"id":"muse-03","label":"Music 3","url":"http://muse-03:3001","secretFile":"/run/secrets/worker_control_03"},
+  {"id":"muse-04","label":"Music 4","url":"http://muse-04:3001","secretFile":"/run/secrets/worker_control_04"},
+  {"id":"muse-05","label":"Music 5","url":"http://muse-05:3001","secretFile":"/run/secrets/worker_control_05"}
+]
