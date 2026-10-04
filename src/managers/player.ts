@@ -1,6 +1,6 @@
 import {inject, injectable} from 'inversify';
 import {TYPES} from '../types.js';
-import Player from '../services/player.js';
+import Player, {STATUS} from '../services/player.js';
 import FileCacheProvider from '../services/file-cache.js';
 import type YoutubeAPI from '../services/youtube-api.js';
 
@@ -22,7 +22,7 @@ export default class {
       guildId,
       connected: player.voiceConnection !== null,
       channelId: player.voiceConnection?.joinConfig.channelId ?? null,
-      status: player.status,
+      status: STATUS[player.status],
     }));
   }
 
