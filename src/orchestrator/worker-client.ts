@@ -36,12 +36,22 @@ const requestWorker = async <T>(
       'x-muse-timestamp': timestamp,
       'x-muse-signature': signature,
     },
-    timeout: {request: 5000},
+    timeout: {request: method === 'POST' && requestPath.endsWith('/commands') ? 85_000 : 5000},
     retry: {limit: 0},
     followRedirect: false,
-  }).json<T>();
+    responseType: 'json',
+    throwHttpErrors: false,
+  });
 
-  return response;
+  const responseBody = response.body as T | {error?: unknown};
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const error = typeof (responseBody as {error?: unknown}).error === 'string'
+      ? (responseBody as {error: string}).error
+      : `worker returned HTTP ${response.statusCode}`;
+    throw new Error(error.slice(0, 300));
+  }
+
+  return responseBody as T;
 };
 
 export const getWorkerStatus = async (worker: WorkerDefinition) => requestWorker<WorkerStatus>(
