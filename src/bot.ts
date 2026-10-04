@@ -15,6 +15,8 @@ import {generateDependencyReport} from '@discordjs/voice';
 import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
+import {commandVisibleForRole} from './control/managed-commands.js';
+import RemoteCommandRouter from './control/remote-command-router.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -41,6 +43,7 @@ export default class {
   private readonly shouldRegisterCommandsOnBot: boolean;
   private readonly commandsByName!: Collection<string, Command>;
   private readonly commandsByButtonId!: Collection<string, Command>;
+  private readonly remoteCommandRouter?: RemoteCommandRouter;
 
   constructor(@inject(TYPES.Client) client: Client, @inject(TYPES.Config) config: Config) {
     this.client = client;
@@ -48,6 +51,9 @@ export default class {
     this.shouldRegisterCommandsOnBot = config.REGISTER_COMMANDS_ON_BOT;
     this.commandsByName = new Collection();
     this.commandsByButtonId = new Collection();
+    this.remoteCommandRouter = config.BOT_ROLE === 'controller'
+      ? new RemoteCommandRouter(config)
+      : undefined;
   }
 
   public shutdown(): void {
@@ -59,6 +65,10 @@ export default class {
     this.setReady(false);
     // Load in commands
     for (const command of container.getAll<Command>(TYPES.Command)) {
+      if (!commandVisibleForRole(this.config, command)) {
+        continue;
+      }
+
       // Make sure we can serialize to JSON without errors
       try {
         command.slashCommand.toJSON();
@@ -97,6 +107,11 @@ export default class {
           const requiresVC = command.requiresVC instanceof Function ? command.requiresVC(interaction) : command.requiresVC;
           if (requiresVC && interaction.member && !isUserInVoice(interaction.guild, interaction.member.user as User)) {
             await interaction.reply({content: errorMsg('gotta be in a voice channel'), ephemeral: true});
+            return;
+          }
+
+          if (this.remoteCommandRouter?.handles(interaction.commandName)) {
+            await this.remoteCommandRouter.execute(interaction);
             return;
           }
 

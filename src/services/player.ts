@@ -101,6 +101,7 @@ export default class {
   public loopCurrentSong = false;
   public loopCurrentQueue = false;
   private currentChannel: VoiceChannel | undefined;
+  private lastVoiceChannelId: string | null = null;
   private voiceConnectionGeneration = 0;
   private pendingConnection?: {channelId: string; promise: Promise<void>};
   private queue: QueuedSong[] = [];
@@ -139,6 +140,7 @@ export default class {
   }
 
   async connect(channel: VoiceChannel): Promise<void> {
+    this.lastVoiceChannelId = channel.id;
     if (this.pendingConnection?.channelId === channel.id) {
       return this.pendingConnection.promise;
     }
@@ -212,6 +214,10 @@ export default class {
 
   getPosition(): number {
     return this.positionInSeconds;
+  }
+
+  getLastVoiceChannelId(): string | null {
+    return this.lastVoiceChannelId;
   }
 
   async play(allowAgeRestrictedFallback = true): Promise<void> {
@@ -479,6 +485,7 @@ export default class {
 
   stop(): void {
     this.disconnect();
+    this.lastVoiceChannelId = null;
     this.queuePosition = 0;
     this.queue = [];
     this.currentQueueEntryVersion++;

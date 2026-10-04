@@ -9,7 +9,10 @@ export type WorkerPlayerStatus = {
   guildId: string;
   connected: boolean;
   channelId: string | null;
+  lastChannelId: string | null;
   status: string;
+  hasCurrent: boolean;
+  queueSize: number;
 };
 
 export type WorkerStatus = {

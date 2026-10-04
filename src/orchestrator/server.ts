@@ -4,6 +4,9 @@ import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
+import GuildRoutingStore from './guild-routing-store.js';
+import PlaybackLeaseManager from './playback-lease-manager.js';
+import PlaybackOrchestrator from './playback-orchestrator.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -21,12 +24,22 @@ export default class OrchestratorServer {
   private server?: Server;
   private readonly workers: WorkerClient[];
   private readonly groups: GuildGroupStore;
+  private readonly routing: GuildRoutingStore;
+  private readonly playback: PlaybackOrchestrator;
+  private reconcileTimer?: NodeJS.Timeout;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
     this.groups = new GuildGroupStore(
       config.groupsFile,
       new Set(config.workers.map(worker => worker.id)),
+    );
+    this.routing = new GuildRoutingStore(config.routingFile);
+    this.playback = new PlaybackOrchestrator(
+      this.workers,
+      this.groups,
+      this.routing,
+      new PlaybackLeaseManager(),
     );
   }
 
@@ -43,10 +56,23 @@ export default class OrchestratorServer {
       });
     });
 
+    await this.playback.reconcileAll();
+    this.reconcileTimer = setInterval(() => {
+      void this.playback.reconcileAll().catch(error => {
+        console.error('Playback lease reconciliation failed:', error);
+      });
+    }, 15_000);
+    this.reconcileTimer.unref();
+
     console.log(`Muse orchestrator listening on ${this.config.host}:${this.config.port} with ${this.workers.length} workers`);
   }
 
   async close(): Promise<void> {
+    if (this.reconcileTimer) {
+      clearInterval(this.reconcileTimer);
+      this.reconcileTimer = undefined;
+    }
+
     if (!this.server) {
       return;
     }
@@ -70,12 +96,20 @@ export default class OrchestratorServer {
         return;
       }
 
-      if (!hasBearerToken(request, this.config.apiToken)) {
+      const segments = getPathSegments(request);
+      const isPlaybackRoute = segments.length >= 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'playback';
+      const isAdmin = hasBearerToken(request, this.config.apiToken);
+      const isController = isPlaybackRoute
+        && hasBearerToken(request, this.config.controllerToken);
+
+      if (!isAdmin && !isController) {
         sendJson(response, 401, {error: 'unauthorized'});
         return;
       }
 
-      const segments = getPathSegments(request);
       if (request.method === 'GET' && segments.join('/') === 'v1/workers') {
         sendJson(response, 200, {workers: await this.workerStatuses()});
         return;
@@ -99,6 +133,78 @@ export default class OrchestratorServer {
         && request.method === 'PATCH') {
         sendJson(response, 200, await this.updateGuildWorkers(segments[2], await readJsonBody(request)));
         return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'channels'
+        && request.method === 'GET') {
+        sendJson(response, 200, await this.playback.channels(segments[2]));
+        return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'routing'
+        && request.method === 'GET') {
+        sendJson(response, 200, {guildId: segments[2], routing: this.routing.get(segments[2])});
+        return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'routing'
+        && request.method === 'PUT') {
+        sendJson(response, 200, {
+          guildId: segments[2],
+          routing: this.routing.update(segments[2], await readJsonBody(request), this.groups),
+        });
+        return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'playback'
+        && request.method === 'GET') {
+        sendJson(response, 200, await this.playback.state(segments[2]));
+        return;
+      }
+
+      if (segments.length === 5
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'playback') {
+        const action = segments[4];
+        if (request.method === 'POST') {
+          const body = await readJsonBody(request);
+          if (action === 'play') {
+            sendJson(response, 200, await this.playback.play(segments[2], body));
+            return;
+          }
+
+          if (['pause', 'resume', 'skip', 'stop', 'disconnect', 'volume'].includes(action)) {
+            sendJson(response, 200, await this.playback.action(
+              segments[2],
+              action as 'pause' | 'resume' | 'skip' | 'stop' | 'disconnect' | 'volume',
+              body,
+            ));
+            return;
+          }
+        }
+
+        if (request.method === 'GET' && (action === 'queue' || action === 'now-playing')) {
+          const url = new URL(request.url ?? '/', 'http://orchestrator');
+          sendJson(response, 200, await this.playback.read(
+            segments[2],
+            action,
+            url.searchParams.get('voiceChannelId'),
+          ));
+          return;
+        }
       }
 
       if (segments.length === 4
@@ -140,6 +246,7 @@ export default class OrchestratorServer {
         && segments[3] === 'groups'
         && request.method === 'DELETE') {
         this.groups.delete(segments[2], segments[4]);
+        this.routing.removeGroupReferences(segments[2], segments[4]);
         sendJson(response, 200, {guildId: segments[2], deletedGroupId: segments[4]});
         return;
       }

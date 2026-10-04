@@ -19,6 +19,11 @@ const groupOfflineNote = document.getElementById('group-offline-note');
 const saveGroupButton = document.getElementById('save-group');
 const cancelGroupEditButton = document.getElementById('cancel-group-edit');
 const dropOfflineMembersButton = document.getElementById('drop-offline-members');
+const defaultGroupSelect = document.getElementById('default-group-select');
+const categoryRouting = document.getElementById('category-routing');
+const voiceRouting = document.getElementById('voice-routing');
+const routingMessage = document.getElementById('routing-message');
+const saveRoutingButton = document.getElementById('save-routing');
 
 let session = null;
 let selectedGuildId = null;
@@ -435,10 +440,116 @@ const saveGroup = async () => {
   }
 };
 
+const appendGroupOptions = (select, selectedGroupId, emptyLabel) => {
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = emptyLabel;
+  select.append(empty);
+
+  for (const group of guildDetails?.groups ?? []) {
+    const option = document.createElement('option');
+    option.value = group.id;
+    option.textContent = group.name;
+    option.selected = group.id === selectedGroupId;
+    select.append(option);
+  }
+};
+
+const routingRow = (item, selectedGroupId, kind) => {
+  const row = el('div', 'routing-row');
+  const copy = el('div', '');
+  copy.append(
+    el('strong', '', item.name),
+    el('span', '', kind === 'voice'
+      ? (item.parentId ? 'Eredita prima dalla categoria' : 'Canale senza categoria')
+      : 'Regola per tutti i canali della categoria'),
+  );
+
+  const select = document.createElement('select');
+  select.className = 'select-input routing-select';
+  select.dataset.id = item.id;
+  select.dataset.kind = kind;
+  appendGroupOptions(select, selectedGroupId, 'Eredita');
+  row.append(copy, select);
+  return row;
+};
+
+const renderRouting = () => {
+  defaultGroupSelect.replaceChildren();
+  categoryRouting.replaceChildren();
+  voiceRouting.replaceChildren();
+
+  appendGroupOptions(
+    defaultGroupSelect,
+    guildDetails?.routing?.defaultGroupId ?? null,
+    'Tutti i worker disponibili',
+  );
+
+  const categoryRules = guildDetails?.routing?.categoryGroups ?? {};
+  for (const category of guildDetails?.channels?.categories ?? []) {
+    categoryRouting.append(routingRow(category, categoryRules[category.id] ?? null, 'category'));
+  }
+
+  if (categoryRouting.childElementCount === 0) {
+    categoryRouting.append(el('div', 'group-empty', 'Nessuna categoria disponibile.'));
+  }
+
+  const voiceRules = guildDetails?.routing?.voiceChannelGroups ?? {};
+  for (const channel of guildDetails?.channels?.voiceChannels ?? []) {
+    voiceRouting.append(routingRow(channel, voiceRules[channel.id] ?? null, 'voice'));
+  }
+
+  if (voiceRouting.childElementCount === 0) {
+    voiceRouting.append(el('div', 'group-empty', 'Nessun canale vocale disponibile.'));
+  }
+};
+
+const saveRouting = async () => {
+  if (!selectedGuildId) return;
+
+  const categoryGroups = {};
+  const voiceChannelGroups = {};
+
+  for (const select of document.querySelectorAll('.routing-select')) {
+    if (!select.value) continue;
+    if (select.dataset.kind === 'category') categoryGroups[select.dataset.id] = select.value;
+    if (select.dataset.kind === 'voice') voiceChannelGroups[select.dataset.id] = select.value;
+  }
+
+  saveRoutingButton.disabled = true;
+  routingMessage.textContent = '';
+  routingMessage.className = 'muted';
+
+  try {
+    await api(`/api/guilds/${encodeURIComponent(selectedGuildId)}/routing`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': session.csrfToken,
+      },
+      body: JSON.stringify({
+        defaultGroupId: defaultGroupSelect.value || null,
+        categoryGroups,
+        voiceChannelGroups,
+      }),
+    });
+
+    await selectGuild(selectedGuildId);
+    routingMessage.textContent = 'Routing playback aggiornato.';
+    routingMessage.className = 'success';
+  } catch (error) {
+    routingMessage.textContent = error.message;
+    routingMessage.className = 'error';
+  } finally {
+    saveRoutingButton.disabled = false;
+  }
+};
+
 const selectGuild = async guildId => {
   selectedGuildId = guildId;
   formMessage.textContent = '';
   groupMessage.textContent = '';
+  routingMessage.textContent = '';
   resetGroupEditor();
   statusPill.textContent = 'Caricamento';
   statusPill.className = 'status-pill';
@@ -455,7 +566,9 @@ const selectGuild = async guildId => {
     guildContent.hidden = false;
     renderWorkers();
     renderGroups();
-    statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online`;
+    renderRouting();
+    const activeSessions = guildDetails.playback?.leases?.length ?? 0;
+    statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online · ${activeSessions} sessioni`;
     statusPill.className = 'status-pill ok';
   } catch (error) {
     formMessage.textContent = error.message;
@@ -548,6 +661,7 @@ document.getElementById('select-none').addEventListener('click', () => {
 
 applyButton.addEventListener('click', applySettings);
 saveGroupButton.addEventListener('click', saveGroup);
+saveRoutingButton.addEventListener('click', saveRouting);
 
 cancelGroupEditButton.addEventListener('click', () => {
   resetGroupEditor();

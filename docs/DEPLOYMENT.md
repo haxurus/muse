@@ -207,7 +207,7 @@ Muse is considered healthy only after the Discord client has reached ready state
 
 ## 11. Backups
 
-Before replacing a running release the deploy script stops Muse cleanly and archives all five worker SQLite databases plus the orchestrator's per-guild group state.
+Before replacing a running release the deploy script stops Muse cleanly and archives all five worker SQLite databases plus the orchestrator's per-guild group and playback-routing state.
 
 Backups are stored in:
 
@@ -217,7 +217,7 @@ Backups are stored in:
 
 They are root-only and files older than 14 days are removed automatically.
 
-The audio cache is intentionally excluded. The orchestrator group file is included so X+Y layouts are restored together with a rollback.
+The audio cache is intentionally excluded. Both `groups.json` and `routing.json` are included so X+Y layouts and their voice/category routing are restored together with a rollback.
 
 ## 12. Status and rollback
 
@@ -246,3 +246,22 @@ Networks are segmented as follows:
 The host firewall blocks private/link-local destinations from the egress bridge and blocks private control bridges from reaching host services.
 
 Do not attach the dashboard, orchestrator, or workers to Sentinel networks or the Docker socket.
+
+
+## Controller/worker Discord applications
+
+Production assigns roles as follows:
+
+```text
+muse-01 -> controller + audio worker
+muse-02 -> audio worker
+muse-03 -> audio worker
+muse-04 -> audio worker
+muse-05 -> audio worker
+```
+
+All five applications must be invited to each Discord server that should have five-player capacity.
+
+Only `muse-01` exposes managed playback slash commands. Worker applications intentionally clear their slash commands.
+
+The controller mounts the internal orchestrator API token because it must request worker allocations. It does not mount any other worker's Discord token.

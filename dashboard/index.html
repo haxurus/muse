@@ -105,6 +105,40 @@
         <section class="panel">
           <div class="panel-heading">
             <div>
+              <p class="section-label">ROUTING PLAYBACK</p>
+              <h2>Quale gruppo serve ogni vocale</h2>
+              <p class="muted">Priorità: regola della vocale, poi categoria, poi gruppo predefinito. Senza regola il pool usa tutti i worker disponibili.</p>
+            </div>
+          </div>
+
+          <div class="routing-default">
+            <label for="default-group-select">
+              <strong>Gruppo predefinito</strong>
+              <span class="muted">Usato quando non esiste una regola più specifica.</span>
+            </label>
+            <select id="default-group-select" class="select-input"></select>
+          </div>
+
+          <div class="routing-columns">
+            <div>
+              <p class="section-label">CATEGORIE</p>
+              <div id="category-routing" class="routing-list"></div>
+            </div>
+            <div>
+              <p class="section-label">CANALI VOCALI</p>
+              <div id="voice-routing" class="routing-list"></div>
+            </div>
+          </div>
+
+          <div class="apply-row">
+            <p id="routing-message" class="muted"></p>
+            <button id="save-routing" class="button primary" type="button">Salva routing</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
               <p class="section-label">CONFIGURAZIONE</p>
               <h2>Impostazioni selezionate</h2>
               <p class="muted">Attiva solo i campi che vuoi modificare. Le altre impostazioni restano invariate.</p>

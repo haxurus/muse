@@ -18,7 +18,9 @@ Production-specific additions include:
 - restricted GitHub Actions -> VPS deployment;
 - five isolated music workers coordinated by an orchestrator;
 - Muse Control web dashboard with Discord OAuth and per-guild authorization;
-- persistent per-server worker groups for arbitrary X+Y bot combinations.
+- persistent per-server worker groups for arbitrary X+Y bot combinations;
+- automatic guild/voice worker leasing with default, category, and voice-channel group routing;
+- one user-facing controller bot with four commandless secondary audio workers.
 
 Deployment documentation: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)  
 Dashboard/OAuth: [docs/DASHBOARD.md](docs/DASHBOARD.md)  

@@ -11,7 +11,12 @@ describe('dashboard production isolation', () => {
     expect(compose).toContain('dashboard-control:');
     expect(compose).toContain('dashboard-web:');
     expect(compose).toContain('MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json');
+    expect(compose).toContain('MUSE_ORCHESTRATOR_ROUTING_FILE: /state/routing.json');
     expect(compose).toContain('./data/orchestrator:/state');
+    expect(compose).toContain('MUSE_BOT_ROLE: controller');
+    expect(compose.match(/MUSE_BOT_ROLE: worker/gu)).toHaveLength(4);
+    expect(compose).toContain('MUSE_ORCHESTRATOR_CONTROLLER_TOKEN_FILE: /run/secrets/orchestrator_controller_token');
+    expect(compose).toContain('MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_controller_token');
     expect(compose).toContain('proxy_net:');
     expect(compose).not.toContain('/var/run/docker.sock');
     expect(compose).not.toMatch(/ports:\s*\n/u);

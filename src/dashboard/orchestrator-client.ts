@@ -35,6 +35,19 @@ export type GuildSettingsUpdate = {
   settings: Record<string, unknown>;
 };
 
+export type GuildChannels = {
+  guildId: string;
+  categories: Array<{id: string; name: string}>;
+  voiceChannels: Array<{id: string; name: string; parentId: string | null}>;
+};
+
+export type GuildRoutingPolicy = {
+  defaultGroupId: string | null;
+  categoryGroups: Record<string, string>;
+  voiceChannelGroups: Record<string, string>;
+  updatedAt: string;
+};
+
 const options = (token: string) => ({
   headers: {
     authorization: `Bearer ${token}`,
@@ -62,6 +75,40 @@ export default class OrchestratorClient {
       `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/workers`,
       options(this.config.orchestratorToken),
     ).json<OrchestratorGuildWorkers>();
+  }
+
+  async guildChannels(guildId: string): Promise<GuildChannels> {
+    return got.get(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/channels`,
+      options(this.config.orchestratorToken),
+    ).json<GuildChannels>();
+  }
+
+  async guildRouting(guildId: string): Promise<{guildId: string; routing: GuildRoutingPolicy}> {
+    return got.get(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/routing`,
+      options(this.config.orchestratorToken),
+    ).json<{guildId: string; routing: GuildRoutingPolicy}>();
+  }
+
+  async updateGuildRouting(
+    guildId: string,
+    routing: Partial<Pick<GuildRoutingPolicy, 'defaultGroupId' | 'categoryGroups' | 'voiceChannelGroups'>>,
+  ): Promise<{guildId: string; routing: GuildRoutingPolicy}> {
+    return got.put(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/routing`,
+      {
+        ...options(this.config.orchestratorToken),
+        json: routing,
+      },
+    ).json<{guildId: string; routing: GuildRoutingPolicy}>();
+  }
+
+  async guildPlayback(guildId: string): Promise<unknown> {
+    return got.get(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/playback`,
+      options(this.config.orchestratorToken),
+    ).json<unknown>();
   }
 
   async createGuildGroup(guildId: string, body: {name: string; workerIds: string[]}): Promise<unknown> {

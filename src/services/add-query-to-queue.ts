@@ -1,4 +1,4 @@
-import {ChatInputCommandInteraction, GuildMember} from 'discord.js';
+import {ChatInputCommandInteraction, GuildMember, VoiceChannel} from 'discord.js';
 import {inject, injectable} from 'inversify';
 import shuffle from 'array-shuffle';
 import {TYPES} from '../types.js';
@@ -16,6 +16,23 @@ import {ONE_HOUR_IN_SECONDS} from '../utils/constants.js';
 const isSameQueueEntry = (capturedId: number | null, currentId: number | null) => (
   capturedId !== null && capturedId === currentId
 );
+
+export type QueueAddRequest = {
+  guildId: string;
+  targetVoiceChannel: VoiceChannel;
+  textChannelId: string;
+  requesterId: string;
+  query: string;
+  addToFrontOfQueue: boolean;
+  shuffleAdditions: boolean;
+  shouldSplitChapters: boolean;
+  skipCurrentTrack: boolean;
+};
+
+export type QueueAddResult = {
+  message: string;
+  showPlayingEmbed: boolean;
+};
 
 const normalizeSkipError = (error: unknown) => (
   error instanceof Error && error.message === 'No songs in queue to forward to.'
@@ -57,17 +74,48 @@ export default class AddQueryToQueue {
     interaction: ChatInputCommandInteraction;
   }): Promise<void> {
     const guildId = interaction.guild!.id;
+    const [targetVoiceChannel] = getMemberVoiceChannel(interaction.member as GuildMember) ?? getMostPopularVoiceChannel(interaction.guild!);
+    const {queueAddResponseEphemeral} = await getGuildSettings(guildId);
+
+    await interaction.deferReply({ephemeral: queueAddResponseEphemeral});
+
+    const result = await this.addRequest({
+      guildId,
+      targetVoiceChannel,
+      textChannelId: interaction.channel!.id,
+      requesterId: interaction.member!.user.id,
+      query: query.trim(),
+      addToFrontOfQueue,
+      shuffleAdditions,
+      shouldSplitChapters,
+      skipCurrentTrack,
+    });
+
+    const player = this.playerManager.get(guildId);
+    if (result.showPlayingEmbed && player.getCurrent()) {
+      await interaction.editReply({
+        embeds: [buildPlayingMessageEmbed(player)],
+      });
+    }
+
+    await interaction.editReply(result.message);
+  }
+
+  public async addRequest({
+    guildId,
+    targetVoiceChannel,
+    textChannelId,
+    requesterId,
+    query,
+    addToFrontOfQueue,
+    shuffleAdditions,
+    shouldSplitChapters,
+    skipCurrentTrack,
+  }: QueueAddRequest): Promise<QueueAddResult> {
     const player = this.playerManager.get(guildId);
     const currentQueueEntryId = player.getCurrentQueueEntryId();
     const wasPlayingSong = currentQueueEntryId !== null;
-
-    const [targetVoiceChannel] = getMemberVoiceChannel(interaction.member as GuildMember) ?? getMostPopularVoiceChannel(interaction.guild!);
-
-    const settings = await getGuildSettings(guildId);
-
-    const {playlistLimit, queueAddResponseEphemeral} = settings;
-
-    await interaction.deferReply({ephemeral: queueAddResponseEphemeral});
+    const {playlistLimit} = await getGuildSettings(guildId);
 
     let [newSongs, extraMsg] = await this.getSongs.getSongs(query, playlistLimit, shouldSplitChapters);
 
@@ -85,18 +133,16 @@ export default class AddQueryToQueue {
 
     const needsConnection = player.voiceConnection === null;
     if (needsConnection) {
-      // A failed join must not leave an unacknowledged request in the queue.
       await player.connect(targetVoiceChannel);
     } else {
-      // Let an existing session recover without changing its channel or paused state.
       await player.ensureVoiceConnectionReady();
     }
 
     newSongs.forEach((song, index) => {
       player.add({
         ...song,
-        addedInChannelId: interaction.channel!.id,
-        requestedBy: interaction.member!.user.id,
+        addedInChannelId: textChannelId,
+        requestedBy: requesterId,
       }, {
         immediate: addToFrontOfQueue,
         immediateOffset: index,
@@ -104,32 +150,20 @@ export default class AddQueryToQueue {
     });
 
     const firstSong = newSongs[0];
-
     let statusMsg = '';
-    let shouldShowPlayingEmbed = false;
 
     if (needsConnection) {
-      // Resume / start playback
       await player.play();
 
       if (wasPlayingSong) {
         statusMsg = 'resuming playback';
       }
-
-      shouldShowPlayingEmbed = true;
     } else if (player.status === STATUS.IDLE) {
-      // Player is idle, start playback instead
       await player.play();
     }
 
     if (!player.getCurrent()) {
       throw new Error('no playable songs found');
-    }
-
-    if (shouldShowPlayingEmbed) {
-      await interaction.editReply({
-        embeds: [buildPlayingMessageEmbed(player)],
-      });
     }
 
     let didSkipCurrentTrack = false;
@@ -142,7 +176,6 @@ export default class AddQueryToQueue {
       }
     }
 
-    // Build response message
     if (statusMsg !== '') {
       if (extraMsg === '') {
         extraMsg = statusMsg;
@@ -155,11 +188,14 @@ export default class AddQueryToQueue {
       extraMsg = ` (${extraMsg})`;
     }
 
-    if (newSongs.length === 1) {
-      await interaction.editReply(`u betcha, **${firstSong.title}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
-    } else {
-      await interaction.editReply(`u betcha, **${firstSong.title}** and ${newSongs.length - 1} other songs were added to the queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
-    }
+    const message = newSongs.length === 1
+      ? `u betcha, **${firstSong.title}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`
+      : `u betcha, **${firstSong.title}** and ${newSongs.length - 1} other songs were added to the queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`;
+
+    return {
+      message,
+      showPlayingEmbed: needsConnection,
+    };
   }
 
   private async skipNonMusicSegments(song: SongMetadata) {

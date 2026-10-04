@@ -131,6 +131,11 @@ export default class DashboardServer {
           return;
         }
 
+        if (segments.length === 4 && segments[3] === 'routing' && request.method === 'PUT') {
+          await this.updateRouting(request, response, guildId);
+          return;
+        }
+
         if (segments.length === 5 && segments[3] === 'groups' && request.method === 'PATCH') {
           await this.updateGroup(request, response, guildId, segments[4]);
           return;
@@ -205,7 +210,12 @@ export default class DashboardServer {
 
   private async guildResponse(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
     const {guild} = await this.assertGuildAccess(request, guildId, false);
-    const details = await this.orchestrator.guildWorkers(guildId);
+    const [details, channels, routing, playback] = await Promise.all([
+      this.orchestrator.guildWorkers(guildId),
+      this.orchestrator.guildChannels(guildId),
+      this.orchestrator.guildRouting(guildId),
+      this.orchestrator.guildPlayback(guildId),
+    ]);
 
     sendJson(response, 200, {
       guild: {
@@ -214,7 +224,60 @@ export default class DashboardServer {
         iconUrl: guildIconUrl(guild.id, guild.icon),
       },
       ...details,
+      channels,
+      routing: routing.routing,
+      playback,
     });
+  }
+
+  private async updateRouting(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
+    const {session} = await this.assertGuildAccess(request, guildId, true);
+    this.auth.assertCsrf(request, session);
+    this.auth.assertMutationAllowed(session);
+
+    const input = await readJsonBody(request);
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'routing body must be an object');
+    }
+
+    const body = input as {
+      defaultGroupId?: unknown;
+      categoryGroups?: unknown;
+      voiceChannelGroups?: unknown;
+    };
+
+    const isRuleMap = (value: unknown): value is Record<string, string> => (
+      typeof value === 'object'
+      && value !== null
+      && !Array.isArray(value)
+      && Object.entries(value).every(([key, groupId]) => /^\d{10,32}$/u.test(key) && typeof groupId === 'string')
+    );
+
+    if (body.defaultGroupId !== undefined
+      && body.defaultGroupId !== null
+      && typeof body.defaultGroupId !== 'string') {
+      throw new HttpError(400, 'defaultGroupId must be a group id or null');
+    }
+
+    if (body.categoryGroups !== undefined && !isRuleMap(body.categoryGroups)) {
+      throw new HttpError(400, 'categoryGroups must map channel ids to group ids');
+    }
+
+    if (body.voiceChannelGroups !== undefined && !isRuleMap(body.voiceChannelGroups)) {
+      throw new HttpError(400, 'voiceChannelGroups must map channel ids to group ids');
+    }
+
+    sendJson(response, 200, await this.orchestrator.updateGuildRouting(guildId, {
+      ...(body.defaultGroupId === undefined
+        ? {}
+        : {defaultGroupId: body.defaultGroupId}),
+      ...(body.categoryGroups === undefined
+        ? {}
+        : {categoryGroups: body.categoryGroups}),
+      ...(body.voiceChannelGroups === undefined
+        ? {}
+        : {voiceChannelGroups: body.voiceChannelGroups}),
+    }));
   }
 
   private async createGroup(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
