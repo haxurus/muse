@@ -101,7 +101,7 @@ const renderGuilds = () => {
 };
 
 const settingControl = definition => {
-  const row = el('label', 'setting-row');
+  const row = el('div', 'setting-row');
   const enabled = document.createElement('input');
   enabled.type = 'checkbox';
   enabled.className = 'setting-enabled';
@@ -113,13 +113,16 @@ const settingControl = definition => {
   let input;
   if (definition.type === 'boolean') {
     input = document.createElement('select');
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'Seleziona...';
     const yes = document.createElement('option');
     yes.value = 'true';
     yes.textContent = 'Sì';
     const no = document.createElement('option');
     no.value = 'false';
     no.textContent = 'No';
-    input.append(yes, no);
+    input.append(empty, yes, no);
   } else {
     input = document.createElement('input');
     input.type = 'number';
@@ -163,7 +166,7 @@ const syncSuggestedValues = () => {
     const allSame = values.every(value => value === first);
 
     if (!allSame || first === undefined || first === null) {
-      if (input.tagName === 'INPUT') input.value = '';
+      input.value = '';
       continue;
     }
 
@@ -251,6 +254,10 @@ const collectSettings = () => {
     if (!enabled.checked) continue;
 
     if (definition.type === 'boolean') {
+      if (input.value === '') {
+        throw new Error(`Scegli un valore per ${definition.label}`);
+      }
+
       settings[definition.key] = input.value === 'true';
       continue;
     }
@@ -291,11 +298,11 @@ const applySettings = async () => {
     });
 
     const failed = Array.isArray(result.failed) ? result.failed.length : 0;
+    await selectGuild(selectedGuildId);
     formMessage.textContent = failed === 0
       ? 'Configurazione applicata.'
       : `Configurazione applicata con ${failed} worker non aggiornati.`;
     formMessage.className = failed === 0 ? 'success' : 'error';
-    await selectGuild(selectedGuildId);
   } catch (error) {
     formMessage.textContent = error.message;
     formMessage.className = 'error';
