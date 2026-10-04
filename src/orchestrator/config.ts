@@ -1,4 +1,5 @@
 import {readFileSync} from 'node:fs';
+import path from 'node:path';
 
 export type WorkerDefinition = {
   id: string;
@@ -85,6 +86,8 @@ export type OrchestratorConfig = {
   port: number;
   apiToken: string;
   workers: WorkerDefinition[];
+  dataDir: string;
+  poolStorePath: string;
 };
 
 export const loadOrchestratorConfig = (): OrchestratorConfig => {
@@ -98,10 +101,14 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     throw new Error('MUSE_ORCHESTRATOR_TOKEN_FILE must point to a mounted secret');
   }
 
+  const dataDir = path.resolve(process.env.MUSE_ORCHESTRATOR_DATA_DIR ?? './orchestrator-data');
+
   return {
     host: process.env.MUSE_ORCHESTRATOR_HOST ?? '127.0.0.1',
     port,
     apiToken: readRequiredFile(tokenFile, 'orchestrator API token'),
     workers: loadWorkerDefinitions(),
+    dataDir,
+    poolStorePath: path.join(dataDir, 'pool-config.json'),
   };
 };

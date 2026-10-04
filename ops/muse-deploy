@@ -119,6 +119,10 @@ backup_db() {
     done
   done
 
+  if [[ -f "$BASE/data/orchestrator/pool-config.json" ]]; then
+    files+=("data/orchestrator/pool-config.json")
+  fi
+
   if [[ "${#files[@]}" -gt 0 ]]; then
     tar -C "$BASE" -czf "$backup" "${files[@]}"
     chmod 600 "$backup"
@@ -141,6 +145,7 @@ restore_backup() {
   for worker in 01 02 03 04 05; do
     rm -f       "$BASE/data/bot-$worker/db.sqlite"       "$BASE/data/bot-$worker/db.sqlite-wal"       "$BASE/data/bot-$worker/db.sqlite-shm"
   done
+  rm -f "$BASE/data/orchestrator/pool-config.json"
 
   tar -C "$BASE" -xzf "$backup"
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$BASE/data"

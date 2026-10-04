@@ -127,6 +127,15 @@ export default class DashboardServer {
         }
       }
 
+      if (segments.length === 4
+        && segments[0] === 'api'
+        && segments[1] === 'guilds'
+        && segments[3] === 'pool'
+        && request.method === 'PUT') {
+        await this.updateGuildPool(request, response, segments[2]);
+        return;
+      }
+
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
@@ -190,7 +199,10 @@ export default class DashboardServer {
 
   private async guildResponse(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
     const {guild} = await this.assertGuildAccess(request, guildId, false);
-    const details = await this.orchestrator.guildWorkers(guildId);
+    const [details, pool] = await Promise.all([
+      this.orchestrator.guildWorkers(guildId),
+      this.orchestrator.guildPool(guildId),
+    ]);
 
     sendJson(response, 200, {
       guild: {
@@ -199,7 +211,28 @@ export default class DashboardServer {
         iconUrl: guildIconUrl(guild.id, guild.icon),
       },
       ...details,
+      pool,
     });
+  }
+
+  private async updateGuildPool(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
+    const {session} = await this.assertGuildAccess(request, guildId, true);
+    this.auth.assertCsrf(request, session);
+    this.auth.assertMutationAllowed(session);
+
+    const input = await readJsonBody(request);
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      throw new HttpError(400, 'pool configuration must be an object');
+    }
+
+    sendJson(
+      response,
+      200,
+      await this.orchestrator.updateGuildPool(
+        guildId,
+        input as Parameters<OrchestratorClient['updateGuildPool']>[1],
+      ),
+    );
   }
 
   private async updateGuild(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {

@@ -98,6 +98,7 @@ export default class {
   public voiceConnection: VoiceConnection | null = null;
   public status = STATUS.PAUSED;
   public guildId: string;
+  public lastVoiceChannelId: string | null = null;
   public loopCurrentSong = false;
   public loopCurrentQueue = false;
   private currentChannel: VoiceChannel | undefined;
@@ -144,6 +145,7 @@ export default class {
     }
 
     this.disconnect();
+    this.lastVoiceChannelId = channel.id;
     const promise = this.connectWithRetries(channel, this.voiceConnectionGeneration);
     this.pendingConnection = {channelId: channel.id, promise};
 

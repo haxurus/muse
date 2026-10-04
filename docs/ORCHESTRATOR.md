@@ -18,14 +18,12 @@ Implemented:
 - single-worker, subset, or all-present-worker settings updates;
 - fleet health checks, database backup, deploy and rollback awareness;
 - Discord OAuth dashboard with guild-level authorization;
-- one/subset/all worker settings management from the dashboard.
+- one/subset/all worker settings management from the dashboard;
+- persistent per-guild worker groups and quotas;
+- automatic voice-channel worker assignment.
 
 Not implemented yet:
 
-- persistent per-guild worker groups;
-- automatic voice-channel worker assignment;
-- player reservations/leases;
-- per-guild quotas;
 - audit log UI.
 
 ## Container topology
@@ -104,3 +102,7 @@ This is the API primitive the dashboard uses for:
 - one bot;
 - any arbitrary subset of bots;
 - all bots available in a guild.
+
+## Pool routing
+
+See [POOL.md](POOL.md) for worker grouping, quota enforcement, reservations and voice-channel assignment.
