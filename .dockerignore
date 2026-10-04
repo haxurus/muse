@@ -2,6 +2,7 @@
 .github
 node_modules
 data
+control
 dist
 dts
 coverage
@@ -9,8 +10,13 @@ coverage
 .env.*
 secrets
 backups
+tests
+deploy
+docs
+ops
+security
 *.log
+*.md
 Dockerfile*
 docker-compose*.yml
-README.md
-SECURITY.md
+.release-it.json
