@@ -81,6 +81,7 @@ for worker in 01 02 03 04 05; do
 done
 
 ensure_generated_secret orchestrator_api_token
+ensure_generated_secret orchestrator_controller_token
 ensure_runtime_secret dashboard_discord_client_secret
 ensure_runtime_secret youtube_api_key
 ensure_runtime_secret spotify_client_id
