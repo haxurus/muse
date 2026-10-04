@@ -130,6 +130,7 @@ services:
       MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       MUSE_WORKERS_FILE: /config/workers.json
       MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json
+      MUSE_ORCHESTRATOR_ROUTING_FILE: /state/routing.json
     secrets:
       - orchestrator_api_token
       - control_token_01
@@ -178,11 +179,15 @@ services:
     environment:
       <<: *worker-environment
       MUSE_WORKER_ID: muse-01
+      MUSE_BOT_ROLE: controller
+      MUSE_ORCHESTRATOR_URL: http://orchestrator:3100
+      MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_01
       MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_01
     secrets:
       - discord_token_01
       - control_token_01
+      - orchestrator_api_token
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
@@ -197,6 +202,7 @@ services:
     environment:
       <<: *worker-environment
       MUSE_WORKER_ID: muse-02
+      MUSE_BOT_ROLE: worker
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_02
       MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_02
     secrets:
@@ -216,6 +222,7 @@ services:
     environment:
       <<: *worker-environment
       MUSE_WORKER_ID: muse-03
+      MUSE_BOT_ROLE: worker
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_03
       MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_03
     secrets:
@@ -235,6 +242,7 @@ services:
     environment:
       <<: *worker-environment
       MUSE_WORKER_ID: muse-04
+      MUSE_BOT_ROLE: worker
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_04
       MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_04
     secrets:
@@ -254,6 +262,7 @@ services:
     environment:
       <<: *worker-environment
       MUSE_WORKER_ID: muse-05
+      MUSE_BOT_ROLE: worker
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_05
       MUSE_CONTROL_TOKEN_FILE: /run/secrets/control_token_05
     secrets:
