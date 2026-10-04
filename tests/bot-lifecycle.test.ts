@@ -167,6 +167,8 @@ const makeConfig = (registerCommandsOnBot: boolean, activityUrl = '') => ({
   BOT_STATUS: 'idle' as const,
   DISCORD_TOKEN: 'fake-token',
   REGISTER_COMMANDS_ON_BOT: registerCommandsOnBot,
+  ENABLE_DISCORD_COMMANDS: true,
+  POOL_INGRESS_ENABLED: false,
 });
 
 const makeClient = (guildIds: string[] = []) => {
