@@ -142,14 +142,15 @@ export const withGuildPoolLock = async <T>(guildId: string, operation: () => Pro
   const current = new Promise<void>(resolve => {
     release = resolve;
   });
-  guildLocks.set(guildId, previous.then(() => current));
+  const queued = previous.then(() => current);
+  guildLocks.set(guildId, queued);
 
   await previous;
   try {
     return await operation();
   } finally {
     release();
-    if (guildLocks.get(guildId) === current) {
+    if (guildLocks.get(guildId) === queued) {
       guildLocks.delete(guildId);
     }
   }
