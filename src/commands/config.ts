@@ -73,6 +73,13 @@ export default class implements Command {
         .setMaxValue(100)
         .setRequired(true)))
     .addSubcommand(subcommand => subcommand
+      .setName('set-sponsorblock')
+      .setDescription('set whether SponsorBlock removes music-offtopic segments')
+      .addBooleanOption(option => option
+        .setName('value')
+        .setDescription('whether SponsorBlock is enabled for this server')
+        .setRequired(true)))
+    .addSubcommand(subcommand => subcommand
       .setName('set-default-queue-page-size')
       .setDescription('set the default page size of the /queue command')
       .addIntegerOption(option => option
@@ -196,6 +203,23 @@ export default class implements Command {
         break;
       }
 
+      case 'set-sponsorblock': {
+        const value = interaction.options.getBoolean('value')!;
+
+        await prisma.setting.update({
+          where: {
+            guildId: interaction.guild!.id,
+          },
+          data: {
+            enableSponsorBlock: value,
+          },
+        });
+
+        await interaction.reply('👍 SponsorBlock setting updated');
+
+        break;
+      }
+
       case 'set-default-queue-page-size': {
         const value = interaction.options.getInteger('page-size')!;
 
@@ -264,6 +288,7 @@ export default class implements Command {
           'Default queue page size': config.defaultQueuePageSize,
           'Reduce volume when people speak': config.turnDownVolumeWhenPeopleSpeak ? 'yes' : 'no',
           'Reduce volume when people speak target': config.turnDownVolumeWhenPeopleSpeakTarget,
+          'SponsorBlock': config.enableSponsorBlock ? 'yes' : 'no',
         };
 
         let description = '';
