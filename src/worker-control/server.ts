@@ -152,6 +152,29 @@ export const startWorkerControlServer = ({
         return;
       }
 
+      const commandMatch = /^\/v1\/guilds\/(\d+)\/commands$/u.exec(requestUrl.pathname);
+      if (commandMatch && request.method === 'POST') {
+        const payload = JSON.parse(body) as Partial<RemoteCommandRequest>;
+        if (payload.guildId !== commandMatch[1]
+          || typeof payload.textChannelId !== 'string'
+          || typeof payload.userId !== 'string'
+          || typeof payload.commandName !== 'string'
+          || (payload.voiceChannelId !== null && typeof payload.voiceChannelId !== 'string')
+          || typeof payload.options !== 'object'
+          || payload.options === null
+          || Array.isArray(payload.options)) {
+          throw new Error('invalid remote command request');
+        }
+
+        const result = await executeRemoteCommand({
+          request: payload as RemoteCommandRequest,
+          client,
+          commands,
+        });
+        sendJson(response, 200, result);
+        return;
+      }
+
       const disconnectMatch = /^\/v1\/guilds\/(\d+)\/disconnect$/u.exec(requestUrl.pathname);
       if (disconnectMatch && request.method === 'POST') {
         const player = playerManager.getExisting(disconnectMatch[1]);
