@@ -51,13 +51,14 @@ export default class {
   }
 
   private setReady(ready: boolean): void {
+    const readyFile = this.config.READY_FILE ?? '/tmp/muse-ready';
     if (ready) {
-      writeFileSync(this.config.READY_FILE, 'ready\n', {mode: 0o600});
+      writeFileSync(readyFile, 'ready\n', {mode: 0o600});
       return;
     }
 
-    if (existsSync(this.config.READY_FILE)) {
-      unlinkSync(this.config.READY_FILE);
+    if (existsSync(readyFile)) {
+      unlinkSync(readyFile);
     }
   }
 
