@@ -9,7 +9,13 @@ This fork keeps upstream integration separate from production:
 
 Muse does not need Nginx Proxy Manager and publishes no host ports. Discord Gateway, REST, voice and media traffic are outbound connections.
 
-## 1. Create the deploy SSH key
+## 1. Set the production branch as default
+
+In GitHub repository settings, set the default branch to `main`.
+
+The GitHub connector used to prepare this fork cannot change repository administration settings, so this is intentionally a manual repository-setting step. Keep `master` available for upstream synchronization.
+
+## 2. Create the deploy SSH key
 
 On a trusted workstation:
 
@@ -19,7 +25,7 @@ ssh-keygen -t ed25519 -a 100 -f muse_deploy -C "muse-github-actions"
 
 Keep `muse_deploy` private. The `.pub` file is used once by the VPS installer.
 
-## 2. SSH AllowUsers preflight
+## 3. SSH AllowUsers preflight
 
 VPS01 restricts SSH users. Before running the installer, add `muse-deploy` to the existing `AllowUsers` directive.
 
@@ -39,7 +45,7 @@ sudo sshd -T | grep '^allowusers'
 
 Do not close the existing administrative SSH session until the new configuration has been verified.
 
-## 3. Install the production infrastructure
+## 4. Install the production infrastructure
 
 Clone the repository temporarily on the VPS:
 
@@ -65,7 +71,7 @@ It also creates the restricted `muse-deploy` account, installs the forced SSH co
 
 The deploy account is not added to the Docker group and cannot execute arbitrary commands through its deployment key.
 
-## 4. Configure runtime secrets
+## 5. Configure runtime secrets
 
 Edit secrets through a root editor:
 
@@ -86,7 +92,7 @@ sudo find /srv/docker/muse/secrets -maxdepth 1 -type f -printf '%m %u:%g %p\n'
 
 The expected host permissions are `600 root:root`.
 
-## 5. Configure non-secret settings
+## 6. Configure non-secret settings
 
 Edit:
 
@@ -109,7 +115,7 @@ HTTP_STREAM_ALLOWED_HOSTS=
 
 Keep `YT_DLP_AUTO_UPDATE=false` in the hardened container. Updating executables inside a running read-only container defeats immutable-image deployment. Refresh yt-dlp by rebuilding the image instead.
 
-## 6. GitHub production environment
+## 7. GitHub production environment
 
 Create a GitHub Environment named `production`, restrict it to `main`, and add:
 
@@ -128,13 +134,13 @@ Until this variable is `true`, images can be built but the VPS deployment job is
 
 `VPS_KNOWN_HOSTS` must contain a host key verified from the VPS itself. Do not disable SSH host-key verification in CI.
 
-## 7. GHCR
+## 8. GHCR
 
 The easiest deployment is to make the `haxurus/muse` container package public.
 
 If the package remains private, authenticate the root Docker client on VPS01 once using a read-only package token. Do not place that token in the repository or application container.
 
-## 8. Deployment flow
+## 9. Deployment flow
 
 A push to `main` performs:
 
@@ -172,7 +178,7 @@ Discord readiness health check
 
 Muse is considered healthy only after the Discord client has reached ready state and command registration has completed.
 
-## 9. Backups
+## 10. Backups
 
 Before replacing a running release the deploy script stops Muse cleanly and archives the SQLite database.
 
@@ -186,7 +192,7 @@ They are root-only and files older than 14 days are removed automatically.
 
 The audio cache is intentionally excluded.
 
-## 10. Status and rollback
+## 11. Status and rollback
 
 From an administrative VPS shell:
 
@@ -197,7 +203,7 @@ sudo /usr/local/sbin/muse-deploy rollback
 
 Rollback can also be launched through GitHub Actions -> **Rollback production**.
 
-## 11. Network model
+## 12. Network model
 
 The bot has no inbound application ports.
 
