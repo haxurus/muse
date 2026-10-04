@@ -14,6 +14,8 @@ export type DashboardSession = {
     fetchedAt: number;
     guilds: DiscordGuild[];
   };
+  mutationWindowStartedAt?: number;
+  mutationCount?: number;
 };
 
 export default class SessionStore {
@@ -84,6 +86,23 @@ export default class SessionStore {
     const session = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
     return session;
+  }
+
+  consumeMutationBudget(session: DashboardSession, limit = 30, windowMs = 60_000): boolean {
+    const now = Date.now();
+    if (!session.mutationWindowStartedAt || now - session.mutationWindowStartedAt >= windowMs) {
+      session.mutationWindowStartedAt = now;
+      session.mutationCount = 1;
+      return true;
+    }
+
+    const count = session.mutationCount ?? 0;
+    if (count >= limit) {
+      return false;
+    }
+
+    session.mutationCount = count + 1;
+    return true;
   }
 
   private cleanup(): void {
