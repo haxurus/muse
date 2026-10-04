@@ -42,7 +42,7 @@ const makeSong = (title: string, url = title.toLowerCase().replaceAll(' ', '-'))
   source: 0,
 });
 
-const makeGetSongsHarness = () => {
+const makeGetSongsHarness = (streamConfig = {ALLOW_HTTP_STREAMS: false, HTTP_STREAM_ALLOWED_HOSTS: [] as string[]}) => {
   const youtubeAPI = {
     search: vi.fn().mockResolvedValue([]),
     getVideo: vi.fn().mockResolvedValue([]),
@@ -56,7 +56,7 @@ const makeGetSongsHarness = () => {
   };
 
   return {
-    getSongs: new GetSongs(youtubeAPI as never, spotifyAPI as never),
+    getSongs: new GetSongs(youtubeAPI as never, spotifyAPI as never, streamConfig as never),
     spotifyAPI,
     youtubeAPI,
   };
@@ -190,8 +190,19 @@ describe('GetSongs provider routing', () => {
     expect(youtubeAPI.search).not.toHaveBeenCalledWith(url, false);
   });
 
-  it('routes a direct-stream URL through ffprobe', async () => {
-    const {getSongs, youtubeAPI} = makeGetSongsHarness();
+  it('rejects arbitrary direct-stream URLs by default', async () => {
+    const {getSongs} = makeGetSongsHarness();
+    const url = 'https://radio.example/live.m3u8';
+
+    await expect(getSongs.getSongs(url, 20, false)).rejects.toThrow('not allowed');
+    expect(dependencyMocks.ffprobe).not.toHaveBeenCalled();
+  });
+
+  it('routes an allowlisted direct-stream URL through ffprobe', async () => {
+    const {getSongs, youtubeAPI} = makeGetSongsHarness({
+      ALLOW_HTTP_STREAMS: true,
+      HTTP_STREAM_ALLOWED_HOSTS: ['radio.example'],
+    });
     const url = 'https://radio.example/live.m3u8';
 
     const [songs, extraMessage] = await getSongs.getSongs(url, 20, false);
