@@ -13,6 +13,8 @@ x-worker-common: &worker-common
     YT_DLP_AUTO_UPDATE: "false"
     WORKER_CONTROL_ENABLED: "true"
     WORKER_CONTROL_PORT: "3001"
+    ENABLE_DISCORD_COMMANDS: "false"
+    POOL_INGRESS_ENABLED: "false"
   networks:
     - control
     - egress
@@ -52,6 +54,7 @@ services:
       ORCHESTRATOR_LISTEN_HOST: 0.0.0.0
       ORCHESTRATOR_LISTEN_PORT: "3000"
       ORCHESTRATOR_WORKERS_FILE: /config/workers.json
+      ORCHESTRATOR_INGRESS_WORKER_ID: muse-01
       ORCHESTRATOR_DISCORD_CLIENT_SECRET_FILE: /run/secrets/orchestrator_discord_client_secret
     volumes:
       - ./control:/control
@@ -132,6 +135,9 @@ services:
       <<: *worker-environment
       WORKER_ID: muse-01
       WORKER_LABEL: Music 1
+      ENABLE_DISCORD_COMMANDS: "true"
+      POOL_INGRESS_ENABLED: "true"
+      ORCHESTRATOR_INTERNAL_URL: http://muse-orchestrator:3000
       DISCORD_TOKEN_FILE: /run/secrets/discord_token_01
       WORKER_CONTROL_SECRET_FILE: /run/secrets/worker_control_01
     volumes:
