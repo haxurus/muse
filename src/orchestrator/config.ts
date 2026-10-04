@@ -86,6 +86,7 @@ export type OrchestratorConfig = {
   apiToken: string;
   workers: WorkerDefinition[];
   groupsFile: string;
+  routingFile: string;
 };
 
 export const loadOrchestratorConfig = (): OrchestratorConfig => {
@@ -104,11 +105,17 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     throw new Error('MUSE_ORCHESTRATOR_GROUPS_FILE must be stored under /state');
   }
 
+  const routingFile = process.env.MUSE_ORCHESTRATOR_ROUTING_FILE ?? '/state/routing.json';
+  if (!routingFile.startsWith('/state/')) {
+    throw new Error('MUSE_ORCHESTRATOR_ROUTING_FILE must be stored under /state');
+  }
+
   return {
     host: process.env.MUSE_ORCHESTRATOR_HOST ?? '127.0.0.1',
     port,
     apiToken: readRequiredFile(tokenFile, 'orchestrator API token'),
     workers: loadWorkerDefinitions(),
     groupsFile,
+    routingFile,
   };
 };
