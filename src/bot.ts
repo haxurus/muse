@@ -1,4 +1,4 @@
-import {Client, Collection, User} from 'discord.js';
+import {Client, Collection, GuildMember, User} from 'discord.js';
 import {existsSync, unlinkSync, writeFileSync} from 'node:fs';
 import {inject, injectable} from 'inversify';
 import ora from 'ora';
@@ -9,12 +9,14 @@ import debug from './utils/debug.js';
 import handleGuildCreate from './events/guild-create.js';
 import handleVoiceStateUpdate from './events/voice-state-update.js';
 import errorMsg from './utils/error-msg.js';
-import {isUserInVoice} from './utils/channels.js';
+import {getMemberVoiceChannel, isUserInVoice} from './utils/channels.js';
 import Config from './services/config.js';
 import {generateDependencyReport} from '@discordjs/voice';
 import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
+import PoolAssignmentClient from './services/pool-assignment.js';
+import {getPoolCommandMode} from './utils/pool-command-mode.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -39,12 +41,18 @@ export default class {
   private readonly client: Client;
   private readonly config: Config;
   private readonly shouldRegisterCommandsOnBot: boolean;
+  private readonly poolAssignment: PoolAssignmentClient;
   private readonly commandsByName!: Collection<string, Command>;
   private readonly commandsByButtonId!: Collection<string, Command>;
 
-  constructor(@inject(TYPES.Client) client: Client, @inject(TYPES.Config) config: Config) {
+  constructor(
+    @inject(TYPES.Client) client: Client,
+    @inject(TYPES.Config) config: Config,
+    @inject(TYPES.Services.PoolAssignment) poolAssignment: PoolAssignmentClient,
+  ) {
     this.client = client;
     this.config = config;
+    this.poolAssignment = poolAssignment;
     this.shouldRegisterCommandsOnBot = config.REGISTER_COMMANDS_ON_BOT;
     this.commandsByName = new Collection();
     this.commandsByButtonId = new Collection();
@@ -98,6 +106,38 @@ export default class {
           if (requiresVC && interaction.member && !isUserInVoice(interaction.guild, interaction.member.user as User)) {
             await interaction.reply({content: errorMsg('gotta be in a voice channel'), ephemeral: true});
             return;
+          }
+
+          const poolMode = this.config.WORKER_ID ? getPoolCommandMode(interaction.commandName) : null;
+          if (poolMode) {
+            const memberVoice = getMemberVoiceChannel(interaction.member as GuildMember);
+            if (!memberVoice) {
+              await interaction.reply({content: errorMsg('gotta be in a voice channel'), ephemeral: true});
+              return;
+            }
+
+            const [voiceChannel] = memberVoice;
+            const assignment = await this.poolAssignment.assign(
+              interaction.guild.id,
+              voiceChannel.id,
+              poolMode,
+            );
+
+            if (assignment.workerId !== this.config.WORKER_ID) {
+              const targetName = assignment.bot?.username ?? assignment.workerId;
+              const group = assignment.groupName ? ' nel gruppo **' + assignment.groupName + '**' : '';
+              await interaction.reply({
+                content: 'Per questa vocale Muse ha assegnato automaticamente **'
+                  + targetName
+                  + '**'
+                  + group
+                  + '. Usa **/'
+                  + interaction.commandName
+                  + '** di quel bot.',
+                ephemeral: true,
+              });
+              return;
+            }
           }
 
           if (command.execute) {
