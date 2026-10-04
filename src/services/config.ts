@@ -60,6 +60,10 @@ const CONFIG_MAP = {
   ALLOW_HTTP_STREAMS: process.env.ALLOW_HTTP_STREAMS === 'true',
   HTTP_STREAM_ALLOWED_HOSTS: parseHostAllowlist(process.env.HTTP_STREAM_ALLOWED_HOSTS),
   READY_FILE: process.env.MUSE_READY_FILE ?? '/tmp/muse-ready',
+  WORKER_ID: process.env.MUSE_WORKER_ID?.trim() ?? '',
+  CONTROL_HOST: process.env.MUSE_CONTROL_HOST?.trim() ?? '127.0.0.1',
+  CONTROL_PORT: parseInt(process.env.MUSE_CONTROL_PORT ?? '0', 10),
+  CONTROL_TOKEN: readSecret('MUSE_CONTROL_TOKEN', true),
 } as const;
 
 const BOT_ACTIVITY_TYPE_MAP = {
@@ -90,6 +94,10 @@ export default class Config {
   readonly ALLOW_HTTP_STREAMS!: boolean;
   readonly HTTP_STREAM_ALLOWED_HOSTS!: readonly string[];
   readonly READY_FILE!: string;
+  readonly WORKER_ID!: string;
+  readonly CONTROL_HOST!: string;
+  readonly CONTROL_PORT!: number;
+  readonly CONTROL_TOKEN!: string;
 
   constructor() {
     for (const [key, value] of Object.entries(CONFIG_MAP)) {
@@ -132,6 +140,20 @@ export default class Config {
 
     if (this.ALLOW_HTTP_STREAMS && this.HTTP_STREAM_ALLOWED_HOSTS.length === 0) {
       throw new Error('HTTP_STREAM_ALLOWED_HOSTS must be set when ALLOW_HTTP_STREAMS=true');
+    }
+
+    if (this.WORKER_ID) {
+      if (!/^[a-z0-9][a-z0-9-]{0,31}$/u.test(this.WORKER_ID)) {
+        throw new Error('MUSE_WORKER_ID must contain only lowercase letters, digits and hyphens');
+      }
+
+      if (!Number.isInteger(this.CONTROL_PORT) || this.CONTROL_PORT < 1 || this.CONTROL_PORT > 65_535) {
+        throw new Error('MUSE_CONTROL_PORT must be a valid TCP port when MUSE_WORKER_ID is set');
+      }
+
+      if (!this.CONTROL_TOKEN) {
+        throw new Error('MUSE_CONTROL_TOKEN or MUSE_CONTROL_TOKEN_FILE is required for a managed worker');
+      }
     }
   }
 }
