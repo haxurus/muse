@@ -11,7 +11,7 @@ PREVIOUS="$STATE/previous-image"
 LAST_BACKUP="$STATE/last-backup"
 RUNTIME_UID=10001
 RUNTIME_GID=10001
-SERVICES=(orchestrator muse-01 muse-02 muse-03 muse-04 muse-05)
+SERVICES=(dashboard-edge dashboard orchestrator muse-01 muse-02 muse-03 muse-04 muse-05)
 WORKERS=(muse-01 muse-02 muse-03 muse-04 muse-05)
 
 compose() {
@@ -21,6 +21,38 @@ compose() {
 validate_image() {
   [[ "$1" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ ]] || {
     echo "Refusing non-immutable or unexpected image reference." >&2
+    exit 64
+  }
+}
+
+env_value() {
+  local key="$1"
+  awk -F= -v key="$key" '$1==key{print substr($0,index($0,"=")+1)}' "$ENV_FILE" | tail -n1
+}
+
+validate_runtime_config() {
+  local secret client_id public_url
+
+  for secret in \
+    discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
+    youtube_api_key dashboard_discord_client_secret orchestrator_api_token \
+    control_token_01 control_token_02 control_token_03 control_token_04 control_token_05; do
+    [[ -s "$BASE/secrets/$secret" ]] || {
+      echo "Required secret is empty: $secret" >&2
+      exit 64
+    }
+  done
+
+  client_id="$(env_value MUSE_DASHBOARD_DISCORD_CLIENT_ID)"
+  public_url="$(env_value MUSE_DASHBOARD_PUBLIC_URL)"
+
+  [[ "$client_id" =~ ^[0-9]{10,32}$ && ! "$client_id" =~ ^0+$ ]] || {
+    echo "MUSE_DASHBOARD_DISCORD_CLIENT_ID is not configured." >&2
+    exit 64
+  }
+
+  [[ "$public_url" =~ ^https://[^/]+/?$ && "$public_url" != *"example.com"* ]] || {
+    echo "MUSE_DASHBOARD_PUBLIC_URL must be a real https origin." >&2
     exit 64
   }
 }
@@ -131,6 +163,7 @@ deploy_image() {
     old=""
   fi
 
+  validate_runtime_config
   docker pull "$image"
   stop_for_backup
   backup_db
@@ -145,7 +178,7 @@ deploy_image() {
   if wait_healthy; then
     printf '%s\n' "$image" > "$CURRENT"
     chmod 600 "$CURRENT" "$PREVIOUS" 2>/dev/null || true
-    echo "Muse orchestrator and all five workers deployed successfully."
+    echo "Muse dashboard, orchestrator and all five workers deployed successfully."
     return 0
   fi
 

@@ -143,7 +143,10 @@ export default class OrchestratorServer {
       }
 
       const worker = this.workers.find(candidate => candidate.id === result.workerId)!;
-      return this.wrap(worker.id, worker.guildSettings(guildId));
+      return this.wrap(worker.id, worker.guildSettings(guildId).then(settings => ({
+        status: result.value,
+        settings,
+      })));
     }));
 
     return {

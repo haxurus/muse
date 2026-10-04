@@ -26,6 +26,7 @@ jobs:
       - run: yarn install --frozen-lockfile
       - run: yarn lint
       - run: yarn typecheck
+      - run: node --check dashboard/dashboard.js
       - run: yarn test
       - run: yarn build
       - name: Validate production compose
@@ -36,7 +37,7 @@ jobs:
           mkdir -p deploy/secrets deploy/config
           cp deploy/workers.json deploy/config/workers.json
           for secret in \
-            orchestrator_api_token \
+            orchestrator_api_token dashboard_discord_client_secret \
             discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
             control_token_01 control_token_02 control_token_03 control_token_04 control_token_05 \
             youtube_api_key spotify_client_id spotify_client_secret; do

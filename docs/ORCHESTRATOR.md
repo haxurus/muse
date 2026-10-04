@@ -16,13 +16,12 @@ Implemented:
 - guild discovery through the orchestrator;
 - read/write guild settings through the orchestrator;
 - single-worker, subset, or all-present-worker settings updates;
-- fleet health checks, database backup, deploy and rollback awareness.
+- fleet health checks, database backup, deploy and rollback awareness;
+- Discord OAuth dashboard with guild-level authorization;
+- one/subset/all worker settings management from the dashboard.
 
 Not implemented yet:
 
-- public dashboard;
-- Discord OAuth;
-- administrator RBAC;
 - persistent per-guild worker groups;
 - automatic voice-channel worker assignment;
 - player reservations/leases;
@@ -74,7 +73,7 @@ Discord tokens and provider credentials are never exposed through the control AP
 
 ## Orchestrator API
 
-The orchestrator API currently requires a static internal bearer token. A later dashboard layer will replace direct use of this token with authenticated Discord sessions and guild-level authorization.
+The orchestrator API requires a static internal bearer token and is reachable only from private control networks. The dashboard authenticates users with Discord and performs guild-level authorization before it calls the orchestrator.
 
 Endpoints:
 
@@ -100,7 +99,7 @@ Example multi-worker update request:
 
 If `workerIds` is omitted, the orchestrator applies the patch to all currently reachable workers that are members of the guild.
 
-This is the API primitive the future dashboard will use for:
+This is the API primitive the dashboard uses for:
 
 - one bot;
 - any arbitrary subset of bots;

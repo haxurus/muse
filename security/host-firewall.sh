@@ -8,7 +8,7 @@ fi
 
 command -v iptables >/dev/null 2>&1 || { echo "iptables is required" >&2; exit 1; }
 
-for iface in muse-eg muse-c01 muse-c02 muse-c03 muse-c04 muse-c05; do
+for iface in muse-eg muse-deg muse-dw muse-dc muse-c01 muse-c02 muse-c03 muse-c04 muse-c05; do
   iptables -C INPUT -i "$iface" -j DROP 2>/dev/null || iptables -I INPUT 1 -i "$iface" -j DROP
 done
 
@@ -21,8 +21,10 @@ for cidr in \
   192.168.0.0/16 \
   224.0.0.0/4 \
   240.0.0.0/4; do
-  iptables -C DOCKER-USER -i muse-eg -d "$cidr" -j REJECT 2>/dev/null \
-    || iptables -I DOCKER-USER 1 -i muse-eg -d "$cidr" -j REJECT
+  for iface in muse-eg muse-deg; do
+    iptables -C DOCKER-USER -i "$iface" -d "$cidr" -j REJECT 2>/dev/null \
+      || iptables -I DOCKER-USER 1 -i "$iface" -d "$cidr" -j REJECT
+  done
 done
 
 echo "Muse worker and control-plane isolation rules installed."

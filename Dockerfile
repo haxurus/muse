@@ -62,6 +62,7 @@ ENV DATA_DIR=/data \
     YT_DLP_AUTO_UPDATE=false
 
 COPY --from=builder --chown=10001:10001 /usr/app/dist ./dist
+COPY --from=builder --chown=10001:10001 /usr/app/dashboard ./dashboard
 COPY --from=dependencies --chown=10001:10001 /usr/app/prod_node_modules ./node_modules
 COPY --from=builder --chown=10001:10001 /usr/app/node_modules/.prisma/client ./node_modules/.prisma/client
 COPY --from=builder --chown=10001:10001 /usr/app/migrations ./migrations

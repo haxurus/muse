@@ -15,9 +15,13 @@ Production-specific additions include:
 - isolated Docker egress network;
 - SQLite backup and automatic rollback;
 - GHCR image publishing by immutable digest;
-- restricted GitHub Actions -> VPS deployment.
+- restricted GitHub Actions -> VPS deployment;
+- five isolated music workers coordinated by an orchestrator;
+- Muse Control web dashboard with Discord OAuth and per-guild authorization.
 
 Deployment documentation: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)  
+Dashboard/OAuth: [docs/DASHBOARD.md](docs/DASHBOARD.md)  
+Orchestrator: [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md)  
 Upstream synchronization: [docs/UPSTREAM.md](docs/UPSTREAM.md)
 
 > The upstream instructions below are retained for project compatibility. For VPS01 production, use the deployment guide above rather than the upstream `docker run` example.

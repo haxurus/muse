@@ -22,6 +22,11 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! docker network inspect proxy_net >/dev/null 2>&1; then
+  echo "Required external Docker network proxy_net does not exist." >&2
+  exit 1
+fi
+
 allow_users="$(sshd -T 2>/dev/null | awk '$1=="allowusers"{for(i=2;i<=NF;i++) print $i}')"
 if [[ -n "$allow_users" ]] && ! grep -qx "$DEPLOY_USER" <<<"$allow_users"; then
   echo "sshd AllowUsers is enabled but does not include $DEPLOY_USER." >&2
@@ -75,6 +80,7 @@ for worker in 01 02 03 04 05; do
 done
 
 ensure_generated_secret orchestrator_api_token
+ensure_runtime_secret dashboard_discord_client_secret
 ensure_runtime_secret youtube_api_key
 ensure_runtime_secret spotify_client_id
 ensure_runtime_secret spotify_client_secret
@@ -113,10 +119,13 @@ systemctl enable muse-firewall.service >/dev/null
 /usr/local/sbin/muse-host-firewall
 
 echo
-echo "Muse orchestrator + five-worker infrastructure installed in $BASE."
+echo "Muse dashboard + orchestrator + five-worker infrastructure installed in $BASE."
 echo "Next:"
 echo "  1. Fill discord_token_01 through discord_token_05"
 echo "  2. Fill youtube_api_key"
-echo "  3. Optionally fill both Spotify secret files"
-echo "  4. Review $BASE/.env"
-echo "  5. Do not enable automatic production deploy until validation is complete"
+echo "  3. Fill dashboard_discord_client_secret"
+echo "  4. Set MUSE_DASHBOARD_PUBLIC_URL and MUSE_DASHBOARD_DISCORD_CLIENT_ID in $BASE/.env"
+echo "  5. Register <public-url>/auth/discord/callback in the Discord OAuth application"
+echo "  6. Optionally fill both Spotify secret files"
+echo "  7. Configure NPM to proxy the dashboard hostname to muse-dashboard:8080"
+echo "  8. Do not enable automatic production deploy until validation is complete"

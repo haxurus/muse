@@ -32,6 +32,93 @@ x-worker-common: &worker-common
       max-file: "3"
 
 services:
+  dashboard-edge:
+    image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+    command: ["node", "--enable-source-maps", "dist/dashboard/edge.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      MUSE_DASHBOARD_EDGE_HOST: 0.0.0.0
+      MUSE_DASHBOARD_EDGE_PORT: "8080"
+      MUSE_DASHBOARD_UPSTREAM: http://dashboard:3000
+    networks:
+      dashboard-web:
+      proxy_net:
+        aliases:
+          - muse-dashboard
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    pids_limit: 96
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/edge-health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  dashboard:
+    image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+    command: ["node", "--enable-source-maps", "dist/dashboard/index.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      MUSE_DASHBOARD_HOST: 0.0.0.0
+      MUSE_DASHBOARD_PORT: "3000"
+      MUSE_DASHBOARD_PUBLIC_URL: ${MUSE_DASHBOARD_PUBLIC_URL:?MUSE_DASHBOARD_PUBLIC_URL is required}
+      MUSE_DASHBOARD_DISCORD_CLIENT_ID: ${MUSE_DASHBOARD_DISCORD_CLIENT_ID:?MUSE_DASHBOARD_DISCORD_CLIENT_ID is required}
+      MUSE_DASHBOARD_DISCORD_CLIENT_SECRET_FILE: /run/secrets/dashboard_discord_client_secret
+      MUSE_DASHBOARD_ORCHESTRATOR_URL: http://orchestrator:3100
+      MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
+      MUSE_DASHBOARD_SESSION_HOURS: ${MUSE_DASHBOARD_SESSION_HOURS:-8}
+    secrets:
+      - dashboard_discord_client_secret
+      - orchestrator_api_token
+    networks:
+      - dashboard-web
+      - dashboard-control
+      - dashboard-egress
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   orchestrator:
     image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
     command: ["node", "--enable-source-maps", "dist/orchestrator/index.js"]
@@ -52,6 +139,7 @@ services:
     volumes:
       - ./config/workers.json:/config/workers.json:ro
     networks:
+      - dashboard-control
       - control-01
       - control-02
       - control-03
@@ -179,11 +267,29 @@ services:
       - control-05
 
 networks:
+  proxy_net:
+    external: true
+    name: proxy_net
   egress:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.name: muse-eg
       com.docker.network.bridge.enable_icc: "false"
+  dashboard-egress:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-deg
+      com.docker.network.bridge.enable_icc: "false"
+  dashboard-web:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-dw
+  dashboard-control:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-dc
   control-01:
     internal: true
     driver: bridge
@@ -211,6 +317,8 @@ networks:
       com.docker.network.bridge.name: muse-c05
 
 secrets:
+  dashboard_discord_client_secret:
+    file: ./secrets/dashboard_discord_client_secret
   orchestrator_api_token:
     file: ./secrets/orchestrator_api_token
   discord_token_01:

@@ -7,7 +7,7 @@ This fork keeps upstream integration separate from production:
 - production images are built from `main` and published to `ghcr.io/haxurus/muse`;
 - the VPS deploys immutable image digests only.
 
-Muse does not need Nginx Proxy Manager and publishes no host ports. Discord Gateway, REST, voice and media traffic are outbound connections.
+The five music workers and orchestrator publish no host ports. The web dashboard is exposed only through the secret-free `dashboard-edge` container on the existing `proxy_net`, so Nginx Proxy Manager remains the single HTTPS ingress.
 
 ## 1. Set the production branch as default
 
@@ -61,6 +61,7 @@ The installer creates:
 /srv/docker/muse/
 ├── .env
 ├── docker-compose.yml
+├── config/
 ├── data/
 ├── backups/
 ├── secrets/
@@ -76,8 +77,13 @@ The deploy account is not added to the Docker group and cannot execute arbitrary
 Edit secrets through a root editor:
 
 ```bash
-sudoedit /srv/docker/muse/secrets/discord_token
+sudoedit /srv/docker/muse/secrets/discord_token_01
+sudoedit /srv/docker/muse/secrets/discord_token_02
+sudoedit /srv/docker/muse/secrets/discord_token_03
+sudoedit /srv/docker/muse/secrets/discord_token_04
+sudoedit /srv/docker/muse/secrets/discord_token_05
 sudoedit /srv/docker/muse/secrets/youtube_api_key
+sudoedit /srv/docker/muse/secrets/dashboard_discord_client_secret
 sudoedit /srv/docker/muse/secrets/spotify_client_id
 sudoedit /srv/docker/muse/secrets/spotify_client_secret
 ```
@@ -90,7 +96,7 @@ Verify permissions:
 sudo find /srv/docker/muse/secrets -maxdepth 1 -type f -printf '%m %u:%g %p\n'
 ```
 
-The expected host permissions are `600 root:root`.
+The runtime secret files are installed as `640 root:10001`, so the non-root Muse runtime can read only the secrets explicitly mounted into its container.
 
 ## 6. Configure non-secret settings
 
@@ -111,11 +117,32 @@ BOT_ACTIVITY_TYPE=LISTENING
 BOT_ACTIVITY=music
 ALLOW_HTTP_STREAMS=false
 HTTP_STREAM_ALLOWED_HOSTS=
+MUSE_DASHBOARD_PUBLIC_URL=https://music.example.com
+MUSE_DASHBOARD_DISCORD_CLIENT_ID=000000000000000000
+MUSE_DASHBOARD_SESSION_HOURS=8
 ```
+
+Replace the dashboard URL and client ID before deployment. Configure the Discord OAuth redirect URI as:
+
+```text
+https://<dashboard-host>/auth/discord/callback
+```
+
+See [DASHBOARD.md](DASHBOARD.md) for the complete OAuth and security model.
 
 Keep `YT_DLP_AUTO_UPDATE=false` in the hardened container. Updating executables inside a running read-only container defeats immutable-image deployment. Refresh yt-dlp by rebuilding the image instead.
 
-## 7. GitHub production environment
+## 7. Configure Nginx Proxy Manager
+
+Create a Proxy Host for the dashboard hostname and forward it to:
+
+```text
+muse-dashboard:8080
+```
+
+Do not expose or proxy ports 3000, 3100, or 3101 directly.
+
+## 8. GitHub production environment
 
 Create a GitHub Environment named `production`, restrict it to `main`, and add:
 
@@ -134,13 +161,13 @@ Until this variable is `true`, images can be built but the VPS deployment job is
 
 `VPS_KNOWN_HOSTS` must contain a host key verified from the VPS itself. Do not disable SSH host-key verification in CI.
 
-## 8. GHCR
+## 9. GHCR
 
 The easiest deployment is to make the `haxurus/muse` container package public.
 
 If the package remains private, authenticate the root Docker client on VPS01 once using a read-only package token. Do not place that token in the repository or application container.
 
-## 9. Deployment flow
+## 10. Deployment flow
 
 A push to `main` performs:
 
@@ -178,7 +205,7 @@ Discord readiness health check
 
 Muse is considered healthy only after the Discord client has reached ready state and command registration has completed.
 
-## 10. Backups
+## 11. Backups
 
 Before replacing a running release the deploy script stops Muse cleanly and archives the SQLite database.
 
@@ -192,7 +219,7 @@ They are root-only and files older than 14 days are removed automatically.
 
 The audio cache is intentionally excluded.
 
-## 11. Status and rollback
+## 12. Status and rollback
 
 From an administrative VPS shell:
 
@@ -203,16 +230,19 @@ sudo /usr/local/sbin/muse-deploy rollback
 
 Rollback can also be launched through GitHub Actions -> **Rollback production**.
 
-## 12. Network model
+## 13. Network model
 
-The bot has no inbound application ports.
+The worker and control services have no inbound host ports.
 
-The dedicated bridge is named:
+Networks are segmented as follows:
 
-```text
-muse-eg
-```
+- `proxy_net`: NPM <-> secret-free dashboard edge only;
+- `dashboard-web`: edge <-> dashboard;
+- `dashboard-control`: dashboard <-> orchestrator;
+- `muse-c01` ... `muse-c05`: orchestrator <-> one worker each;
+- `muse-eg`: filtered outbound Internet access for music workers;
+- `muse-deg`: separate filtered outbound Internet access for the OAuth dashboard.
 
-The host firewall blocks traffic arriving from this bridge toward services on the VPS and blocks forwarded access to private, link-local and other non-public ranges. Public outbound traffic remains available for Discord, YouTube, SoundCloud, Spotify and approved integrations.
+The host firewall blocks private/link-local destinations from the egress bridge and blocks private control bridges from reaching host services.
 
-Do not attach Muse to `proxy_net`, database networks, Sentinel networks, or the Docker socket.
+Do not attach the dashboard, orchestrator, or workers to Sentinel networks or the Docker socket.
