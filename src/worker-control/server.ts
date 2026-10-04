@@ -33,7 +33,9 @@ const readBody = async (request: IncomingMessage): Promise<string> => new Promis
 
     body += chunk;
   });
-  request.once('end', () => resolve(body));
+  request.once('end', () => {
+    resolve(body);
+  });
   request.once('error', reject);
 });
 
