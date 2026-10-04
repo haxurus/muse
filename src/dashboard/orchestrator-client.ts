@@ -31,6 +31,7 @@ export type OrchestratorGuildPool = {
   guildId: string;
   config: GuildPoolConfig;
   availableWorkerIds: string[];
+  onlineWorkerIds: string[];
   voiceChannels: Array<{
     id: string;
     name: string;
