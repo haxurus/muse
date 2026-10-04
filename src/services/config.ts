@@ -64,6 +64,9 @@ const CONFIG_MAP = {
   CONTROL_HOST: process.env.MUSE_CONTROL_HOST?.trim() ?? '127.0.0.1',
   CONTROL_PORT: parseInt(process.env.MUSE_CONTROL_PORT ?? '0', 10),
   CONTROL_TOKEN: readSecret('MUSE_CONTROL_TOKEN', true),
+  BOT_ROLE: (process.env.MUSE_BOT_ROLE?.trim() ?? 'standalone') as 'standalone' | 'controller' | 'worker',
+  ORCHESTRATOR_URL: process.env.MUSE_ORCHESTRATOR_URL?.trim() ?? '',
+  ORCHESTRATOR_TOKEN: readSecret('MUSE_ORCHESTRATOR_TOKEN', true),
 } as const;
 
 const BOT_ACTIVITY_TYPE_MAP = {
@@ -98,6 +101,9 @@ export default class Config {
   readonly CONTROL_HOST!: string;
   readonly CONTROL_PORT!: number;
   readonly CONTROL_TOKEN!: string;
+  readonly BOT_ROLE!: 'standalone' | 'controller' | 'worker';
+  readonly ORCHESTRATOR_URL!: string;
+  readonly ORCHESTRATOR_TOKEN!: string;
 
   constructor() {
     for (const [key, value] of Object.entries(CONFIG_MAP)) {
@@ -142,6 +148,10 @@ export default class Config {
       throw new Error('HTTP_STREAM_ALLOWED_HOSTS must be set when ALLOW_HTTP_STREAMS=true');
     }
 
+    if (!['standalone', 'controller', 'worker'].includes(this.BOT_ROLE)) {
+      throw new Error('MUSE_BOT_ROLE must be standalone, controller, or worker');
+    }
+
     if (this.WORKER_ID) {
       if (!/^[a-z0-9][a-z0-9-]{0,31}$/u.test(this.WORKER_ID)) {
         throw new Error('MUSE_WORKER_ID must contain only lowercase letters, digits and hyphens');
@@ -153,6 +163,23 @@ export default class Config {
 
       if (!this.CONTROL_TOKEN) {
         throw new Error('MUSE_CONTROL_TOKEN or MUSE_CONTROL_TOKEN_FILE is required for a managed worker');
+      }
+    }
+
+    if (this.BOT_ROLE === 'controller') {
+      const orchestrator = new URL(this.ORCHESTRATOR_URL);
+      if (orchestrator.protocol !== 'http:'
+        || orchestrator.hostname !== 'orchestrator'
+        || orchestrator.username
+        || orchestrator.password
+        || orchestrator.pathname !== '/'
+        || orchestrator.search
+        || orchestrator.hash) {
+        throw new Error('MUSE_ORCHESTRATOR_URL must be the internal orchestrator service URL');
+      }
+
+      if (!this.ORCHESTRATOR_TOKEN) {
+        throw new Error('MUSE_ORCHESTRATOR_TOKEN_FILE is required for controller mode');
       }
     }
   }
