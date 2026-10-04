@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: muse-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -27,9 +31,16 @@ jobs:
       - run: yarn lint
       - run: yarn typecheck
       - run: node --check dashboard/dashboard.js
+      - run: node --check dashboard/pool-routing.js
+      - name: Validate operator script syntax
+        run: |
+          bash -n ops/install-vps.sh
+          bash -n ops/muse-deploy
+          sh -n ops/muse-deploy-entrypoint
+          sh -n security/host-firewall.sh
       - run: yarn test
       - run: yarn build
-      - name: Validate production compose
+      - name: Validate production compose in both modes
         if: matrix.node-version == '22'
         run: |
           set -euo pipefail
@@ -37,14 +48,32 @@ jobs:
           mkdir -p deploy/secrets deploy/config
           cp deploy/workers.json deploy/config/workers.json
           for secret in \
-            orchestrator_api_token dashboard_discord_client_secret \
+            orchestrator_api_token dashboard_discord_client_secret pool_client_token \
             discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
             control_token_01 control_token_02 control_token_03 control_token_04 control_token_05 \
             youtube_api_key spotify_client_id spotify_client_secret; do
             printf 'ci-placeholder\n' > "deploy/secrets/$secret"
           done
-          MUSE_IMAGE="ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
-            docker compose -f deploy/docker-compose.prod.yml config -q
+          export MUSE_IMAGE="ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          MUSE_POOL_ENABLED=false docker compose -f deploy/docker-compose.prod.yml config -q
+          MUSE_POOL_ENABLED=true docker compose -f deploy/docker-compose.prod.yml config --format json > /tmp/muse-compose.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/muse-compose.json') as f:
+              c = json.load(f)
+          s = c['services']
+          assert len(s) == 8
+          for name, service in s.items():
+              assert not service.get('ports'), name
+              mounts = {x['source'] for x in service.get('secrets', [])}
+              if name in ('orchestrator', 'muse-01'):
+                  assert 'pool_client_token' in mounts, name
+              else:
+                  assert 'pool_client_token' not in mounts, name
+          assert s['muse-01']['environment']['MUSE_POOL_ROLE'] == 'controller'
+          for i in range(2, 6):
+              assert s[f'muse-0{i}']['environment']['MUSE_POOL_ROLE'] == 'worker'
+          PY
       - name: Build production image
         if: matrix.node-version == '22'
         run: docker build -t muse-ci .
