@@ -1,6 +1,16 @@
+.git
+.github
 node_modules
 data
 dist
 dts
+coverage
 .env
-Dockerfile
+.env.*
+secrets
+backups
+*.log
+Dockerfile*
+docker-compose*.yml
+README.md
+SECURITY.md
