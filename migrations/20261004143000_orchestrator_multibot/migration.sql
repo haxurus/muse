@@ -1,4 +1,5 @@
 ALTER TABLE "Setting" ADD COLUMN "enableSponsorBlock" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Setting" ADD COLUMN "orchestratorEnabled" BOOLEAN NOT NULL DEFAULT true;
 
 CREATE TABLE "ManagedGuild" (
     "guildId" TEXT NOT NULL PRIMARY KEY,
