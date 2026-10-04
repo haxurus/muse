@@ -1,0 +1,181 @@
+#!/bin/bash
+set -euo pipefail
+
+BASE=/srv/docker/muse
+COMPOSE="$BASE/docker-compose.yml"
+ENV_FILE="$BASE/.env"
+BACKUPS="$BASE/backups"
+STATE="$BASE/.deploy-state"
+CURRENT="$STATE/current-image"
+PREVIOUS="$STATE/previous-image"
+LAST_BACKUP="$STATE/last-backup"
+
+compose() {
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" "$@"
+}
+
+validate_image() {
+  [[ "$1" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ ]] || {
+    echo "Refusing non-immutable or unexpected image reference." >&2
+    exit 64
+  }
+}
+
+set_env_key() {
+  local key="$1" value="$2" tmp
+  tmp="$(mktemp "$BASE/.env.tmp.XXXXXX")"
+  awk -v key="$key" -v value="$value" '
+    BEGIN {found=0}
+    index($0, key "=") == 1 {print key "=" value; found=1; next}
+    {print}
+    END {if (!found) print key "=" value}
+  ' "$ENV_FILE" > "$tmp"
+  chmod 600 "$tmp"
+  chown root:root "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
+wait_healthy() {
+  local deadline=$((SECONDS + 150)) cid status
+  while (( SECONDS < deadline )); do
+    cid="$(compose ps -q muse || true)"
+    if [[ -n "$cid" ]]; then
+      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+      [[ "$status" == "healthy" ]] && return 0
+      [[ "$status" == "exited" || "$status" == "dead" ]] && return 1
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+stop_for_backup() {
+  compose stop -t 30 muse >/dev/null 2>&1 || true
+}
+
+backup_db() {
+  mkdir -p "$BACKUPS" "$STATE"
+  chmod 700 "$BACKUPS" "$STATE"
+  local stamp backup
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup="$BACKUPS/muse-$stamp.tar.gz"
+
+  if [[ -f "$BASE/data/db.sqlite" ]]; then
+    tar -C "$BASE/data" -czf "$backup" db.sqlite \
+      $(find "$BASE/data" -maxdepth 1 -type f \( -name 'db.sqlite-wal' -o -name 'db.sqlite-shm' \) -printf '%f ')
+    chmod 600 "$backup"
+    printf '%s\n' "$backup" > "$LAST_BACKUP"
+    find "$BACKUPS" -type f -name 'muse-*.tar.gz' -mtime +14 -delete
+    echo "Database backup: $backup"
+  else
+    : > "$LAST_BACKUP"
+    echo "No existing database to back up."
+  fi
+}
+
+restore_backup() {
+  [[ -s "$LAST_BACKUP" ]] || return 0
+  local backup
+  backup="$(cat "$LAST_BACKUP")"
+  [[ -f "$backup" ]] || return 0
+  rm -f "$BASE/data/db.sqlite" "$BASE/data/db.sqlite-wal" "$BASE/data/db.sqlite-shm"
+  tar -C "$BASE/data" -xzf "$backup"
+  chown -R 1000:1000 "$BASE/data"
+}
+
+deploy_image() {
+  local image="$1" old=""
+  validate_image "$image"
+
+  mkdir -p "$STATE"
+  chmod 700 "$STATE"
+
+  if [[ -s "$CURRENT" ]]; then
+    old="$(cat "$CURRENT")"
+  else
+    old="$(awk -F= '$1=="MUSE_IMAGE"{print substr($0,index($0,"=")+1)}' "$ENV_FILE" | tail -n1)"
+  fi
+
+  docker pull "$image"
+  stop_for_backup
+  backup_db
+
+  if [[ -n "$old" && "$old" != "$image" ]]; then
+    printf '%s\n' "$old" > "$PREVIOUS"
+  fi
+
+  set_env_key MUSE_IMAGE "$image"
+  compose up -d --remove-orphans
+
+  if wait_healthy; then
+    printf '%s\n' "$image" > "$CURRENT"
+    chmod 600 "$CURRENT" "$PREVIOUS" 2>/dev/null || true
+    echo "Muse deployed successfully."
+    return 0
+  fi
+
+  echo "New release failed health checks." >&2
+  compose logs --tail=120 muse >&2 || true
+  compose stop -t 15 muse >/dev/null 2>&1 || true
+
+  if [[ -n "$old" ]]; then
+    echo "Restoring previous application and database." >&2
+    restore_backup
+    set_env_key MUSE_IMAGE "$old"
+    compose up -d --remove-orphans
+    wait_healthy || {
+      echo "Automatic rollback also failed." >&2
+      exit 1
+    }
+    printf '%s\n' "$old" > "$CURRENT"
+  fi
+
+  exit 1
+}
+
+rollback() {
+  [[ -s "$PREVIOUS" ]] || { echo "No previous image recorded." >&2; exit 1; }
+  local target current
+  target="$(cat "$PREVIOUS")"
+  current="$(cat "$CURRENT" 2>/dev/null || true)"
+  validate_image "$target"
+
+  docker pull "$target"
+  stop_for_backup
+  backup_db
+  set_env_key MUSE_IMAGE "$target"
+  compose up -d --remove-orphans
+  wait_healthy || { compose logs --tail=120 muse >&2 || true; exit 1; }
+
+  printf '%s\n' "$target" > "$CURRENT"
+  [[ -n "$current" ]] && printf '%s\n' "$current" > "$PREVIOUS"
+  echo "Muse rollback completed."
+}
+
+status() {
+  compose ps
+  echo
+  printf 'Current:  %s\n' "$(cat "$CURRENT" 2>/dev/null || echo unknown)"
+  printf 'Previous: %s\n' "$(cat "$PREVIOUS" 2>/dev/null || echo none)"
+}
+
+[[ "$(id -u)" -eq 0 ]] || { echo "Run through the restricted deploy entrypoint or as root." >&2; exit 1; }
+cd "$BASE"
+
+case "${1:-status}" in
+  deploy)
+    [[ $# -eq 2 ]] || { echo "Usage: muse-deploy deploy <digest>" >&2; exit 64; }
+    deploy_image "$2"
+    ;;
+  rollback)
+    [[ $# -eq 1 ]] || exit 64
+    rollback
+    ;;
+  status)
+    [[ $# -eq 1 ]] || exit 64
+    status
+    ;;
+  *)
+    exit 64
+    ;;
+esac
