@@ -9,11 +9,18 @@ const selectionSummary = document.getElementById('selection-summary');
 const formMessage = document.getElementById('form-message');
 const applyButton = document.getElementById('apply-button');
 const statusPill = document.getElementById('status-pill');
+const guildQuota = document.getElementById('guild-quota');
+const groupsContainer = document.getElementById('groups-container');
+const poolMessage = document.getElementById('pool-message');
+const poolUsageLabel = document.getElementById('pool-usage-label');
+const savePoolButton = document.getElementById('save-pool');
+const addGroupButton = document.getElementById('add-group');
 
 let session = null;
 let selectedGuildId = null;
 let guildDetails = null;
 const selectedWorkers = new Set();
+let poolDraftGroups = [];
 
 const SETTINGS = [
   {key: 'defaultVolume', label: 'Volume predefinito', hint: '0-100', type: 'number', min: 0, max: 100},
@@ -150,6 +157,274 @@ const renderSettingsForm = () => {
   }
 };
 
+const workerDisplayName = workerId => {
+  const worker = guildDetails?.workers.find(candidate => candidate.workerId === workerId);
+  return worker?.value?.status?.bot?.username ?? workerId;
+};
+
+const makeCheckChip = ({value, label, checked, onChange}) => {
+  const chip = el('label', 'check-chip');
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.value = value;
+  checkbox.checked = checked;
+  checkbox.addEventListener('change', () => onChange(checkbox.checked));
+  chip.append(checkbox, document.createTextNode(label));
+  return chip;
+};
+
+const renderPoolGroups = () => {
+  groupsContainer.replaceChildren();
+
+  if (poolDraftGroups.length === 0) {
+    groupsContainer.append(el(
+      'div',
+      'group-empty',
+      'Nessun gruppo: tutte le vocali useranno automaticamente l’intero pool disponibile.',
+    ));
+    return;
+  }
+
+  for (const group of poolDraftGroups) {
+    const card = el('div', 'group-card');
+    card.dataset.groupId = group.id;
+
+    const head = el('div', 'group-head');
+
+    const nameField = el('label', 'group-field');
+    nameField.append(el('span', '', 'Nome gruppo'));
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 48;
+    nameInput.value = group.name;
+    nameInput.addEventListener('input', () => {
+      group.name = nameInput.value;
+    });
+    nameField.append(nameInput);
+
+    const quotaField = el('label', 'group-field');
+    quotaField.append(el('span', '', 'Quota gruppo'));
+    const quotaInput = document.createElement('input');
+    quotaInput.type = 'number';
+    quotaInput.min = '0';
+    quotaInput.max = String(group.workerIds.length);
+    quotaInput.step = '1';
+    quotaInput.value = String(Math.min(group.maxConcurrentPlayers, group.workerIds.length));
+    quotaInput.addEventListener('input', () => {
+      group.maxConcurrentPlayers = Number(quotaInput.value);
+    });
+    quotaField.append(quotaInput);
+
+    const defaultLabel = el('label', 'group-default');
+    const defaultRadio = document.createElement('input');
+    defaultRadio.type = 'radio';
+    defaultRadio.name = 'default-pool-group';
+    defaultRadio.checked = group.isDefault;
+    defaultRadio.addEventListener('change', () => {
+      if (!defaultRadio.checked) return;
+      for (const candidate of poolDraftGroups) {
+        candidate.isDefault = candidate.id === group.id;
+      }
+    });
+    defaultLabel.append(defaultRadio, document.createTextNode('Predefinito'));
+
+    const remove = el('button', 'button ghost', 'Rimuovi');
+    remove.type = 'button';
+    remove.addEventListener('click', () => {
+      poolDraftGroups = poolDraftGroups.filter(candidate => candidate.id !== group.id);
+      if (poolDraftGroups.length > 0 && !poolDraftGroups.some(candidate => candidate.isDefault)) {
+        poolDraftGroups[0].isDefault = true;
+      }
+      renderPoolGroups();
+    });
+
+    head.append(nameField, quotaField, defaultLabel, remove);
+    card.append(head);
+
+    const workerSection = el('div', 'group-section');
+    workerSection.append(el('span', 'group-section-title', 'WORKER DEL GRUPPO'));
+    const workerChecks = el('div', 'check-grid');
+
+    for (const workerId of guildDetails.pool.availableWorkerIds) {
+      workerChecks.append(makeCheckChip({
+        value: workerId,
+        label: workerDisplayName(workerId),
+        checked: group.workerIds.includes(workerId),
+        onChange: checked => {
+          if (checked) {
+            for (const candidate of poolDraftGroups) {
+              if (candidate.id !== group.id) {
+                candidate.workerIds = candidate.workerIds.filter(id => id !== workerId);
+                candidate.maxConcurrentPlayers = Math.min(candidate.maxConcurrentPlayers, candidate.workerIds.length);
+              }
+            }
+            if (!group.workerIds.includes(workerId)) group.workerIds.push(workerId);
+          } else {
+            group.workerIds = group.workerIds.filter(id => id !== workerId);
+          }
+
+          group.maxConcurrentPlayers = Math.min(group.maxConcurrentPlayers, group.workerIds.length);
+          renderPoolGroups();
+        },
+      }));
+    }
+
+    workerSection.append(workerChecks);
+    card.append(workerSection);
+
+    const channelSection = el('div', 'group-section');
+    channelSection.append(el('span', 'group-section-title', 'VOCALI RISERVATE AL GRUPPO'));
+    const channelChecks = el('div', 'check-grid');
+
+    if (guildDetails.pool.voiceChannels.length === 0) {
+      channelChecks.append(el('span', 'muted', 'Nessuna vocale disponibile.'));
+    }
+
+    for (const channel of guildDetails.pool.voiceChannels) {
+      channelChecks.append(makeCheckChip({
+        value: channel.id,
+        label: channel.name,
+        checked: group.voiceChannelIds.includes(channel.id),
+        onChange: checked => {
+          if (checked) {
+            for (const candidate of poolDraftGroups) {
+              if (candidate.id !== group.id) {
+                candidate.voiceChannelIds = candidate.voiceChannelIds.filter(id => id !== channel.id);
+              }
+            }
+            if (!group.voiceChannelIds.includes(channel.id)) group.voiceChannelIds.push(channel.id);
+          } else {
+            group.voiceChannelIds = group.voiceChannelIds.filter(id => id !== channel.id);
+          }
+
+          renderPoolGroups();
+        },
+      }));
+    }
+
+    channelSection.append(channelChecks);
+    card.append(channelSection);
+    groupsContainer.append(card);
+  }
+};
+
+const renderPoolConfig = () => {
+  const {config, availableWorkerIds} = guildDetails.pool;
+  guildQuota.min = '0';
+  guildQuota.max = String(availableWorkerIds.length);
+  guildQuota.value = String(Math.min(config.maxConcurrentPlayers, availableWorkerIds.length));
+  poolDraftGroups = config.groups.map(group => ({
+    ...group,
+    workerIds: [...group.workerIds],
+    voiceChannelIds: [...group.voiceChannelIds],
+  }));
+
+  const activePlayers = guildDetails.workers.filter(worker => (
+    worker.ok
+    && worker.value?.status?.players?.some(player => (
+      player.guildId === selectedGuildId && (player.connected || player.hasCurrent)
+    ))
+  )).length;
+  poolUsageLabel.textContent = activePlayers + '/' + config.maxConcurrentPlayers + ' player occupati';
+
+  renderPoolGroups();
+};
+
+const nextGroupId = () => {
+  const used = new Set(poolDraftGroups.map(group => group.id));
+  for (let index = 1; index <= 99; index++) {
+    const id = 'group-' + index;
+    if (!used.has(id)) return id;
+  }
+  throw new Error('Troppi gruppi configurati.');
+};
+
+const addPoolGroup = () => {
+  const assigned = new Set(poolDraftGroups.flatMap(group => group.workerIds));
+  const available = guildDetails.pool.availableWorkerIds.find(workerId => !assigned.has(workerId));
+  if (!available) {
+    poolMessage.textContent = 'Tutti i worker appartengono già a un gruppo.';
+    poolMessage.className = 'error';
+    return;
+  }
+
+  poolDraftGroups.push({
+    id: nextGroupId(),
+    name: 'Nuovo gruppo',
+    workerIds: [available],
+    voiceChannelIds: [],
+    maxConcurrentPlayers: 1,
+    isDefault: poolDraftGroups.length === 0,
+  });
+  poolMessage.textContent = '';
+  poolMessage.className = 'muted';
+  renderPoolGroups();
+};
+
+const savePool = async () => {
+  if (!selectedGuildId) return;
+
+  const maxConcurrentPlayers = Number(guildQuota.value);
+  if (!Number.isSafeInteger(maxConcurrentPlayers)
+    || maxConcurrentPlayers < 0
+    || maxConcurrentPlayers > guildDetails.pool.availableWorkerIds.length) {
+    poolMessage.textContent = 'Quota server non valida.';
+    poolMessage.className = 'error';
+    return;
+  }
+
+  for (const group of poolDraftGroups) {
+    group.name = group.name.trim();
+    if (!group.name || group.workerIds.length === 0) {
+      poolMessage.textContent = 'Ogni gruppo deve avere un nome e almeno un worker.';
+      poolMessage.className = 'error';
+      return;
+    }
+
+    if (!Number.isSafeInteger(group.maxConcurrentPlayers)
+      || group.maxConcurrentPlayers < 0
+      || group.maxConcurrentPlayers > group.workerIds.length) {
+      poolMessage.textContent = 'Quota non valida nel gruppo ' + group.name + '.';
+      poolMessage.className = 'error';
+      return;
+    }
+  }
+
+  if (poolDraftGroups.length > 0
+    && poolDraftGroups.filter(group => group.isDefault).length !== 1) {
+    poolMessage.textContent = 'Deve esserci esattamente un gruppo predefinito.';
+    poolMessage.className = 'error';
+    return;
+  }
+
+  savePoolButton.disabled = true;
+  poolMessage.textContent = 'Salvataggio...';
+  poolMessage.className = 'muted';
+
+  try {
+    await api('/api/guilds/' + encodeURIComponent(selectedGuildId) + '/pool', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': session.csrfToken,
+      },
+      body: JSON.stringify({
+        maxConcurrentPlayers,
+        groups: poolDraftGroups,
+      }),
+    });
+
+    await selectGuild(selectedGuildId);
+    poolMessage.textContent = 'Pool aggiornato.';
+    poolMessage.className = 'success';
+  } catch (error) {
+    poolMessage.textContent = error.message;
+    poolMessage.className = 'error';
+  } finally {
+    savePoolButton.disabled = false;
+  }
+};
+
 const selectedWorkerResults = () => {
   if (!guildDetails) return [];
   return guildDetails.workers.filter(worker => worker.ok && selectedWorkers.has(worker.workerId));
@@ -206,11 +481,21 @@ const renderWorkers = () => {
       updateSelectionSummary();
     });
 
+    const group = guildDetails.pool.config.groups.find(candidate => candidate.workerIds.includes(worker.workerId));
+
     card.append(
       checkbox,
       el('span', 'worker-status', 'Online'),
       el('h3', '', worker.value?.status?.bot?.username ?? worker.workerId),
-      el('div', 'worker-meta', `${worker.value?.status?.bot?.username ?? worker.workerId} · Volume ${worker.value?.settings?.defaultVolume ?? '?'}% · Playlist ${worker.value?.settings?.playlistLimit ?? '?'}`),
+      el(
+        'div',
+        'worker-meta',
+        (group ? group.name + ' · ' : '')
+          + 'Volume '
+          + (worker.value?.settings?.defaultVolume ?? '?')
+          + '% · Playlist '
+          + (worker.value?.settings?.playlistLimit ?? '?'),
+      ),
     );
 
     workerGrid.append(card);
@@ -235,6 +520,7 @@ const selectGuild = async guildId => {
     document.getElementById('page-subtitle').textContent = 'Configura uno, più o tutti i music bot disponibili in questo server.';
     emptyState.hidden = true;
     guildContent.hidden = false;
+    renderPoolConfig();
     renderWorkers();
     statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online`;
     statusPill.className = 'status-pill ok';
@@ -328,6 +614,8 @@ document.getElementById('select-none').addEventListener('click', () => {
 });
 
 applyButton.addEventListener('click', applySettings);
+addGroupButton.addEventListener('click', addPoolGroup);
+savePoolButton.addEventListener('click', savePool);
 
 document.getElementById('logout-button').addEventListener('click', async () => {
   try {
