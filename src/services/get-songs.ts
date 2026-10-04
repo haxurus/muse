@@ -15,11 +15,14 @@ export default class {
   private readonly youtubeAPI: YoutubeAPI;
   private readonly spotifyAPI?: SpotifyAPI;
 
+  private readonly config: Pick<Config, 'ALLOW_HTTP_STREAMS' | 'HTTP_STREAM_ALLOWED_HOSTS'>;
+
   constructor(@inject(TYPES.Services.YoutubeAPI) youtubeAPI: YoutubeAPI,
-    @inject(TYPES.Config) private readonly config: Config,
-    @inject(TYPES.Services.SpotifyAPI) @optional() spotifyAPI?: SpotifyAPI) {
+    @inject(TYPES.Services.SpotifyAPI) @optional() spotifyAPI?: SpotifyAPI,
+    @inject(TYPES.Config) @optional() config?: Config) {
     this.youtubeAPI = youtubeAPI;
     this.spotifyAPI = spotifyAPI;
+    this.config = config ?? {ALLOW_HTTP_STREAMS: false, HTTP_STREAM_ALLOWED_HOSTS: []};
   }
 
   async getSongs(query: string, playlistLimit: number, shouldSplitChapters: boolean): Promise<[SongMetadata[], string]> {
