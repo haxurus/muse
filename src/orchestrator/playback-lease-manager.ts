@@ -117,8 +117,13 @@ export default class PlaybackLeaseManager {
     state: PlaybackLeaseState,
   ): PlaybackLease {
     const existing = this.get(guildId, voiceChannelId);
+    if (existing?.workerId === workerId) {
+      this.setState(guildId, voiceChannelId, state);
+      return this.get(guildId, voiceChannelId)!;
+    }
+
     if (existing) {
-      return existing;
+      this.release(guildId, voiceChannelId);
     }
 
     const conflictingVoice = this.voiceByGuildWorker.get(this.workerKey(guildId, workerId));
