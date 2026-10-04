@@ -108,6 +108,78 @@ describe('playback pool allocation', () => {
     }
   });
 
+  it('keeps a fresh RESERVED lease while worker state is still catching up', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'muse-pool-'));
+
+    try {
+      const groups = new GuildGroupStore(
+        path.join(directory, 'groups.json'),
+        new Set(['muse-01']),
+      );
+      const routing = new GuildRoutingStore(path.join(directory, 'routing.json'));
+      const leases = new PlaybackLeaseManager();
+      leases.reserve(GUILD, VOICE_A, 'muse-01', null);
+
+      const orchestrator = new PlaybackOrchestrator(
+        [makeWorker('muse-01')],
+        groups,
+        routing,
+        leases,
+      );
+
+      await orchestrator.reconcileGuild(GUILD);
+      expect(leases.get(GUILD, VOICE_A)).toEqual(
+        expect.objectContaining({workerId: 'muse-01', state: 'RESERVED'}),
+      );
+    } finally {
+      rmSync(directory, {recursive: true, force: true});
+    }
+  });
+
+  it('releases an IDLE disconnected worker after its completed queue auto-disconnects', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'muse-pool-'));
+
+    try {
+      const groups = new GuildGroupStore(
+        path.join(directory, 'groups.json'),
+        new Set(['muse-01']),
+      );
+      const routing = new GuildRoutingStore(path.join(directory, 'routing.json'));
+      const leases = new PlaybackLeaseManager();
+      leases.reserve(GUILD, VOICE_A, 'muse-01', null);
+      leases.setState(GUILD, VOICE_A, 'ACTIVE');
+
+      const worker = makeWorker('muse-01') as unknown as {
+        id: string;
+        status: ReturnType<typeof vi.fn>;
+      };
+      worker.status.mockResolvedValue({
+        ...workerStatus('muse-01'),
+        players: [{
+          guildId: GUILD,
+          connected: false,
+          channelId: null,
+          lastChannelId: VOICE_A,
+          status: 'IDLE',
+          hasCurrent: true,
+          queueSize: 0,
+        }],
+      });
+
+      const orchestrator = new PlaybackOrchestrator(
+        [worker as unknown as WorkerClient],
+        groups,
+        routing,
+        leases,
+      );
+
+      await orchestrator.reconcileGuild(GUILD);
+      expect(leases.get(GUILD, VOICE_A)).toBeUndefined();
+    } finally {
+      rmSync(directory, {recursive: true, force: true});
+    }
+  });
+
   it('honors a voice-channel group override instead of borrowing from another group', async () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'muse-pool-'));
 
