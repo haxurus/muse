@@ -7,13 +7,18 @@ Upstream tracking branch: `master`
 
 Production-specific additions include:
 
+- one authenticated orchestrator dashboard for multiple Discord guilds;
+- five isolated music workers that can be grouped differently per guild;
+- server, group and per-worker configuration inheritance with arbitrary bulk selection;
+- desired-state reconciliation and per-guild worker enable policy;
+- signed private orchestrator-to-worker control traffic;
 - non-root/read-only Docker runtime;
 - mounted file secrets;
 - Discord readiness health checks;
 - graceful shutdown;
 - secure direct-stream allowlisting;
 - isolated Docker egress network;
-- SQLite backup and automatic rollback;
+- fleet-wide SQLite backup and automatic rollback;
 - GHCR image publishing by immutable digest;
 - restricted GitHub Actions -> VPS deployment.
 
