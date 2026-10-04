@@ -99,6 +99,12 @@ export default class DashboardAuth {
     return guilds.filter(canManageGuild);
   }
 
+  assertMutationAllowed(session: DashboardSession): void {
+    if (!this.store.consumeMutationBudget(session)) {
+      throw new HttpError(429, 'too many configuration changes');
+    }
+  }
+
   assertCsrf(request: IncomingMessage, session: DashboardSession): void {
     const {origin} = request.headers;
     if (origin !== this.config.publicUrl.origin) {
