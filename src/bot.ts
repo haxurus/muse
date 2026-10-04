@@ -98,6 +98,7 @@ export default class {
             return;
           }
         }
+
         if (interaction.isCommand()) {
           const command = this.commandsByName.get(interaction.commandName);
 
