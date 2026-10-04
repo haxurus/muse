@@ -1,4 +1,5 @@
 import {inject, injectable, optional} from 'inversify';
+import Config from './config.js';
 import * as spotifyURI from 'spotify-uri';
 import {SongMetadata, QueuedPlaylist, MediaSource} from './player.js';
 import {TYPES} from '../types.js';
@@ -14,7 +15,9 @@ export default class {
   private readonly youtubeAPI: YoutubeAPI;
   private readonly spotifyAPI?: SpotifyAPI;
 
-  constructor(@inject(TYPES.Services.YoutubeAPI) youtubeAPI: YoutubeAPI, @inject(TYPES.Services.SpotifyAPI) @optional() spotifyAPI?: SpotifyAPI) {
+  constructor(@inject(TYPES.Services.YoutubeAPI) youtubeAPI: YoutubeAPI,
+    @inject(TYPES.Config) private readonly config: Config,
+    @inject(TYPES.Services.SpotifyAPI) @optional() spotifyAPI?: SpotifyAPI) {
     this.youtubeAPI = youtubeAPI;
     this.spotifyAPI = spotifyAPI;
   }
@@ -96,7 +99,11 @@ export default class {
 
       newSongs.push(...convertedSongs);
     } else {
-      const song = await this.httpLiveStream(query);
+      if (!this.isAllowedHttpStream(url)) {
+        throw new Error('that URL provider is not allowed');
+      }
+
+      const song = await this.httpLiveStream(url.href);
 
       if (song) {
         newSongs.push(song);
@@ -152,6 +159,17 @@ export default class {
         return [[], 0, 0];
       }
     }
+  }
+
+  private isAllowedHttpStream(url: URL): boolean {
+    if (!this.config.ALLOW_HTTP_STREAMS) {
+      return false;
+    }
+
+    const host = url.hostname.toLowerCase();
+    return this.config.HTTP_STREAM_ALLOWED_HOSTS.some(allowedHost => (
+      host === allowedHost || host.endsWith(`.${allowedHost}`)
+    ));
   }
 
   private async httpLiveStream(url: string): Promise<SongMetadata> {
