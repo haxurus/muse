@@ -65,6 +65,8 @@ COPY --from=builder --chown=node:node /usr/app/migrations ./migrations
 COPY --from=builder --chown=node:node /usr/app/schema.prisma ./schema.prisma
 COPY --from=builder --chown=node:node /usr/app/package.json ./package.json
 
+RUN mkdir -p /data && chown node:node /data
+
 USER node
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=45s --retries=3 \
