@@ -11,6 +11,7 @@ import prepareYtDlp from './utils/prepare-yt-dlp.js';
 import {prisma} from './utils/db.js';
 import {Client} from 'discord.js';
 import WorkerControlServer from './control/worker-server.js';
+import AddQueryToQueue from './services/add-query-to-queue.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
@@ -64,6 +65,7 @@ const startBot = async () => {
       config,
       container.get<Client>(TYPES.Client),
       container.get<PlayerManager>(TYPES.Managers.Player),
+      container.get<AddQueryToQueue>(TYPES.Services.AddQueryToQueue),
     );
     await workerControlServer.start();
   }
