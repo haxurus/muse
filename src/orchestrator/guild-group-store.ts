@@ -27,7 +27,12 @@ const normalizeName = (value: unknown): string => {
   }
 
   const name = value.trim();
-  if (name.length < 1 || name.length > 48 || /[\u0000-\u001f\u007f]/u.test(name)) {
+  const hasControlCharacter = [...name].some(character => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127;
+  });
+
+  if (name.length < 1 || name.length > 48 || hasControlCharacter) {
     throw new HttpError(400, 'group name must contain 1-48 printable characters');
   }
 
@@ -59,7 +64,7 @@ const validateGuildId = (guildId: string): void => {
 };
 
 export default class GuildGroupStore {
-  private data: StoreData;
+  private readonly data: StoreData;
 
   constructor(
     private readonly filePath: string,
@@ -146,7 +151,9 @@ export default class GuildGroupStore {
     }
 
     if (next.length === 0) {
-      delete this.data.guilds[guildId];
+      this.data.guilds = Object.fromEntries(
+        Object.entries(this.data.guilds).filter(([id]) => id !== guildId),
+      );
     } else {
       this.data.guilds[guildId] = next;
     }
