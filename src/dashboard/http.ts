@@ -5,11 +5,12 @@ import {HttpError} from '../control/http.js';
 const MAX_BODY_BYTES = 64 * 1024;
 
 export const securityHeaders = (): Record<string, string> => ({
-  'content-security-policy': "default-src 'self'; img-src 'self' https://cdn.discordapp.com data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'content-security-policy': "default-src 'self'; img-src 'self' https://cdn.discordapp.com data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'cross-origin-opener-policy': 'same-origin',
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   'referrer-policy': 'no-referrer',
+  'strict-transport-security': 'max-age=31536000',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
 });
