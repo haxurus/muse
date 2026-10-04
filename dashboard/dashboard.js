@@ -248,7 +248,8 @@ const renderPoolGroups = () => {
     for (const workerId of guildDetails.pool.availableWorkerIds) {
       workerChecks.append(makeCheckChip({
         value: workerId,
-        label: workerDisplayName(workerId),
+        label: workerDisplayName(workerId)
+          + (guildDetails.pool.onlineWorkerIds.includes(workerId) ? '' : ' (offline)'),
         checked: group.workerIds.includes(workerId),
         onChange: checked => {
           if (checked) {
