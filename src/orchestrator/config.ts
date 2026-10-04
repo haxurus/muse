@@ -84,6 +84,7 @@ export type OrchestratorConfig = {
   host: string;
   port: number;
   apiToken: string;
+  controllerToken: string;
   workers: WorkerDefinition[];
   groupsFile: string;
   routingFile: string;
@@ -100,6 +101,11 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     throw new Error('MUSE_ORCHESTRATOR_TOKEN_FILE must point to a mounted secret');
   }
 
+  const controllerTokenFile = process.env.MUSE_ORCHESTRATOR_CONTROLLER_TOKEN_FILE;
+  if (!controllerTokenFile?.startsWith('/run/secrets/')) {
+    throw new Error('MUSE_ORCHESTRATOR_CONTROLLER_TOKEN_FILE must point to a mounted secret');
+  }
+
   const groupsFile = process.env.MUSE_ORCHESTRATOR_GROUPS_FILE ?? '/state/groups.json';
   if (!groupsFile.startsWith('/state/')) {
     throw new Error('MUSE_ORCHESTRATOR_GROUPS_FILE must be stored under /state');
@@ -114,6 +120,7 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     host: process.env.MUSE_ORCHESTRATOR_HOST ?? '127.0.0.1',
     port,
     apiToken: readRequiredFile(tokenFile, 'orchestrator API token'),
+    controllerToken: readRequiredFile(controllerTokenFile, 'orchestrator controller token'),
     workers: loadWorkerDefinitions(),
     groupsFile,
     routingFile,
