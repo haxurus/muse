@@ -39,6 +39,7 @@ export default class PoolEngine {
     } = options;
 
     const active = this.sessionAssignments(guildId, workers);
+    this.reconcileReservations(guildId, active);
     const existing = active.find(assignment => assignment.voiceChannelId === voiceChannelId);
     if (existing) {
       return this.toAssignment(guildId, voiceChannelId, existing.worker, config, false);
@@ -143,6 +144,26 @@ export default class PoolEngine {
       groupName: group?.name ?? null,
       reserved,
     };
+  }
+
+  private reconcileReservations(
+    guildId: string,
+    active: Array<{worker: ReachableWorker; voiceChannelId: string}>,
+  ): void {
+    const prefix = guildId + ':';
+    for (const [key, reservation] of this.reservations.entries()) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+
+      const channelId = key.slice(prefix.length);
+      if (active.some(assignment => (
+        assignment.worker.id === reservation.workerId
+        || assignment.voiceChannelId === channelId
+      ))) {
+        this.reservations.delete(key);
+      }
+    }
   }
 
   private cleanupReservations(): void {
