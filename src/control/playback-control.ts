@@ -211,7 +211,7 @@ export default class PlaybackControl {
       throw new HttpError(409, 'no active player for this server');
     }
 
-    const assignedChannelId = player.voiceConnection?.joinConfig.channelId;
+    const assignedChannelId = player.voiceConnection?.joinConfig.channelId ?? player.getLastVoiceChannelId();
     if (assignedChannelId !== body.voiceChannelId) {
       throw new HttpError(409, 'this worker is not assigned to your voice channel');
     }
