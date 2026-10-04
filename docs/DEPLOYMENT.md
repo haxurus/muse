@@ -207,7 +207,7 @@ Muse is considered healthy only after the Discord client has reached ready state
 
 ## 11. Backups
 
-Before replacing a running release the deploy script stops Muse cleanly and archives the SQLite database.
+Before replacing a running release the deploy script stops Muse cleanly and archives all five worker SQLite databases plus the orchestrator's per-guild group state.
 
 Backups are stored in:
 
@@ -217,7 +217,7 @@ Backups are stored in:
 
 They are root-only and files older than 14 days are removed automatically.
 
-The audio cache is intentionally excluded.
+The audio cache is intentionally excluded. The orchestrator group file is included so X+Y layouts are restored together with a rollback.
 
 ## 12. Status and rollback
 
