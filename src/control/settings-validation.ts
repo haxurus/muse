@@ -34,7 +34,7 @@ export const sanitizeGuildSettingsPatch = (input: unknown): GuildSettingsPatch =
 
   const patch: GuildSettingsPatch = {};
   for (const [key, value] of Object.entries(input)) {
-    if (!(key in NUMBER_RANGES) && !BOOLEAN_KEYS.has(key as keyof GuildSettingsPatch)) {
+    if (!Object.prototype.hasOwnProperty.call(NUMBER_RANGES, key) && !BOOLEAN_KEYS.has(key as keyof GuildSettingsPatch)) {
       throw new HttpError(400, `unsupported setting: ${key}`);
     }
 
@@ -49,7 +49,7 @@ export const sanitizeGuildSettingsPatch = (input: unknown): GuildSettingsPatch =
     }
 
     const range = NUMBER_RANGES[typedKey];
-    if (!range || typeof value !== 'number' || !Number.isInteger(value) || value < range[0] || value > range[1]) {
+    if (!range || typeof value !== 'number' || !Number.isSafeInteger(value) || value < range[0] || value > range[1]) {
       throw new HttpError(400, `${key} must be an integer between ${range?.[0] ?? 0} and ${range?.[1] ?? 0}`);
     }
 
