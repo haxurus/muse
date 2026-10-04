@@ -1,8 +1,14 @@
 import type {Setting} from '@prisma/client';
 
+export type WorkerVoiceChannel = {
+  id: string;
+  name: string;
+};
+
 export type WorkerGuild = {
   id: string;
   name: string;
+  voiceChannels: WorkerVoiceChannel[];
 };
 
 export type WorkerPlayerStatus = {
