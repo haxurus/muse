@@ -1,0 +1,368 @@
+const loginView = document.getElementById('login-view');
+const appView = document.getElementById('app-view');
+const guildList = document.getElementById('guild-list');
+const guildContent = document.getElementById('guild-content');
+const emptyState = document.getElementById('empty-state');
+const workerGrid = document.getElementById('worker-grid');
+const settingsForm = document.getElementById('settings-form');
+const selectionSummary = document.getElementById('selection-summary');
+const formMessage = document.getElementById('form-message');
+const applyButton = document.getElementById('apply-button');
+const statusPill = document.getElementById('status-pill');
+
+let session = null;
+let selectedGuildId = null;
+let guildDetails = null;
+const selectedWorkers = new Set();
+
+const SETTINGS = [
+  {key: 'defaultVolume', label: 'Volume predefinito', hint: '0-100', type: 'number', min: 0, max: 100},
+  {key: 'playlistLimit', label: 'Limite playlist', hint: '1-500 tracce', type: 'number', min: 1, max: 500},
+  {key: 'secondsToWaitAfterQueueEmpties', label: 'Auto-disconnect', hint: 'Secondi, 0 = mai', type: 'number', min: 0, max: 86400},
+  {key: 'defaultQueuePageSize', label: 'Pagina coda', hint: '1-30 elementi', type: 'number', min: 1, max: 30},
+  {key: 'leaveIfNoListeners', label: 'Esci senza listener', hint: 'Lascia la vocale se resta solo', type: 'boolean'},
+  {key: 'queueAddResponseEphemeral', label: 'Risposta privata', hint: 'Conferma queue visibile solo al richiedente', type: 'boolean'},
+  {key: 'autoAnnounceNextSong', label: 'Annuncia prossimo brano', hint: 'Messaggio automatico alla traccia successiva', type: 'boolean'},
+  {key: 'turnDownVolumeWhenPeopleSpeak', label: 'Riduci volume al parlato', hint: 'Abbassa la musica quando qualcuno parla', type: 'boolean'},
+  {key: 'turnDownVolumeWhenPeopleSpeakTarget', label: 'Volume durante parlato', hint: '0-100', type: 'number', min: 0, max: 100},
+];
+
+const api = async (url, options = {}) => {
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+  });
+
+  if (response.status === 401) {
+    throw new Error('AUTH_REQUIRED');
+  }
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error || 'Richiesta non riuscita');
+  }
+
+  return body;
+};
+
+const el = (tag, className, text) => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+const showLogin = () => {
+  loginView.hidden = false;
+  appView.hidden = true;
+};
+
+const showApp = () => {
+  loginView.hidden = true;
+  appView.hidden = false;
+};
+
+const guildButton = guild => {
+  const button = el('button', 'guild-button');
+  button.type = 'button';
+  button.dataset.guildId = guild.id;
+
+  let icon;
+  if (guild.iconUrl) {
+    icon = el('img', 'guild-icon');
+    icon.src = guild.iconUrl;
+    icon.alt = '';
+  } else {
+    icon = el('div', 'guild-fallback', guild.name.slice(0, 1).toUpperCase());
+  }
+
+  const copy = el('div', 'guild-copy');
+  copy.append(
+    el('strong', '', guild.name),
+    el('span', '', guild.owner ? 'Proprietario' : 'Amministratore'),
+  );
+
+  button.append(icon, copy, el('span', 'count-badge', String(guild.availableWorkers)));
+  button.addEventListener('click', () => selectGuild(guild.id));
+  return button;
+};
+
+const renderGuilds = () => {
+  guildList.replaceChildren();
+
+  if (session.guilds.length === 0) {
+    guildList.append(el('p', 'muted', 'Nessun server amministrabile con Muse disponibile.'));
+    return;
+  }
+
+  for (const guild of session.guilds) {
+    guildList.append(guildButton(guild));
+  }
+};
+
+const settingControl = definition => {
+  const row = el('label', 'setting-row');
+  const enabled = document.createElement('input');
+  enabled.type = 'checkbox';
+  enabled.className = 'setting-enabled';
+  enabled.dataset.key = definition.key;
+
+  const copy = el('div', 'setting-copy');
+  copy.append(el('strong', '', definition.label), el('span', '', definition.hint));
+
+  let input;
+  if (definition.type === 'boolean') {
+    input = document.createElement('select');
+    const yes = document.createElement('option');
+    yes.value = 'true';
+    yes.textContent = 'Sì';
+    const no = document.createElement('option');
+    no.value = 'false';
+    no.textContent = 'No';
+    input.append(yes, no);
+  } else {
+    input = document.createElement('input');
+    input.type = 'number';
+    input.min = String(definition.min);
+    input.max = String(definition.max);
+    input.step = '1';
+  }
+
+  input.dataset.key = definition.key;
+  input.className = 'setting-input';
+  input.disabled = true;
+
+  enabled.addEventListener('change', () => {
+    input.disabled = !enabled.checked;
+  });
+
+  row.append(enabled, copy, input);
+  return row;
+};
+
+const renderSettingsForm = () => {
+  settingsForm.replaceChildren();
+  for (const definition of SETTINGS) {
+    settingsForm.append(settingControl(definition));
+  }
+};
+
+const selectedWorkerResults = () => {
+  if (!guildDetails) return [];
+  return guildDetails.workers.filter(worker => worker.ok && selectedWorkers.has(worker.workerId));
+};
+
+const syncSuggestedValues = () => {
+  const workers = selectedWorkerResults();
+  for (const definition of SETTINGS) {
+    const input = settingsForm.querySelector(`.setting-input[data-key="${definition.key}"]`);
+    if (!input || workers.length === 0) continue;
+
+    const values = workers.map(worker => worker.value?.[definition.key]);
+    const first = values[0];
+    const allSame = values.every(value => value === first);
+
+    if (!allSame || first === undefined || first === null) {
+      if (input.tagName === 'INPUT') input.value = '';
+      continue;
+    }
+
+    input.value = String(first);
+  }
+};
+
+const updateSelectionSummary = () => {
+  const count = selectedWorkers.size;
+  selectionSummary.textContent = `${count} worker selezionat${count === 1 ? 'o' : 'i'}`;
+  applyButton.disabled = count === 0;
+
+  for (const card of workerGrid.querySelectorAll('.worker-card')) {
+    const checkbox = card.querySelector('input[type="checkbox"]');
+    const selected = checkbox.checked;
+    card.classList.toggle('selected', selected);
+  }
+
+  syncSuggestedValues();
+};
+
+const renderWorkers = () => {
+  workerGrid.replaceChildren();
+  selectedWorkers.clear();
+
+  for (const worker of guildDetails.workers) {
+    if (!worker.ok) continue;
+
+    const card = el('label', 'worker-card');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = worker.workerId;
+
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedWorkers.add(worker.workerId);
+      else selectedWorkers.delete(worker.workerId);
+      updateSelectionSummary();
+    });
+
+    card.append(
+      checkbox,
+      el('span', 'worker-status', 'Online'),
+      el('h3', '', worker.workerId),
+      el('div', 'worker-meta', `Volume ${worker.value?.defaultVolume ?? '?'}% · Playlist ${worker.value?.playlistLimit ?? '?'}`),
+    );
+
+    workerGrid.append(card);
+  }
+
+  updateSelectionSummary();
+};
+
+const selectGuild = async guildId => {
+  selectedGuildId = guildId;
+  formMessage.textContent = '';
+  statusPill.textContent = 'Caricamento';
+  statusPill.className = 'status-pill';
+
+  for (const button of guildList.querySelectorAll('.guild-button')) {
+    button.classList.toggle('active', button.dataset.guildId === guildId);
+  }
+
+  try {
+    guildDetails = await api(`/api/guilds/${encodeURIComponent(guildId)}`);
+    document.getElementById('page-title').textContent = guildDetails.guild.name;
+    document.getElementById('page-subtitle').textContent = 'Configura uno, più o tutti i music bot disponibili in questo server.';
+    emptyState.hidden = true;
+    guildContent.hidden = false;
+    renderWorkers();
+    statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online`;
+    statusPill.className = 'status-pill ok';
+  } catch (error) {
+    formMessage.textContent = error.message;
+    formMessage.className = 'error';
+    statusPill.textContent = 'Errore';
+  }
+};
+
+const collectSettings = () => {
+  const settings = {};
+
+  for (const definition of SETTINGS) {
+    const enabled = settingsForm.querySelector(`.setting-enabled[data-key="${definition.key}"]`);
+    const input = settingsForm.querySelector(`.setting-input[data-key="${definition.key}"]`);
+    if (!enabled.checked) continue;
+
+    if (definition.type === 'boolean') {
+      settings[definition.key] = input.value === 'true';
+      continue;
+    }
+
+    if (input.value === '') {
+      throw new Error(`Inserisci un valore per ${definition.label}`);
+    }
+
+    settings[definition.key] = Number(input.value);
+  }
+
+  if (Object.keys(settings).length === 0) {
+    throw new Error('Seleziona almeno un’impostazione da modificare.');
+  }
+
+  return settings;
+};
+
+const applySettings = async () => {
+  if (!selectedGuildId || selectedWorkers.size === 0) return;
+
+  formMessage.textContent = '';
+  formMessage.className = 'muted';
+  applyButton.disabled = true;
+
+  try {
+    const settings = collectSettings();
+    const result = await api(`/api/guilds/${encodeURIComponent(selectedGuildId)}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': session.csrfToken,
+      },
+      body: JSON.stringify({
+        workerIds: [...selectedWorkers],
+        settings,
+      }),
+    });
+
+    const failed = Array.isArray(result.failed) ? result.failed.length : 0;
+    formMessage.textContent = failed === 0
+      ? 'Configurazione applicata.'
+      : `Configurazione applicata con ${failed} worker non aggiornati.`;
+    formMessage.className = failed === 0 ? 'success' : 'error';
+    await selectGuild(selectedGuildId);
+  } catch (error) {
+    formMessage.textContent = error.message;
+    formMessage.className = 'error';
+  } finally {
+    applyButton.disabled = selectedWorkers.size === 0;
+  }
+};
+
+document.getElementById('select-all').addEventListener('click', () => {
+  for (const checkbox of workerGrid.querySelectorAll('input[type="checkbox"]')) {
+    checkbox.checked = true;
+    selectedWorkers.add(checkbox.value);
+  }
+  updateSelectionSummary();
+});
+
+document.getElementById('select-none').addEventListener('click', () => {
+  for (const checkbox of workerGrid.querySelectorAll('input[type="checkbox"]')) {
+    checkbox.checked = false;
+  }
+  selectedWorkers.clear();
+  updateSelectionSummary();
+});
+
+applyButton.addEventListener('click', applySettings);
+
+document.getElementById('logout-button').addEventListener('click', async () => {
+  try {
+    await fetch('/auth/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'x-csrf-token': session.csrfToken,
+      },
+    });
+  } finally {
+    window.location.assign('/');
+  }
+});
+
+const boot = async () => {
+  renderSettingsForm();
+
+  try {
+    session = await api('/api/session');
+  } catch (error) {
+    if (error.message === 'AUTH_REQUIRED') {
+      showLogin();
+      return;
+    }
+
+    showLogin();
+    return;
+  }
+
+  document.getElementById('user-name').textContent = session.user.displayName;
+  document.getElementById('user-username').textContent = `@${session.user.username}`;
+
+  const avatar = document.getElementById('user-avatar');
+  if (session.user.avatarUrl) {
+    avatar.src = session.user.avatarUrl;
+  } else {
+    avatar.hidden = true;
+  }
+
+  renderGuilds();
+  showApp();
+};
+
+void boot();
