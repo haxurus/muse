@@ -1,0 +1,57 @@
+name: Refresh yt-dlp image
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: muse-yt-dlp-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Resolve latest yt-dlp version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL https://pypi.org/pypi/yt-dlp/json | jq -r '.info.version')"
+          [[ "$version" =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build immutable refreshed image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/haxurus/muse:yt-dlp-latest
+            ghcr.io/haxurus/muse:yt-dlp-${{ steps.version.outputs.value }}
+          build-args: |
+            YT_DLP_VERSION=${{ steps.version.outputs.value }}
+            COMMIT_HASH=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
