@@ -116,9 +116,12 @@ export default class PlaybackControl {
     const channel = this.requireVoiceChannel(guildId, body.voiceChannelId);
     this.requireRequesterInChannel(channel, body.requesterId);
     const player = this.playerManager.find(guildId);
+    if (!player) {
+      throw new HttpError(409, 'nothing to play');
+    }
 
-    const currentSong = player?.getCurrent();
-    if (currentSong === null || currentSong === undefined) {
+    const currentSong = player.getCurrent();
+    if (currentSong === null) {
       throw new HttpError(409, 'nothing to play');
     }
 
