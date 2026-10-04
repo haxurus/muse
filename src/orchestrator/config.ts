@@ -95,6 +95,7 @@ export default class OrchestratorConfig {
   readonly LISTEN_PORT = parseInt(process.env.ORCHESTRATOR_LISTEN_PORT ?? '3000', 10);
   readonly SESSION_TTL_MS = parseInt(process.env.ORCHESTRATOR_SESSION_TTL_MS ?? '28800000', 10);
   readonly WORKERS = loadWorkers(required('ORCHESTRATOR_WORKERS_FILE'));
+  readonly INGRESS_WORKER_ID = process.env.ORCHESTRATOR_INGRESS_WORKER_ID ?? 'muse-01';
 
   constructor() {
     const publicUrl = new URL(this.PUBLIC_BASE_URL);
@@ -104,6 +105,10 @@ export default class OrchestratorConfig {
 
     if (!Number.isInteger(this.LISTEN_PORT) || this.LISTEN_PORT < 1 || this.LISTEN_PORT > 65_535) {
       throw new Error('ORCHESTRATOR_LISTEN_PORT must be between 1 and 65535');
+    }
+
+    if (!this.WORKERS.some(worker => worker.id === this.INGRESS_WORKER_ID)) {
+      throw new Error('ORCHESTRATOR_INGRESS_WORKER_ID must reference a configured worker');
     }
 
     if (!Number.isInteger(this.SESSION_TTL_MS) || this.SESSION_TTL_MS < 300_000 || this.SESSION_TTL_MS > 86_400_000) {
