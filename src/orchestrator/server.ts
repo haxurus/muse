@@ -24,6 +24,12 @@ import {
   removeGroup,
 } from './store.js';
 import {disconnectWorkerFromGuild} from './worker-client.js';
+import {verifyControlRequest} from '../control/signature.js';
+import {
+  routePoolIngressCommand,
+  validatePoolIngressRequest,
+  withGuildPoolLock,
+} from './pool-router.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const rateLimits = new Map<string, {windowStart: number; reads: number; writes: number}>();
@@ -52,7 +58,7 @@ const sendHtml = (response: ServerResponse, statusCode: number, html: string) =>
   response.end(html);
 };
 
-const readBody = async (request: IncomingMessage): Promise<unknown> => new Promise((resolve, reject) => {
+const readRawBody = async (request: IncomingMessage): Promise<string> => new Promise((resolve, reject) => {
   let body = '';
   let size = 0;
 
@@ -69,18 +75,23 @@ const readBody = async (request: IncomingMessage): Promise<unknown> => new Promi
   });
   request.once('error', reject);
   request.once('end', () => {
-    if (body === '') {
-      resolve({});
-      return;
-    }
-
-    try {
-      resolve(JSON.parse(body) as unknown);
-    } catch {
-      reject(new Error('invalid JSON body'));
-    }
+    resolve(body);
   });
 });
+
+const parseBody = (body: string): unknown => {
+  if (body === '') {
+    return {};
+  }
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new Error('invalid JSON body');
+  }
+};
+
+const readBody = async (request: IncomingMessage): Promise<unknown> => parseBody(await readRawBody(request));
 
 const requireSession = (request: IncomingMessage): DashboardSession => {
   const session = getSession(request);
@@ -135,6 +146,49 @@ export const startOrchestratorServer = (config: OrchestratorConfig) => {
         sendJson(response, 200, {ok: true, workersConfigured: config.WORKERS.length});
         return;
       }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/internal/v1/commands') {
+        const workerId = typeof request.headers['x-muse-worker-id'] === 'string'
+          ? request.headers['x-muse-worker-id']
+          : '';
+        if (workerId !== config.INGRESS_WORKER_ID) {
+          sendJson(response, 401, {error: 'unauthorized'});
+          return;
+        }
+
+        const ingressWorker = config.WORKERS.find(worker => worker.id === workerId);
+        if (!ingressWorker) {
+          sendJson(response, 401, {error: 'unauthorized'});
+          return;
+        }
+
+        const rawBody = await readRawBody(request);
+        const authenticated = verifyControlRequest({
+          secret: ingressWorker.secret,
+          method: 'POST',
+          requestPath: requestUrl.pathname,
+          body: rawBody,
+          timestampHeader: typeof request.headers['x-muse-timestamp'] === 'string'
+            ? request.headers['x-muse-timestamp']
+            : undefined,
+          signatureHeader: typeof request.headers['x-muse-signature'] === 'string'
+            ? request.headers['x-muse-signature']
+            : undefined,
+        });
+        if (!authenticated) {
+          sendJson(response, 401, {error: 'unauthorized'});
+          return;
+        }
+
+        const poolRequest = validatePoolIngressRequest(parseBody(rawBody));
+        const result = await withGuildPoolLock(
+          poolRequest.guildId,
+          async () => routePoolIngressCommand(poolRequest, config),
+        );
+        sendJson(response, 200, result);
+        return;
+      }
+
 
       if (request.method === 'GET' && requestUrl.pathname === '/auth/login') {
         beginDiscordLogin(response, config);
