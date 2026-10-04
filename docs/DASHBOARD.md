@@ -112,10 +112,17 @@ POST /auth/logout
 
 GET   /api/session
 GET   /api/guilds/:guildId
-PATCH /api/guilds/:guildId
+PATCH  /api/guilds/:guildId
+POST   /api/guilds/:guildId/groups
+PATCH  /api/guilds/:guildId/groups/:groupId
+DELETE /api/guilds/:guildId/groups/:groupId
 ```
 
-The PATCH endpoint accepts a subset of workers plus a settings patch.
+The dashboard also exposes persistent worker groups scoped to the selected Discord server. An administrator can create any combination, edit membership, delete a group, or select a group and then apply a settings patch to its currently available workers.
+
+Groups may overlap and are intentionally not global. A `Principali = 1+2+3` group in Server A has no effect on Server B.
+
+The PATCH settings endpoint accepts a subset of workers plus a settings patch.
 
 Example:
 
