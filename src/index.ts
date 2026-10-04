@@ -9,9 +9,12 @@ import PlayerManager from './managers/player.js';
 import ThirdParty from './services/third-party.js';
 import prepareYtDlp from './utils/prepare-yt-dlp.js';
 import {prisma} from './utils/db.js';
+import {Client} from 'discord.js';
+import WorkerControlServer from './control/worker-server.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
+let workerControlServer: WorkerControlServer | undefined;
 
 const shutdown = async (signal: NodeJS.Signals) => {
   if (shuttingDown) {
@@ -23,6 +26,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
 
   try {
     bot.shutdown();
+    await workerControlServer?.close();
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
 
     if (container.isBound(TYPES.ThirdParty)) {
@@ -54,6 +58,15 @@ const startBot = async () => {
 
   await container.get<FileCacheProvider>(TYPES.FileCache).cleanup();
   await prepareYtDlp(config);
+
+  if (config.WORKER_ID) {
+    workerControlServer = new WorkerControlServer(
+      config,
+      container.get<Client>(TYPES.Client),
+      container.get<PlayerManager>(TYPES.Managers.Player),
+    );
+    await workerControlServer.start();
+  }
 
   installSignalHandlers();
   await bot.register();
