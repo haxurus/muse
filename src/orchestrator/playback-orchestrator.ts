@@ -57,7 +57,7 @@ export default class PlaybackOrchestrator {
     let wasNewLease = false;
 
     const allocation = await this.leases.withGuildLock(guildId, async () => {
-      await this.reconcileGuild(guildId);
+      this.reconcileGuildFromStatuses(guildId, await this.statuses());
 
       const existing = this.leases.get(guildId, voiceChannelId);
       if (existing) {
@@ -185,18 +185,27 @@ export default class PlaybackOrchestrator {
     const guildIds = new Set<string>();
 
     for (const {status} of statuses) {
+      for (const guild of status?.guilds ?? []) {
+        guildIds.add(guild.id);
+      }
+
       for (const player of status?.players ?? []) {
         guildIds.add(player.guildId);
       }
     }
 
-    for (const guildId of guildIds) {
-      this.reconcileGuildFromStatuses(guildId, statuses);
-    }
+    await Promise.all([...guildIds].map(async guildId => this.leases.withGuildLock(
+      guildId,
+      async () => {
+        this.reconcileGuildFromStatuses(guildId, statuses);
+      },
+    )));
   }
 
   async reconcileGuild(guildId: string): Promise<void> {
-    this.reconcileGuildFromStatuses(guildId, await this.statuses());
+    await this.leases.withGuildLock(guildId, async () => {
+      this.reconcileGuildFromStatuses(guildId, await this.statuses());
+    });
   }
 
   private reconcileGuildFromStatuses(guildId: string, statuses: WorkerStatusResult[]): void {
@@ -207,6 +216,16 @@ export default class PlaybackOrchestrator {
 
       const player = status.players.find(candidate => candidate.guildId === guildId);
       if (!player) {
+        const existingLease = this.leases.allForGuild(guildId)
+          .find(lease => lease.workerId === worker.id);
+        const reservationAgeMs = existingLease?.state === 'RESERVED'
+          ? Date.now() - Date.parse(existingLease.createdAt)
+          : Number.POSITIVE_INFINITY;
+
+        if (existingLease?.state === 'RESERVED' && reservationAgeMs < 90_000) {
+          continue;
+        }
+
         this.leases.releaseWorker(guildId, worker.id);
         continue;
       }
@@ -226,7 +245,7 @@ export default class PlaybackOrchestrator {
 
   private async resolveLease(guildId: string, voiceChannelId: string | null): Promise<PlaybackLease> {
     return this.leases.withGuildLock(guildId, async () => {
-      await this.reconcileGuild(guildId);
+      this.reconcileGuildFromStatuses(guildId, await this.statuses());
 
       if (voiceChannelId) {
         const lease = this.leases.get(guildId, voiceChannelId);
