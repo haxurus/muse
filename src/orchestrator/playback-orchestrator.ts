@@ -92,7 +92,8 @@ export default class PlaybackOrchestrator {
         }
 
         const player = status.players.find(candidatePlayer => candidatePlayer.guildId === guildId);
-        return !player || (!player.connected && !player.hasCurrent);
+        return !player
+          || (!player.connected && (!player.hasCurrent || player.status === 'IDLE'));
       });
 
       if (!worker) {
@@ -211,10 +212,13 @@ export default class PlaybackOrchestrator {
       }
 
       const recoverChannelId = player.channelId ?? player.lastChannelId;
-      if ((player.connected || player.hasCurrent) && recoverChannelId) {
+      const retainsSession = player.connected
+        || (player.hasCurrent && player.status !== 'IDLE');
+
+      if (retainsSession && recoverChannelId) {
         const state: PlaybackLeaseState = player.status === 'PLAYING' ? 'ACTIVE' : 'PAUSED';
         this.leases.recover(guildId, recoverChannelId, worker.id, state);
-      } else if (!player.connected && !player.hasCurrent) {
+      } else if (!player.connected) {
         this.leases.releaseWorker(guildId, worker.id);
       }
     }
