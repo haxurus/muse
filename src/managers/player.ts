@@ -17,12 +17,14 @@ export default class {
     this.youtubeAPI = youtubeAPI;
   }
 
-  snapshot(): Array<{guildId: string; connected: boolean; channelId: string | null; status: string}> {
+  snapshot(): Array<{guildId: string; connected: boolean; channelId: string | null; status: string; hasCurrent: boolean; queueSize: number}> {
     return [...this.guildPlayers.entries()].map(([guildId, player]) => ({
       guildId,
       connected: player.voiceConnection !== null,
       channelId: player.voiceConnection?.joinConfig.channelId ?? null,
       status: STATUS[player.status],
+      hasCurrent: player.getCurrent() !== null,
+      queueSize: player.queueSize(),
     }));
   }
 
