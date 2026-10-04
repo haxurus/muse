@@ -88,7 +88,7 @@ dashboard-web         internal
    |
 dashboard             OAuth session + orchestrator token
    |  \
-   |   egress          Discord OAuth/API only
+   |   dashboard-egress  Discord OAuth/API only
    |
 dashboard-control     internal
    |
