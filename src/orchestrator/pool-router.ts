@@ -267,7 +267,10 @@ export const withGuildPoolLock = async <T>(guildId: string, operation: () => Pro
   const current = new Promise<void>(resolve => {
     release = resolve;
   });
-  const queued = previous.then(() => current);
+  const queued = (async () => {
+    await previous;
+    await current;
+  })();
   guildLocks.set(guildId, queued);
 
   await previous;
