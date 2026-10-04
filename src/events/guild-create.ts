@@ -15,6 +15,7 @@ export async function createGuildSettings(guildId: string): Promise<Setting> {
     },
     create: {
       guildId,
+      enableSponsorBlock: process.env.ENABLE_SPONSORBLOCK === 'true',
     },
     update: {},
   });
