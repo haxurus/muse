@@ -223,7 +223,6 @@ export const startOrchestratorServer = (config: OrchestratorConfig) => {
         return;
       }
 
-
       if (request.method === 'GET' && requestUrl.pathname === '/auth/login') {
         beginDiscordLogin(response, config);
         return;
