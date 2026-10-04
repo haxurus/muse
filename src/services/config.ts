@@ -46,6 +46,9 @@ const CONFIG_MAP = {
   SPOTIFY_CLIENT_ID: readSecret('SPOTIFY_CLIENT_ID', true),
   SPOTIFY_CLIENT_SECRET: readSecret('SPOTIFY_CLIENT_SECRET', true),
   REGISTER_COMMANDS_ON_BOT: process.env.REGISTER_COMMANDS_ON_BOT === 'true',
+  ENABLE_DISCORD_COMMANDS: process.env.ENABLE_DISCORD_COMMANDS !== 'false',
+  POOL_INGRESS_ENABLED: process.env.POOL_INGRESS_ENABLED === 'true',
+  ORCHESTRATOR_INTERNAL_URL: process.env.ORCHESTRATOR_INTERNAL_URL ?? '',
   DATA_DIR,
   CACHE_DIR: path.join(DATA_DIR, 'cache'),
   CACHE_LIMIT_IN_BYTES: xbytes.parseSize(process.env.CACHE_LIMIT ?? '2GB'),
@@ -60,6 +63,11 @@ const CONFIG_MAP = {
   ALLOW_HTTP_STREAMS: process.env.ALLOW_HTTP_STREAMS === 'true',
   HTTP_STREAM_ALLOWED_HOSTS: parseHostAllowlist(process.env.HTTP_STREAM_ALLOWED_HOSTS),
   READY_FILE: process.env.MUSE_READY_FILE ?? '/tmp/muse-ready',
+  WORKER_ID: process.env.WORKER_ID ?? 'muse-01',
+  WORKER_LABEL: process.env.WORKER_LABEL ?? process.env.WORKER_ID ?? 'Muse Worker',
+  WORKER_CONTROL_ENABLED: process.env.WORKER_CONTROL_ENABLED === 'true',
+  WORKER_CONTROL_PORT: parseInt(process.env.WORKER_CONTROL_PORT ?? '3001', 10),
+  WORKER_CONTROL_SECRET: readSecret('WORKER_CONTROL_SECRET', true),
 } as const;
 
 const BOT_ACTIVITY_TYPE_MAP = {
@@ -76,6 +84,9 @@ export default class Config {
   readonly SPOTIFY_CLIENT_ID!: string;
   readonly SPOTIFY_CLIENT_SECRET!: string;
   readonly REGISTER_COMMANDS_ON_BOT!: boolean;
+  readonly ENABLE_DISCORD_COMMANDS!: boolean;
+  readonly POOL_INGRESS_ENABLED!: boolean;
+  readonly ORCHESTRATOR_INTERNAL_URL!: string;
   readonly DATA_DIR!: string;
   readonly CACHE_DIR!: string;
   readonly CACHE_LIMIT_IN_BYTES!: number;
@@ -90,6 +101,11 @@ export default class Config {
   readonly ALLOW_HTTP_STREAMS!: boolean;
   readonly HTTP_STREAM_ALLOWED_HOSTS!: readonly string[];
   readonly READY_FILE!: string;
+  readonly WORKER_ID!: string;
+  readonly WORKER_LABEL!: string;
+  readonly WORKER_CONTROL_ENABLED!: boolean;
+  readonly WORKER_CONTROL_PORT!: number;
+  readonly WORKER_CONTROL_SECRET!: string;
 
   constructor() {
     for (const [key, value] of Object.entries(CONFIG_MAP)) {
@@ -128,6 +144,31 @@ export default class Config {
       } else {
         throw new Error(`Unsupported type for ${key}`);
       }
+    }
+
+    if (this.POOL_INGRESS_ENABLED) {
+      if (!this.ENABLE_DISCORD_COMMANDS) {
+        throw new Error('POOL_INGRESS_ENABLED requires ENABLE_DISCORD_COMMANDS');
+      }
+
+      let orchestratorUrl: URL;
+      try {
+        orchestratorUrl = new URL(this.ORCHESTRATOR_INTERNAL_URL);
+      } catch {
+        throw new Error('ORCHESTRATOR_INTERNAL_URL must be a valid URL when pool ingress is enabled');
+      }
+
+      if (orchestratorUrl.protocol !== 'http:' || orchestratorUrl.username || orchestratorUrl.password) {
+        throw new Error('ORCHESTRATOR_INTERNAL_URL must be a plain internal HTTP URL');
+      }
+    }
+
+    if (this.WORKER_CONTROL_PORT < 1 || this.WORKER_CONTROL_PORT > 65_535) {
+      throw new Error('WORKER_CONTROL_PORT must be between 1 and 65535');
+    }
+
+    if (this.WORKER_CONTROL_ENABLED && this.WORKER_CONTROL_SECRET.length < 32) {
+      throw new Error('WORKER_CONTROL_SECRET must contain at least 32 characters when worker control is enabled');
     }
 
     if (this.ALLOW_HTTP_STREAMS && this.HTTP_STREAM_ALLOWED_HOSTS.length === 0) {

@@ -17,6 +17,20 @@ export default class {
     this.youtubeAPI = youtubeAPI;
   }
 
+  snapshot() {
+    return [...this.guildPlayers.values()].map(player => ({
+      guildId: player.guildId,
+      voiceChannelId: player.voiceConnection?.joinConfig.channelId ?? null,
+      status: player.status,
+      queueLength: player.getQueue().length,
+      currentTitle: player.getCurrent()?.title ?? null,
+    }));
+  }
+
+  getExisting(guildId: string): Player | undefined {
+    return this.guildPlayers.get(guildId);
+  }
+
   cleanup(): void {
     for (const player of this.guildPlayers.values()) {
       player.stop();

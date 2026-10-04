@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     }>,
     restPut: vi.fn(),
     restSetToken: vi.fn(),
+    settingFindUnique: vi.fn(),
     settingUpsert: vi.fn(),
     spinner,
     voiceStateHandler: vi.fn(),
@@ -59,7 +60,10 @@ vi.mock('../src/inversify.config.js', () => ({
 
 vi.mock('../src/utils/db.js', () => ({
   prisma: {
-    setting: {upsert: mocks.settingUpsert},
+    setting: {
+      findUnique: mocks.settingFindUnique,
+      upsert: mocks.settingUpsert,
+    },
   },
 }));
 
@@ -163,6 +167,8 @@ const makeConfig = (registerCommandsOnBot: boolean, activityUrl = '') => ({
   BOT_STATUS: 'idle' as const,
   DISCORD_TOKEN: 'fake-token',
   REGISTER_COMMANDS_ON_BOT: registerCommandsOnBot,
+  ENABLE_DISCORD_COMMANDS: true,
+  POOL_INGRESS_ENABLED: false,
 });
 
 const makeClient = (guildIds: string[] = []) => {
@@ -243,6 +249,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.login.mockResolvedValue(undefined);
   mocks.restPut.mockResolvedValue(undefined);
+  mocks.settingFindUnique.mockResolvedValue({orchestratorEnabled: true});
   mocks.settingUpsert.mockResolvedValue({guildId: 'guild-new'});
   mocks.spinner.text = '';
   mocks.spinner.start.mockReturnValue(mocks.spinner);
@@ -373,6 +380,21 @@ describe('interaction boundaries', () => {
     await invoke(handlers, 'interactionCreate', interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith('🚫 ope: you can\'t use this bot in a DM');
+    expect(command.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects commands when the orchestrator disables this worker for the guild', async () => {
+    mocks.settingFindUnique.mockResolvedValueOnce({orchestratorEnabled: false});
+    const command = makeCommand('play');
+    const {handlers} = await registerBot(true, [command]);
+    const interaction = makeInteraction('play');
+
+    await invoke(handlers, 'interactionCreate', interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: '🚫 ope: this music worker is disabled for this server',
+      ephemeral: true,
+    });
     expect(command.execute).not.toHaveBeenCalled();
   });
 

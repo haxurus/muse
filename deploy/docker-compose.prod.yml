@@ -1,45 +1,236 @@
+x-worker-common: &worker-common
+  image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment: &worker-environment
+    NODE_ENV: production
+    DATA_DIR: /data
+    YOUTUBE_API_KEY_FILE: /run/secrets/youtube_api_key
+    SPOTIFY_CLIENT_ID_FILE: /run/secrets/spotify_client_id
+    SPOTIFY_CLIENT_SECRET_FILE: /run/secrets/spotify_client_secret
+    MUSE_READY_FILE: /tmp/muse-ready
+    YT_DLP_AUTO_UPDATE: "false"
+    WORKER_CONTROL_ENABLED: "true"
+    WORKER_CONTROL_PORT: "3001"
+    ENABLE_DISCORD_COMMANDS: "false"
+    POOL_INGRESS_ENABLED: "false"
+  networks:
+    - control
+    - egress
+  group_add:
+    - "${MUSE_SECRET_GID:?MUSE_SECRET_GID must be configured by the installer}"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m
+  pids_limit: 256
+  mem_limit: 768m
+  cpus: 1.5
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+  secrets:
+    - youtube_api_key
+    - spotify_client_id
+    - spotify_client_secret
+
 services:
-  muse:
+  muse-orchestrator:
     image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
+    command: ["node", "--enable-source-maps", "dist/scripts/migrate-and-start-orchestrator.js"]
     restart: unless-stopped
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      DATA_DIR: /data
-      DISCORD_TOKEN_FILE: /run/secrets/discord_token
-      YOUTUBE_API_KEY_FILE: /run/secrets/youtube_api_key
-      SPOTIFY_CLIENT_ID_FILE: /run/secrets/spotify_client_id
-      SPOTIFY_CLIENT_SECRET_FILE: /run/secrets/spotify_client_secret
-      MUSE_READY_FILE: /tmp/muse-ready
-      YT_DLP_AUTO_UPDATE: "false"
-    secrets:
-      - discord_token
-      - youtube_api_key
-      - spotify_client_id
-      - spotify_client_secret
+      ORCHESTRATOR_DATA_DIR: /control
+      ORCHESTRATOR_LISTEN_HOST: 0.0.0.0
+      ORCHESTRATOR_LISTEN_PORT: "3000"
+      ORCHESTRATOR_WORKERS_FILE: /config/workers.json
+      ORCHESTRATOR_INGRESS_WORKER_ID: muse-01
+      ORCHESTRATOR_DISCORD_CLIENT_SECRET_FILE: /run/secrets/orchestrator_discord_client_secret
     volumes:
-      - ./data:/data
+      - ./control:/control
+      - ./workers.json:/config/workers.json:ro
     networks:
+      - dashboard_internal
+      - control
       - egress
+    group_add:
+      - "${MUSE_SECRET_GID:?MUSE_SECRET_GID must be configured by the installer}"
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=128m
-    pids_limit: 256
-    mem_limit: 1024m
-    cpus: 2.0
-    stop_grace_period: 30s
+      - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 1.0
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    secrets:
+      - orchestrator_discord_client_secret
+      - worker_control_01
+      - worker_control_02
+      - worker_control_03
+      - worker_control_04
+      - worker_control_05
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: "3"
 
+  muse-edge:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      muse-orchestrator:
+        condition: service_healthy
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - proxy_net
+      - dashboard_internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+    pids_limit: 64
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  muse-01:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      WORKER_ID: muse-01
+      WORKER_LABEL: Music 1
+      ENABLE_DISCORD_COMMANDS: "true"
+      POOL_INGRESS_ENABLED: "true"
+      ORCHESTRATOR_INTERNAL_URL: http://muse-orchestrator:3000
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_01
+      WORKER_CONTROL_SECRET_FILE: /run/secrets/worker_control_01
+    volumes:
+      - ./data/muse-01:/data
+    secrets:
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+      - discord_token_01
+      - worker_control_01
+
+  muse-02:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      WORKER_ID: muse-02
+      WORKER_LABEL: Music 2
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_02
+      WORKER_CONTROL_SECRET_FILE: /run/secrets/worker_control_02
+    volumes:
+      - ./data/muse-02:/data
+    secrets:
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+      - discord_token_02
+      - worker_control_02
+
+  muse-03:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      WORKER_ID: muse-03
+      WORKER_LABEL: Music 3
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_03
+      WORKER_CONTROL_SECRET_FILE: /run/secrets/worker_control_03
+    volumes:
+      - ./data/muse-03:/data
+    secrets:
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+      - discord_token_03
+      - worker_control_03
+
+  muse-04:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      WORKER_ID: muse-04
+      WORKER_LABEL: Music 4
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_04
+      WORKER_CONTROL_SECRET_FILE: /run/secrets/worker_control_04
+    volumes:
+      - ./data/muse-04:/data
+    secrets:
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+      - discord_token_04
+      - worker_control_04
+
+  muse-05:
+    <<: *worker-common
+    environment:
+      <<: *worker-environment
+      WORKER_ID: muse-05
+      WORKER_LABEL: Music 5
+      DISCORD_TOKEN_FILE: /run/secrets/discord_token_05
+      WORKER_CONTROL_SECRET_FILE: /run/secrets/worker_control_05
+    volumes:
+      - ./data/muse-05:/data
+    secrets:
+      - youtube_api_key
+      - spotify_client_id
+      - spotify_client_secret
+      - discord_token_05
+      - worker_control_05
+
 networks:
+  proxy_net:
+    external: true
+  dashboard_internal:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-dash
+  control:
+    internal: true
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: muse-ctl
+      com.docker.network.bridge.enable_icc: "true"
   egress:
     driver: bridge
     driver_opts:
@@ -47,11 +238,31 @@ networks:
       com.docker.network.bridge.enable_icc: "false"
 
 secrets:
-  discord_token:
-    file: ./secrets/discord_token
+  discord_token_01:
+    file: ./secrets/discord_token_01
+  discord_token_02:
+    file: ./secrets/discord_token_02
+  discord_token_03:
+    file: ./secrets/discord_token_03
+  discord_token_04:
+    file: ./secrets/discord_token_04
+  discord_token_05:
+    file: ./secrets/discord_token_05
   youtube_api_key:
     file: ./secrets/youtube_api_key
   spotify_client_id:
     file: ./secrets/spotify_client_id
   spotify_client_secret:
     file: ./secrets/spotify_client_secret
+  orchestrator_discord_client_secret:
+    file: ./secrets/orchestrator_discord_client_secret
+  worker_control_01:
+    file: ./secrets/worker_control_01
+  worker_control_02:
+    file: ./secrets/worker_control_02
+  worker_control_03:
+    file: ./secrets/worker_control_03
+  worker_control_04:
+    file: ./secrets/worker_control_04
+  worker_control_05:
+    file: ./secrets/worker_control_05

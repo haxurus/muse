@@ -9,9 +9,14 @@ import PlayerManager from './managers/player.js';
 import ThirdParty from './services/third-party.js';
 import prepareYtDlp from './utils/prepare-yt-dlp.js';
 import {prisma} from './utils/db.js';
+import {Client} from 'discord.js';
+import {Server} from 'node:http';
+import {startWorkerControlServer} from './worker-control/server.js';
+import Command from './commands/index.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
+let workerControlServer: Server | null = null;
 
 const shutdown = async (signal: NodeJS.Signals) => {
   if (shuttingDown) {
@@ -24,6 +29,21 @@ const shutdown = async (signal: NodeJS.Signals) => {
   try {
     bot.shutdown();
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
+
+    if (workerControlServer) {
+      const server = workerControlServer;
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+      workerControlServer = null;
+    }
 
     if (container.isBound(TYPES.ThirdParty)) {
       container.get<ThirdParty>(TYPES.ThirdParty).cleanup();
@@ -54,6 +74,21 @@ const startBot = async () => {
 
   await container.get<FileCacheProvider>(TYPES.FileCache).cleanup();
   await prepareYtDlp(config);
+
+  if (config.WORKER_CONTROL_ENABLED) {
+    const commands = new Map(
+      container.getAll<Command>(TYPES.Command)
+        .filter(command => Boolean(command.slashCommand.name))
+        .map(command => [command.slashCommand.name!, command]),
+    );
+
+    workerControlServer = startWorkerControlServer({
+      config,
+      client: container.get<Client>(TYPES.Client),
+      playerManager: container.get<PlayerManager>(TYPES.Managers.Player),
+      commands,
+    });
+  }
 
   installSignalHandlers();
   await bot.register();

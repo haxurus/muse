@@ -34,6 +34,8 @@ model Setting {
   defaultQueuePageSize                Int      @default(10)
   turnDownVolumeWhenPeopleSpeak       Boolean  @default(false)
   turnDownVolumeWhenPeopleSpeakTarget Int      @default(20)
+  enableSponsorBlock                  Boolean  @default(false)
+  orchestratorEnabled                Boolean  @default(true)
   createdAt                           DateTime @default(now())
   updatedAt                           DateTime @updatedAt
 }
@@ -48,4 +50,45 @@ model FavoriteQuery {
   updatedAt DateTime @updatedAt
 
   @@unique([guildId, name])
+}
+
+model ManagedGuild {
+  guildId              String                    @id
+  name                 String?
+  configJson           String                    @default("{}")
+  maxConcurrentPlayers Int                       @default(5)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  groups               BotGroup[]
+  assignments          GuildWorkerAssignment[]
+}
+
+model BotGroup {
+  id          String                    @id @default(cuid())
+  guildId     String
+  name        String
+  configJson  String                    @default("{}")
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  guild       ManagedGuild              @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  assignments GuildWorkerAssignment[]
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+model GuildWorkerAssignment {
+  guildId        String
+  workerId       String
+  groupId        String?
+  enabled        Boolean      @default(true)
+  preferredOrder Int          @default(100)
+  configJson     String       @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  guild          ManagedGuild @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  group          BotGroup?    @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@id([guildId, workerId])
+  @@index([groupId])
 }

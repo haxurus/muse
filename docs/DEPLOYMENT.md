@@ -1,21 +1,74 @@
-# Production deployment on VPS01
+# Muse fleet deployment on VPS01
 
-This fork keeps upstream integration separate from production:
+Production consists of one control plane and five isolated music workers.
 
-- `master` is reserved for tracking `museofficial/muse`;
-- `main` is the hardened Haxurus production branch;
-- production images are built from `main` and published to `ghcr.io/haxurus/muse`;
-- the VPS deploys immutable image digests only.
+```text
+Nginx Proxy Manager
+        |
+        v
+    muse-edge
+        |
+        v
+muse-orchestrator
+        |
+   private control network
+        |
+  +-----+-----+-----+-----+
+  |     |     |     |     |
+  v     v     v     v     v
+muse-01 ...             muse-05
+```
 
-Muse does not need Nginx Proxy Manager and publishes no host ports. Discord Gateway, REST, voice and media traffic are outbound connections.
+Only `muse-edge` joins `proxy_net`. The orchestrator and music workers are not directly attached to the shared reverse-proxy network.
 
-## 1. Set the production branch as default
+## Branch model
 
-In GitHub repository settings, set the default branch to `main`.
+- `master`: upstream tracking branch.
+- `main`: hardened production branch.
 
-The GitHub connector used to prepare this fork cannot change repository administration settings, so this is intentionally a manual repository-setting step. Keep `master` available for upstream synchronization.
+Set `main` as the default branch after the orchestrator pull request has been reviewed and merged.
 
-## 2. Create the deploy SSH key
+## Discord applications
+
+### Five music bot applications
+
+Create five Discord applications with bot users.
+
+Each application has its own bot credential and should be invited to the Discord servers that may use that worker.
+
+Workers are mapped as:
+
+```text
+Music 1 -> muse-01
+Music 2 -> muse-02
+Music 3 -> muse-03
+Music 4 -> muse-04
+Music 5 -> muse-05
+```
+
+Each worker receives only its own bot credential.
+
+### Dashboard OAuth application
+
+Create a separate Discord application for dashboard login. A bot user is not required for this application.
+
+Add this redirect URI:
+
+```text
+https://YOUR-MUSE-DASHBOARD-HOST/auth/callback
+```
+
+The orchestrator requests only:
+
+```text
+identify guilds
+```
+
+The dashboard then filters the returned guilds to servers where the user is the owner or has Manage Server / Administrator permission.
+
+The OAuth access token is used only during login to read the current user and guild list. It is not persisted.
+
+## Deploy SSH key
 
 On a trusted workstation:
 
@@ -23,19 +76,15 @@ On a trusted workstation:
 ssh-keygen -t ed25519 -a 100 -f muse_deploy -C "muse-github-actions"
 ```
 
-Keep `muse_deploy` private. The `.pub` file is used once by the VPS installer.
+Keep the private key for the GitHub production environment. Copy only the public key to the VPS installer.
 
-## 3. SSH AllowUsers preflight
+## SSH AllowUsers preflight
 
-VPS01 restricts SSH users. Before running the installer, add `muse-deploy` to the existing `AllowUsers` directive.
+VPS01 currently restricts SSH users.
 
-Example:
+Before installing, add `muse-deploy` to the existing `AllowUsers` directive while preserving the existing administrative users.
 
-```text
-AllowUsers user007 sentinel-deploy muse-deploy
-```
-
-Validate before reloading SSH:
+Validate before reloading:
 
 ```bash
 sudo sshd -t
@@ -43,11 +92,11 @@ sudo systemctl reload ssh
 sudo sshd -T | grep '^allowusers'
 ```
 
-Do not close the existing administrative SSH session until the new configuration has been verified.
+Keep the current administrative SSH session open until the new configuration is verified.
 
-## 4. Install the production infrastructure
+## Install the fleet
 
-Clone the repository temporarily on the VPS:
+Clone the production branch temporarily:
 
 ```bash
 git clone --branch main https://github.com/haxurus/muse.git /tmp/muse
@@ -61,158 +110,226 @@ The installer creates:
 /srv/docker/muse/
 ├── .env
 ├── docker-compose.yml
+├── workers.json
+├── nginx.conf
+├── control/
 ├── data/
+│   ├── muse-01/
+│   ├── muse-02/
+│   ├── muse-03/
+│   ├── muse-04/
+│   └── muse-05/
 ├── backups/
 ├── secrets/
 └── .deploy-state/
 ```
 
-It also creates the restricted `muse-deploy` account, installs the forced SSH command, deploy/rollback scripts and the persistent Muse egress firewall unit.
+Internal worker-control authentication material is generated automatically on the VPS.
 
-The deploy account is not added to the Docker group and cannot execute arbitrary commands through its deployment key.
+## Configure music bot credentials
 
-## 5. Configure runtime secrets
-
-Edit secrets through a root editor:
+Edit the five worker credential files with a root editor:
 
 ```bash
-sudoedit /srv/docker/muse/secrets/discord_token
+sudoedit /srv/docker/muse/secrets/discord_token_01
+sudoedit /srv/docker/muse/secrets/discord_token_02
+sudoedit /srv/docker/muse/secrets/discord_token_03
+sudoedit /srv/docker/muse/secrets/discord_token_04
+sudoedit /srv/docker/muse/secrets/discord_token_05
+```
+
+Configure the shared YouTube API credential:
+
+```bash
 sudoedit /srv/docker/muse/secrets/youtube_api_key
-sudoedit /srv/docker/muse/secrets/spotify_client_id
-sudoedit /srv/docker/muse/secrets/spotify_client_secret
 ```
 
-Spotify is optional. If disabled, keep both Spotify files empty.
+Spotify is optional. If used, configure both Spotify credential files.
 
-Verify permissions:
+## Configure dashboard OAuth
+
+Store the Discord OAuth application client secret:
 
 ```bash
-sudo find /srv/docker/muse/secrets -maxdepth 1 -type f -printf '%m %u:%g %p\n'
+sudoedit /srv/docker/muse/secrets/orchestrator_discord_client_secret
 ```
 
-The expected host permissions are `600 root:root`.
-
-## 6. Configure non-secret settings
-
-Edit:
+Then edit:
 
 ```bash
 sudoedit /srv/docker/muse/.env
 ```
 
-Recommended baseline:
+Set:
 
 ```dotenv
-CACHE_LIMIT=2GB
-REGISTER_COMMANDS_ON_BOT=false
-ENABLE_SPONSORBLOCK=false
-BOT_STATUS=online
-BOT_ACTIVITY_TYPE=LISTENING
-BOT_ACTIVITY=music
-ALLOW_HTTP_STREAMS=false
-HTTP_STREAM_ALLOWED_HOSTS=
+ORCHESTRATOR_PUBLIC_BASE_URL=https://YOUR-MUSE-DASHBOARD-HOST
+ORCHESTRATOR_DISCORD_CLIENT_ID=YOUR_OAUTH_APPLICATION_CLIENT_ID
 ```
 
-Keep `YT_DLP_AUTO_UPDATE=false` in the hardened container. Updating executables inside a running read-only container defeats immutable-image deployment. Refresh yt-dlp by rebuilding the image instead.
+The public URL must use HTTPS in production.
 
-## 7. GitHub production environment
+## Nginx Proxy Manager
 
-Create a GitHub Environment named `production`, restrict it to `main`, and add:
+Create a Proxy Host for the dashboard hostname.
+
+Forward to:
+
+```text
+Forward Hostname: muse-edge
+Forward Port:     8080
+Scheme:           http
+```
+
+Do not point NPM directly at `muse-orchestrator`.
+
+The edge is the only Muse service on `proxy_net`.
+
+Use the existing Cloudflare / NPM TLS model and keep the public dashboard on HTTPS.
+
+## Dashboard configuration model
+
+Configuration is scoped to a Discord guild.
+
+Resolution order:
+
+```text
+platform defaults
+      |
+      v
+guild configuration
+      |
+      v
+guild group configuration
+      |
+      v
+worker override
+```
+
+A server administrator can therefore:
+
+- apply one configuration to all five workers;
+- create arbitrary groups such as 3 + 2;
+- group the same workers differently in another Discord server;
+- select any temporary subset of workers and apply a bulk override;
+- configure one worker independently;
+- disable a worker for that guild;
+- set a maximum number of simultaneous players;
+- choose worker priority.
+
+The orchestrator stores the desired state and periodically reconciles it with the worker-local settings.
+
+## Network model
+
+```text
+proxy_net
+   |
+muse-edge
+   |
+muse-dashboard-internal
+   |
+muse-orchestrator
+   |
+   +-- muse-control (internal only) --> five worker control APIs
+   |
+   +-- muse-egress -----------------> public Internet
+
+muse-01..05
+   |
+   +-- muse-control
+   +-- muse-egress
+```
+
+No worker publishes a host port.
+
+The orchestrator does not receive music-bot credentials.
+
+Worker control APIs require signed requests and are reachable only on the private Docker control network.
+
+Do not mount the Docker socket into any Muse container.
+
+## GitHub production environment
+
+Create a GitHub Environment named `production` and restrict it to the production branch.
+
+Configure:
 
 - `VPS_HOST`
 - `VPS_PORT`
 - `VPS_DEPLOY_KEY`
 - `VPS_KNOWN_HOSTS`
 
-Create repository variable:
+Then create the repository variable:
 
 ```text
 ENABLE_VPS_DEPLOY=true
 ```
 
-Until this variable is `true`, images can be built but the VPS deployment job is skipped.
+Leave it disabled until the VPS files, Discord applications, NPM proxy and OAuth callback are configured.
 
-`VPS_KNOWN_HOSTS` must contain a host key verified from the VPS itself. Do not disable SSH host-key verification in CI.
+## Deploy flow
 
-## 8. GHCR
-
-The easiest deployment is to make the `haxurus/muse` container package public.
-
-If the package remains private, authenticate the root Docker client on VPS01 once using a read-only package token. Do not place that token in the repository or application container.
-
-## 9. Deployment flow
-
-A push to `main` performs:
+A production push performs:
 
 ```text
-source
-  |
-  v
-multi-arch Docker build
-  |
-  v
+lint + typecheck + tests
+          |
+          v
+multi-arch image build
+          |
+          v
 GHCR + SBOM + provenance
-  |
-  v
-immutable manifest digest
-  |
-  v
-restricted SSH forced-command
-  |
-  v
-stop current Muse
-  |
-  v
-SQLite backup
-  |
-  v
-start new digest + Prisma migration
-  |
-  v
-Discord readiness health check
-  |
-  +--> healthy: commit release state
-  |
-  +--> failure: restore DB + previous image
+          |
+          v
+immutable image digest
+          |
+          v
+restricted SSH command
+          |
+          v
+stop fleet
+          |
+          v
+backup 6 SQLite databases
+          |
+          v
+start orchestrator + edge + 5 workers
+          |
+          v
+require 7/7 healthy
+          |
+      +---+---+
+      |       |
+   success  failure
+      |       |
+ commit    restore previous
+ state     image + databases
 ```
 
-Muse is considered healthy only after the Discord client has reached ready state and command registration has completed.
+The six databases are:
 
-## 10. Backups
+- orchestrator control database;
+- one local Muse database for each of the five workers.
 
-Before replacing a running release the deploy script stops Muse cleanly and archives the SQLite database.
+Audio caches are excluded from backups.
 
-Backups are stored in:
+## Status and rollback
 
-```text
-/srv/docker/muse/backups/
-```
-
-They are root-only and files older than 14 days are removed automatically.
-
-The audio cache is intentionally excluded.
-
-## 11. Status and rollback
-
-From an administrative VPS shell:
+From the VPS administrative account:
 
 ```bash
 sudo /usr/local/sbin/muse-deploy status
 sudo /usr/local/sbin/muse-deploy rollback
 ```
 
-Rollback can also be launched through GitHub Actions -> **Rollback production**.
+Rollback is also available through the dedicated GitHub Actions workflow.
 
-## 12. Network model
+## Security boundary
 
-The bot has no inbound application ports.
+Compromise of one music worker exposes only that worker's mounted music-bot credential.
 
-The dedicated bridge is named:
+Compromise of the orchestrator can alter worker configuration through its control keys, but the orchestrator has no music-bot credentials and no Docker socket.
 
-```text
-muse-eg
-```
+Compromise of the minimal edge container does not provide application secrets.
 
-The host firewall blocks traffic arriving from this bridge toward services on the VPS and blocks forwarded access to private, link-local and other non-public ranges. Public outbound traffic remains available for Discord, YouTube, SoundCloud, Spotify and approved integrations.
-
-Do not attach Muse to `proxy_net`, database networks, Sentinel networks, or the Docker socket.
+No design can make a Discord-connected process mathematically incapable of sending data through its permitted Discord/Internet connectivity, so the deployment focuses on least privilege and limiting blast radius.

@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -28,6 +32,19 @@ jobs:
       - run: yarn typecheck
       - run: yarn test
       - run: yarn build
+      - name: Validate production operations
+        if: matrix.node-version == '22'
+        run: |
+          set -euo pipefail
+          bash -n ops/muse-deploy ops/install-vps.sh
+          sh -n ops/muse-deploy-entrypoint security/host-firewall.sh
+          cp deploy/.env.production.example deploy/.env
+          sed -i 's/^MUSE_SECRET_GID=.*/MUSE_SECRET_GID=999/' deploy/.env
+          mkdir -p deploy/secrets
+          for secret in             discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05             youtube_api_key spotify_client_id spotify_client_secret orchestrator_discord_client_secret             worker_control_01 worker_control_02 worker_control_03 worker_control_04 worker_control_05; do
+            : > "deploy/secrets/$secret"
+          done
+          MUSE_IMAGE="ghcr.io/haxurus/muse@sha256:0000000000000000000000000000000000000000000000000000000000000000"             docker compose --env-file deploy/.env -f deploy/docker-compose.prod.yml config --quiet
       - name: Build production image
         if: matrix.node-version == '22'
         run: docker build -t muse-ci .
