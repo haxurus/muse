@@ -69,7 +69,7 @@ export default class DashboardServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const pathname = new URL(request.url ?? '/', this.config.publicUrl).pathname;
+    const {pathname} = new URL(request.url ?? '/', this.config.publicUrl);
 
     try {
       if (request.method === 'GET' && pathname === '/health') {
