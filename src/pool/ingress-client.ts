@@ -62,7 +62,7 @@ export const routePoolCommand = async (
     body,
   );
 
-  return got(`${config.ORCHESTRATOR_INTERNAL_URL.replace(/\/$/u, '')}${requestPath}`, {
+  const response = await got(`${config.ORCHESTRATOR_INTERNAL_URL.replace(/\/$/u, '')}${requestPath}`, {
     method: 'POST',
     body,
     headers: {
@@ -74,7 +74,18 @@ export const routePoolCommand = async (
     timeout: {request: 90_000},
     retry: {limit: 0},
     followRedirect: false,
-  }).json<PoolCommandResult>();
+    responseType: 'json',
+    throwHttpErrors: false,
+  });
+  const responseBody = response.body as PoolCommandResult | {error?: unknown};
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const error = typeof (responseBody as {error?: unknown}).error === 'string'
+      ? (responseBody as {error: string}).error
+      : `orchestrator returned HTTP ${response.statusCode}`;
+    throw new Error(error.slice(0, 300));
+  }
+
+  return responseBody as PoolCommandResult;
 };
 
 export const routePoolFavoriteAutocomplete = async (
@@ -100,7 +111,7 @@ export const routePoolFavoriteAutocomplete = async (
     body,
   );
 
-  const result = await got(`${config.ORCHESTRATOR_INTERNAL_URL.replace(/\/$/u, '')}${requestPath}`, {
+  const response = await got(`${config.ORCHESTRATOR_INTERNAL_URL.replace(/\/$/u, '')}${requestPath}`, {
     method: 'POST',
     body,
     headers: {
@@ -112,7 +123,13 @@ export const routePoolFavoriteAutocomplete = async (
     timeout: {request: 5000},
     retry: {limit: 0},
     followRedirect: false,
-  }).json<{choices: Array<{name: string; value: string}>}>();
+    responseType: 'json',
+    throwHttpErrors: false,
+  });
+  const result = response.body as {choices?: Array<{name: string; value: string}>; error?: unknown};
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(typeof result.error === 'string' ? result.error.slice(0, 300) : 'autocomplete unavailable');
+  }
 
-  return result.choices;
+  return result.choices ?? [];
 };
