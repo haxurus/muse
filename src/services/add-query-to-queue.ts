@@ -35,6 +35,7 @@ export type QueueAddResult = {
   queueSize: number;
   status: STATUS;
   voiceChannelId: string | null;
+  showPlayingEmbed: boolean;
 };
 
 const normalizeSkipError = (error: unknown) => (
@@ -95,10 +96,13 @@ export default class AddQueryToQueue {
     });
 
     const player = this.playerManager.get(guildId);
-    await interaction.editReply({
-      content: result.message,
-      embeds: player.getCurrent() ? [buildPlayingMessageEmbed(player)] : [],
-    });
+    if (result.showPlayingEmbed && player.getCurrent()) {
+      await interaction.editReply({
+        embeds: [buildPlayingMessageEmbed(player)],
+      });
+    }
+
+    await interaction.editReply(result.message);
   }
 
   public async addRequest({
@@ -203,6 +207,7 @@ export default class AddQueryToQueue {
       queueSize: player.queueSize(),
       status: player.status,
       voiceChannelId: player.voiceConnection?.joinConfig.channelId ?? null,
+      showPlayingEmbed: needsConnection,
     };
   }
 
