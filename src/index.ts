@@ -11,6 +11,9 @@ import prepareYtDlp from './utils/prepare-yt-dlp.js';
 import {prisma} from './utils/db.js';
 import {Client} from 'discord.js';
 import WorkerControlServer from './control/worker-server.js';
+import AddQueryToQueue from './services/add-query-to-queue.js';
+import BotOnePlaybackWorker from './playback/worker.js';
+import {isBotOnePlaybackEnabled} from './playback/protocol.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
@@ -60,11 +63,12 @@ const startBot = async () => {
   await prepareYtDlp(config);
 
   if (config.WORKER_ID) {
-    workerControlServer = new WorkerControlServer(
-      config,
-      container.get<Client>(TYPES.Client),
-      container.get<PlayerManager>(TYPES.Managers.Player),
-    );
+    const client = container.get<Client>(TYPES.Client);
+    const players = container.get<PlayerManager>(TYPES.Managers.Player);
+    const playback = isBotOnePlaybackEnabled(config.WORKER_ID)
+      ? new BotOnePlaybackWorker(client, players, container.get<AddQueryToQueue>(TYPES.Services.AddQueryToQueue))
+      : undefined;
+    workerControlServer = new WorkerControlServer(config, client, players, playback);
     await workerControlServer.start();
   }
 

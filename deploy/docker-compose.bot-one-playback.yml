@@ -1,0 +1,9 @@
+# Opt-in pilot: only muse-01 changes its command handling.
+# Apply together with the production Compose file; never as a standalone file.
+services:
+  orchestrator:
+    environment:
+      MUSE_BOT_ONE_PLAYBACK: "true"
+  muse-01:
+    environment:
+      MUSE_BOT_ONE_PLAYBACK: "true"

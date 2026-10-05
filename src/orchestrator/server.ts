@@ -4,6 +4,7 @@ import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
+import {handleBotOneProxy} from '../playback/transport.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -67,6 +68,10 @@ export default class OrchestratorServer {
     try {
       if (request.method === 'GET' && request.url === '/health') {
         sendJson(response, 200, {ok: true, workersConfigured: this.workers.length});
+        return;
+      }
+
+      if (await handleBotOneProxy(request, response, this.config)) {
         return;
       }
 

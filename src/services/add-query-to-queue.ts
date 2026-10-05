@@ -1,4 +1,4 @@
-import {ChatInputCommandInteraction, GuildMember} from 'discord.js';
+import {ChatInputCommandInteraction, GuildMember, type InteractionEditReplyOptions} from 'discord.js';
 import {inject, injectable} from 'inversify';
 import shuffle from 'array-shuffle';
 import {TYPES} from '../types.js';
@@ -12,6 +12,12 @@ import {SponsorBlock} from 'sponsorblock-api';
 import Config from './config.js';
 import KeyValueCacheProvider from './key-value-cache.js';
 import {ONE_HOUR_IN_SECONDS} from '../utils/constants.js';
+
+// Only the local queue context and reply sink are required, never an interaction token.
+export type QueueRequestContext = Pick<ChatInputCommandInteraction, 'guild' | 'member' | 'channel'> & {
+  deferReply: (options: {ephemeral: boolean}) => Promise<unknown>;
+  editReply: (value: string | InteractionEditReplyOptions) => Promise<unknown>;
+};
 
 const isSameQueueEntry = (capturedId: number | null, currentId: number | null) => (
   capturedId !== null && capturedId === currentId
@@ -48,13 +54,15 @@ export default class AddQueryToQueue {
     shouldSplitChapters,
     skipCurrentTrack,
     interaction,
+    beforeEnqueue,
   }: {
     query: string;
     addToFrontOfQueue: boolean;
     shuffleAdditions: boolean;
     shouldSplitChapters: boolean;
     skipCurrentTrack: boolean;
-    interaction: ChatInputCommandInteraction;
+    interaction: QueueRequestContext;
+    beforeEnqueue?: () => Promise<void>;
   }): Promise<void> {
     const guildId = interaction.guild!.id;
     const player = this.playerManager.get(guildId);
@@ -83,6 +91,11 @@ export default class AddQueryToQueue {
       newSongs = await Promise.all(newSongs.map(this.skipNonMusicSegments.bind(this)));
     }
 
+    // Remote commands must revalidate after media resolution and before queue mutation.
+    if (beforeEnqueue) {
+      await beforeEnqueue();
+    }
+
     const needsConnection = player.voiceConnection === null;
     if (needsConnection) {
       // A failed join must not leave an unacknowledged request in the queue.
@@ -90,6 +103,10 @@ export default class AddQueryToQueue {
     } else {
       // Let an existing session recover without changing its channel or paused state.
       await player.ensureVoiceConnectionReady();
+    }
+
+    if (beforeEnqueue) {
+      await beforeEnqueue();
     }
 
     newSongs.forEach((song, index) => {

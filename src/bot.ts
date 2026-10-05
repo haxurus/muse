@@ -15,6 +15,7 @@ import {generateDependencyReport} from '@discordjs/voice';
 import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
+import {handleBotOneInteraction} from './playback/controller.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -82,6 +83,10 @@ export default class {
     // eslint-disable-next-line complexity
     this.client.on('interactionCreate', async interaction => {
       try {
+        if (await handleBotOneInteraction(interaction, this.config)) {
+          return;
+        }
+
         if (interaction.isCommand()) {
           const command = this.commandsByName.get(interaction.commandName);
 
