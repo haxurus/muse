@@ -82,7 +82,7 @@ dns_resolvers() {
       fi
     done
     if command -v resolvectl >/dev/null 2>&1; then
-      resolvectl dns 2>/dev/null | tr ' \t' '\n\n' || true
+      resolvectl dns 2>/dev/null | tr '[:blank:]' '\n' || true
     fi
   } | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | grep -v '^127\.' | sort -u
 }
