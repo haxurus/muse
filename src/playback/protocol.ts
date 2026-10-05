@@ -1,7 +1,9 @@
 import {HttpError} from '../control/http.js';
 
 export const PLAYBACK_ACTIONS = ['play', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'queue', 'volume'] as const;
+export const PLAYBACK_WORKER_IDS = ['muse-01', 'muse-02'] as const;
 export type PlaybackAction = typeof PLAYBACK_ACTIONS[number];
+export type PlaybackWorkerId = typeof PLAYBACK_WORKER_IDS[number];
 export type PlaybackRequest = {
   requestId: string;
   guildId: string;
@@ -20,7 +22,7 @@ export type PlaybackRequest = {
   skip?: boolean;
 };
 export type PlaybackResult = {
-  workerId: 'muse-01';
+  workerId: PlaybackWorkerId;
   requestId: string;
   guildId: string;
   channelId: string | null;
@@ -28,8 +30,19 @@ export type PlaybackResult = {
   message: string;
 };
 
+const PLAYBACK_FLAG_BY_WORKER: Record<PlaybackWorkerId, string> = {
+  'muse-01': 'MUSE_BOT_ONE_PLAYBACK',
+  'muse-02': 'MUSE_BOT_TWO_PLAYBACK',
+};
+
+export const isPlaybackWorkerId = (workerId: string): workerId is PlaybackWorkerId =>
+  PLAYBACK_WORKER_IDS.some(candidate => candidate === workerId);
+
+export const isPlaybackWorkerEnabled = (workerId: string): workerId is PlaybackWorkerId =>
+  isPlaybackWorkerId(workerId) && process.env[PLAYBACK_FLAG_BY_WORKER[workerId]] === 'true';
+
 export const isBotOnePlaybackEnabled = (workerId: string): boolean =>
-  process.env.MUSE_BOT_ONE_PLAYBACK === 'true' && workerId === 'muse-01';
+  workerId === 'muse-01' && isPlaybackWorkerEnabled(workerId);
 
 export const parsePlaybackRequest = (input: unknown): PlaybackRequest => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
