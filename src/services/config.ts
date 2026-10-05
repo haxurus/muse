@@ -6,6 +6,7 @@ import path from 'path';
 import xbytes from 'xbytes';
 import {ConditionalKeys} from 'type-fest';
 import {ActivityType, PresenceStatusData} from 'discord.js';
+import {resolveOrchestratorPlaybackUrl} from '../playback/protocol.js';
 dotenv.config({path: process.env.ENV_FILE ?? path.resolve(process.cwd(), '.env')});
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ? process.env.DATA_DIR : './data');
@@ -14,13 +15,23 @@ const firstNonEmpty = (...values: Array<string | undefined>) => values
   .map(value => value?.trim())
   .find((value): value is string => Boolean(value));
 
+export const MIN_CONTROL_TOKEN_LENGTH = 32;
+
+// Reported by the Config constructor so the process fails at startup with a clear message.
+const conflictingSecrets: string[] = [];
+
 const readSecret = (name: string, optional = false) => {
   const direct = firstNonEmpty(process.env[name]);
+  const filePath = firstNonEmpty(process.env[`${name}_FILE`]);
+  if (direct && filePath) {
+    conflictingSecrets.push(name);
+    return direct;
+  }
+
   if (direct) {
     return direct;
   }
 
-  const filePath = firstNonEmpty(process.env[`${name}_FILE`]);
   if (filePath) {
     try {
       return readFileSync(filePath, 'utf8').trim();
@@ -100,6 +111,10 @@ export default class Config {
   readonly CONTROL_TOKEN!: string;
 
   constructor() {
+    if (conflictingSecrets.length > 0) {
+      throw new Error(`Configure each secret either directly or through its _FILE variable, not both: ${conflictingSecrets.map(name => `${name} / ${name}_FILE`).join(', ')}`);
+    }
+
     for (const [key, value] of Object.entries(CONFIG_MAP)) {
       if (typeof value === 'undefined') {
         console.error(`Missing environment variable for ${key}`);
@@ -154,6 +169,13 @@ export default class Config {
       if (!this.CONTROL_TOKEN) {
         throw new Error('MUSE_CONTROL_TOKEN or MUSE_CONTROL_TOKEN_FILE is required for a managed worker');
       }
+
+      if (this.CONTROL_TOKEN.length < MIN_CONTROL_TOKEN_LENGTH) {
+        throw new Error(`MUSE_CONTROL_TOKEN must be at least ${MIN_CONTROL_TOKEN_LENGTH} characters long`);
+      }
+
+      // Fail at startup rather than on the first orchestrated playback command.
+      resolveOrchestratorPlaybackUrl();
     }
   }
 }

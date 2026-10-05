@@ -2,7 +2,7 @@ import {ChannelType} from 'discord.js';
 import {describe, expect, it, vi} from 'vitest';
 import type AddQueryToQueue from '../src/services/add-query-to-queue.js';
 import {STATUS} from '../src/services/player-types.js';
-import BotOnePlaybackWorker from '../src/playback/worker.js';
+import PlaybackWorker from '../src/playback/worker.js';
 import type {PlaybackWorkerId} from '../src/playback/protocol.js';
 
 vi.mock('../src/utils/get-guild-settings.js', () => ({getGuildSettings: async () => ({defaultQueuePageSize: 5})}));
@@ -43,7 +43,7 @@ const makeHarness = (workerId: PlaybackWorkerId, connected = true) => {
     await options.beforeEnqueue?.();
     await options.interaction.editReply('Song added.');
   })};
-  const worker = new BotOnePlaybackWorker(client as never, {get: () => player} as never, enqueue as never, workerId);
+  const worker = new PlaybackWorker(client as never, {get: () => player} as never, enqueue as never, workerId);
   return {worker, member, permissions, voice, text, guild, client, player, enqueue};
 };
 

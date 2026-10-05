@@ -1,4 +1,5 @@
 import {readFileSync} from 'node:fs';
+import path from 'node:path';
 
 export type WorkerDefinition = {
   id: string;
@@ -12,6 +13,8 @@ type WorkerConfigFileEntry = {
   tokenFile: string;
 };
 
+export const MIN_TOKEN_LENGTH = 32;
+
 const readRequiredFile = (filePath: string, label: string): string => {
   const value = readFileSync(filePath, 'utf8').trim();
   if (!value) {
@@ -19,6 +22,27 @@ const readRequiredFile = (filePath: string, label: string): string => {
   }
 
   return value;
+};
+
+export const assertTokenStrength = (token: string, label: string): string => {
+  if (token.length < MIN_TOKEN_LENGTH) {
+    throw new Error(`${label} must be at least ${MIN_TOKEN_LENGTH} characters long`);
+  }
+
+  return token;
+};
+
+const readTokenFile = (filePath: string, label: string): string =>
+  assertTokenStrength(readRequiredFile(filePath, label), label);
+
+/** Normalize a POSIX container path and require it to stay inside `prefix` (which must end with '/'). */
+export const resolveContainedPath = (value: string, prefix: string): string | undefined => {
+  if (!path.posix.isAbsolute(value)) {
+    return undefined;
+  }
+
+  const normalized = path.posix.normalize(value);
+  return normalized.startsWith(prefix) && normalized.length > prefix.length ? normalized : undefined;
 };
 
 const validateWorkerEntry = (entry: WorkerConfigFileEntry): WorkerConfigFileEntry => {
@@ -35,11 +59,12 @@ const validateWorkerEntry = (entry: WorkerConfigFileEntry): WorkerConfigFileEntr
     throw new Error(`Worker URL for ${entry.id} must not contain a path, query, or fragment`);
   }
 
-  if (!entry.tokenFile.startsWith('/run/secrets/')) {
+  const tokenFile = resolveContainedPath(entry.tokenFile, '/run/secrets/');
+  if (!tokenFile) {
     throw new Error(`Worker token file for ${entry.id} must be mounted under /run/secrets`);
   }
 
-  return entry;
+  return {...entry, tokenFile};
 };
 
 export const loadWorkerDefinitions = (): WorkerDefinition[] => {
@@ -75,7 +100,7 @@ export const loadWorkerDefinitions = (): WorkerDefinition[] => {
     return {
       id: entry.id,
       baseUrl: entry.baseUrl.replace(/\/$/u, ''),
-      token: readRequiredFile(entry.tokenFile, `control token for ${entry.id}`),
+      token: readTokenFile(entry.tokenFile, `control token for ${entry.id}`),
     };
   });
 };
@@ -94,20 +119,20 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     throw new Error('MUSE_ORCHESTRATOR_PORT must be a valid TCP port');
   }
 
-  const tokenFile = process.env.MUSE_ORCHESTRATOR_TOKEN_FILE;
-  if (!tokenFile?.startsWith('/run/secrets/')) {
+  const tokenFile = resolveContainedPath(process.env.MUSE_ORCHESTRATOR_TOKEN_FILE ?? '', '/run/secrets/');
+  if (!tokenFile) {
     throw new Error('MUSE_ORCHESTRATOR_TOKEN_FILE must point to a mounted secret');
   }
 
-  const groupsFile = process.env.MUSE_ORCHESTRATOR_GROUPS_FILE ?? '/state/groups.json';
-  if (!groupsFile.startsWith('/state/')) {
+  const groupsFile = resolveContainedPath(process.env.MUSE_ORCHESTRATOR_GROUPS_FILE ?? '/state/groups.json', '/state/');
+  if (!groupsFile) {
     throw new Error('MUSE_ORCHESTRATOR_GROUPS_FILE must be stored under /state');
   }
 
   return {
     host: process.env.MUSE_ORCHESTRATOR_HOST ?? '127.0.0.1',
     port,
-    apiToken: readRequiredFile(tokenFile, 'orchestrator API token'),
+    apiToken: readTokenFile(tokenFile, 'orchestrator API token'),
     workers: loadWorkerDefinitions(),
     groupsFile,
   };

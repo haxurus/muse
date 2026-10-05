@@ -5,7 +5,8 @@ import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
 import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
-import type BotOnePlaybackWorker from '../playback/worker.js';
+import type PlaybackWorker from '../playback/worker.js';
+import {assertGuildId} from './snowflake.js';
 
 export default class WorkerControlServer {
   private server?: Server;
@@ -14,7 +15,7 @@ export default class WorkerControlServer {
     private readonly config: Config,
     private readonly client: Client,
     private readonly playerManager: PlayerManager,
-    private readonly playback?: BotOnePlaybackWorker,
+    private readonly playback?: PlaybackWorker,
   ) {}
 
   async start(): Promise<void> {
@@ -85,6 +86,7 @@ export default class WorkerControlServer {
 
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'settings') {
         const guildId = segments[2];
+        assertGuildId(guildId);
         if (!this.client.guilds.cache.has(guildId)) {
           throw new HttpError(404, 'worker is not a member of that guild');
         }

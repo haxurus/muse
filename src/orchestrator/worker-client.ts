@@ -1,11 +1,27 @@
-import got from 'got';
+import got, {type CancelableRequest, type Response} from 'got';
 import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {WorkerGuildSettings, WorkerStatus} from '../control/types.js';
 import type {WorkerDefinition} from './config.js';
 
+/** Worker responses are small JSON documents; anything larger is treated as a failure. */
+export const MAX_WORKER_RESPONSE_BYTES = 1024 * 1024;
+
 const requestOptions = (token: string) => ({
   headers: {
     authorization: `Bearer ${token}`,
+  },
+  followRedirect: false,
+  hooks: {
+    afterResponse: [
+      // With redirects disabled got treats 3xx as success; a worker never redirects.
+      (response: Response) => {
+        if (response.statusCode >= 300) {
+          throw new Error(`Unexpected worker response status ${response.statusCode}`);
+        }
+
+        return response;
+      },
+    ],
   },
   retry: {
     limit: 0,
@@ -15,6 +31,15 @@ const requestOptions = (token: string) => ({
   },
 });
 
+const capResponseSize = (request: CancelableRequest<Response<string>>): CancelableRequest<Response<string>> => {
+  request.on('downloadProgress', progress => {
+    if (progress.transferred > MAX_WORKER_RESPONSE_BYTES || (progress.total ?? 0) > MAX_WORKER_RESPONSE_BYTES) {
+      request.cancel('worker response too large');
+    }
+  });
+  return request;
+};
+
 export default class WorkerClient {
   constructor(private readonly worker: WorkerDefinition) {}
 
@@ -23,26 +48,26 @@ export default class WorkerClient {
   }
 
   async status(): Promise<WorkerStatus> {
-    return got.get(
+    return capResponseSize(got.get(
       `${this.worker.baseUrl}/v1/status`,
       requestOptions(this.worker.token),
-    ).json<WorkerStatus>();
+    )).json<WorkerStatus>();
   }
 
   async guildSettings(guildId: string): Promise<WorkerGuildSettings> {
-    return got.get(
+    return capResponseSize(got.get(
       `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/settings`,
       requestOptions(this.worker.token),
-    ).json<WorkerGuildSettings>();
+    )).json<WorkerGuildSettings>();
   }
 
   async updateGuildSettings(guildId: string, patch: GuildSettingsPatch): Promise<WorkerGuildSettings> {
-    return got.patch(
+    return capResponseSize(got.patch(
       `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/settings`,
       {
         ...requestOptions(this.worker.token),
         json: patch,
       },
-    ).json<WorkerGuildSettings>();
+    )).json<WorkerGuildSettings>();
   }
 }

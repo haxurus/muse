@@ -1,7 +1,8 @@
-import {mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
+import {closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {HttpError} from '../control/http.js';
+import {assertGuildId, isSnowflake} from '../control/snowflake.js';
 
 export type GuildWorkerGroup = {
   id: string;
@@ -16,9 +17,17 @@ type StoreData = {
   guilds: Record<string, GuildWorkerGroup[]>;
 };
 
-const EMPTY_STORE: StoreData = {
-  version: 1,
-  guilds: {},
+type LoadResult = {status: 'ok'; data: StoreData} | {status: 'missing'} | {status: 'invalid'};
+
+const MAX_GROUPS_PER_GUILD = 16;
+
+const isPrintableName = (name: string): boolean => {
+  const hasControlCharacter = [...name].some(character => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127;
+  });
+
+  return name.length >= 1 && name.length <= 48 && !hasControlCharacter;
 };
 
 const normalizeName = (value: unknown): string => {
@@ -27,12 +36,7 @@ const normalizeName = (value: unknown): string => {
   }
 
   const name = value.trim();
-  const hasControlCharacter = [...name].some(character => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint < 32 || codePoint === 127;
-  });
-
-  if (name.length < 1 || name.length > 48 || hasControlCharacter) {
+  if (!isPrintableName(name)) {
     throw new HttpError(400, 'group name must contain 1-48 printable characters');
   }
 
@@ -57,37 +61,83 @@ const normalizeWorkerIds = (value: unknown, configuredWorkerIds: Set<string>): s
   return workerIds.sort();
 };
 
-const validateGuildId = (guildId: string): void => {
-  if (!/^\d{10,32}$/u.test(guildId)) {
-    throw new HttpError(400, 'invalid Discord guild id');
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// Workers removed from the configuration are tolerated: groups keep unavailable members.
+const isValidGroup = (value: unknown): value is GuildWorkerGroup => isPlainObject(value)
+  && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 64
+  && typeof value.name === 'string' && isPrintableName(value.name)
+  && Array.isArray(value.workerIds) && value.workerIds.length > 0
+  && value.workerIds.every(workerId => typeof workerId === 'string' && /^[a-z0-9][a-z0-9-]{0,31}$/u.test(workerId))
+  && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string';
+
+const isValidStore = (value: unknown): value is StoreData => isPlainObject(value)
+  && value.version === 1
+  && isPlainObject(value.guilds)
+  && Object.entries(value.guilds).every(([guildId, groups]) => isSnowflake(guildId)
+    && Array.isArray(groups)
+    && groups.length <= MAX_GROUPS_PER_GUILD
+    && groups.every(group => isValidGroup(group)));
+
+const serialize = (data: StoreData): string => `${JSON.stringify(data, null, 2)}\n`;
+
+/** Write via temp file + fsync + rename, then fsync the directory where the platform supports it. */
+const writeDurably = (target: string, content: string): void => {
+  const directory = path.dirname(target);
+  const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.tmp`);
+  const fd = openSync(temporary, 'w', 0o600);
+  try {
+    writeSync(fd, content);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+
+  renameSync(temporary, target);
+  try {
+    const directoryFd = openSync(directory, 'r');
+    try {
+      fsyncSync(directoryFd);
+    } finally {
+      closeSync(directoryFd);
+    }
+  } catch {
+    // Directory fsync is not supported on every platform (for example Windows).
   }
 };
 
+/**
+ * Single-process store: the orchestrator must run as exactly one instance per state volume,
+ * because concurrent writers would overwrite each other's changes.
+ */
 export default class GuildGroupStore {
-  private readonly data: StoreData;
+  private data: StoreData;
+  private readonly backupPath: string;
 
   constructor(
     private readonly filePath: string,
     private readonly configuredWorkerIds: Set<string>,
   ) {
+    this.backupPath = `${filePath}.bak`;
     this.data = this.load();
   }
 
   list(guildId: string): GuildWorkerGroup[] {
-    validateGuildId(guildId);
+    assertGuildId(guildId);
     return [...(this.data.guilds[guildId] ?? [])]
       .sort((left, right) => left.name.localeCompare(right.name))
       .map(group => ({...group, workerIds: [...group.workerIds]}));
   }
 
   create(guildId: string, input: unknown): GuildWorkerGroup {
-    validateGuildId(guildId);
+    assertGuildId(guildId);
     const body = this.objectBody(input);
     const name = normalizeName(body.name);
     const workerIds = normalizeWorkerIds(body.workerIds, this.configuredWorkerIds);
     const groups = this.data.guilds[guildId] ?? [];
 
-    if (groups.length >= 16) {
+    if (groups.length >= MAX_GROUPS_PER_GUILD) {
       throw new HttpError(409, 'this server already has the maximum of 16 groups');
     }
 
@@ -102,13 +152,12 @@ export default class GuildGroupStore {
       updatedAt: now,
     };
 
-    this.data.guilds[guildId] = [...groups, group];
-    this.persist();
+    this.commit({...this.data.guilds, [guildId]: [...groups, group]});
     return {...group, workerIds: [...group.workerIds]};
   }
 
   update(guildId: string, groupId: string, input: unknown): GuildWorkerGroup {
-    validateGuildId(guildId);
+    assertGuildId(guildId);
     const body = this.objectBody(input);
     const groups = this.data.guilds[guildId] ?? [];
     const index = groups.findIndex(group => group.id === groupId);
@@ -137,28 +186,21 @@ export default class GuildGroupStore {
 
     const next = [...groups];
     next[index] = updated;
-    this.data.guilds[guildId] = next;
-    this.persist();
+    this.commit({...this.data.guilds, [guildId]: next});
     return {...updated, workerIds: [...updated.workerIds]};
   }
 
   delete(guildId: string, groupId: string): void {
-    validateGuildId(guildId);
+    assertGuildId(guildId);
     const groups = this.data.guilds[guildId] ?? [];
     const next = groups.filter(group => group.id !== groupId);
     if (next.length === groups.length) {
       throw new HttpError(404, 'group not found');
     }
 
-    if (next.length === 0) {
-      this.data.guilds = Object.fromEntries(
-        Object.entries(this.data.guilds).filter(([id]) => id !== guildId),
-      );
-    } else {
-      this.data.guilds[guildId] = next;
-    }
-
-    this.persist();
+    this.commit(next.length === 0
+      ? Object.fromEntries(Object.entries(this.data.guilds).filter(([id]) => id !== guildId))
+      : {...this.data.guilds, [guildId]: next});
   }
 
   private objectBody(input: unknown): Record<string, unknown> {
@@ -177,34 +219,53 @@ export default class GuildGroupStore {
     }
   }
 
-  private load(): StoreData {
-    mkdirSync(path.dirname(this.filePath), {recursive: true, mode: 0o700});
-
+  private read(filePath: string): LoadResult {
+    let raw: string;
     try {
-      const parsed = JSON.parse(readFileSync(this.filePath, 'utf8')) as StoreData;
-      if (parsed.version !== 1 || typeof parsed.guilds !== 'object' || parsed.guilds === null) {
-        throw new Error('unsupported group store');
-      }
-
-      return parsed;
+      raw = readFileSync(filePath, 'utf8');
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {version: EMPTY_STORE.version, guilds: {}};
+        return {status: 'missing'};
       }
 
       throw error;
     }
+
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return isValidStore(parsed) ? {status: 'ok', data: parsed} : {status: 'invalid'};
+    } catch {
+      return {status: 'invalid'};
+    }
   }
 
-  private persist(): void {
-    const directory = path.dirname(this.filePath);
-    const temporary = path.join(directory, `.${path.basename(this.filePath)}.${process.pid}.tmp`);
+  private load(): StoreData {
+    mkdirSync(path.dirname(this.filePath), {recursive: true, mode: 0o700});
 
-    writeFileSync(temporary, `${JSON.stringify(this.data, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'w',
-    });
-    renameSync(temporary, this.filePath);
+    const primary = this.read(this.filePath);
+    if (primary.status === 'ok') {
+      return primary.data;
+    }
+
+    const backup = this.read(this.backupPath);
+    if (backup.status === 'ok') {
+      console.warn(`Group store ${this.filePath} is ${primary.status}; recovered from ${this.backupPath}`);
+      return backup.data;
+    }
+
+    if (primary.status === 'missing') {
+      return {version: 1, guilds: {}};
+    }
+
+    throw new Error(`Group store ${this.filePath} is unreadable or has an invalid schema, and no valid backup exists at ${this.backupPath}. Restore it from a backup before starting the orchestrator.`);
+  }
+
+  /** Persist the next state first; memory only changes after the write succeeded. */
+  private commit(guilds: Record<string, GuildWorkerGroup[]>): void {
+    const next: StoreData = {version: 1, guilds};
+    // The in-memory state always equals the last good file, so it is the backup copy.
+    writeDurably(this.backupPath, serialize(this.data));
+    writeDurably(this.filePath, serialize(next));
+    this.data = next;
   }
 }

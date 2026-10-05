@@ -12,11 +12,17 @@ Only `muse-01` uses this opt-in path. It supports `/play`, `/pause`, `/resume`, 
 
 Only ordinary guild text and voice channels are supported initially. The worker checks current guild membership, the requester's current voice channel and channel permissions. A bot already connected elsewhere in that guild is not moved or used to control that other channel. The same bot can still serve different guilds independently.
 
-A busy guild rejects a second command with a retryable conflict, instead of running concurrent player mutations. Completed and failed request results are retained for 15 minutes for deduplication by guild and interaction ID. This is bounded, process-local idempotency, not a durable exactly-once guarantee across restarts. Active commands do not lose their reservation when an HTTP caller times out. A timeout produces an unconfirmed-outcome error, never a local fallback or an automatic replay. Inspect playback before manually retrying.
+A busy guild rejects a second command with a retryable conflict, instead of running concurrent player mutations. Completed and failed request results are retained for about 60 seconds for deduplication by guild and interaction ID; only in-flight commands count toward admission limits, so finished commands never lock a guild out. `/queue` is read-only and is neither deduplicated nor blocked by a running mutation. This is bounded, process-local idempotency, not a durable exactly-once guarantee across restarts.
+
+Each worker-side command has a hard deadline of 170 seconds (below the 180-second transport timeout). When it expires the guild slot is released and a warning is logged; the underlying player operation may still complete. A timeout, a lost connection, a malformed response or an expired deadline is reported end to end as HTTP 504 and shown to the user as an unknown outcome ("Check /queue before retrying"), never as "not ready", never with a local fallback and never with an automatic replay. HTTP 503 is reserved for "the bot is not ready". If songs were already queued when a later step of `/play` fails, the bot stays connected and reports the partial outcome instead of an error.
+
+Known player failures (no songs found, nothing playing, empty queue, no song to skip to, unsupported channel type, full voice channel, missing bot permissions including Embed Links for `/play`) are returned as 4xx errors with short, fixed messages that are passed through unchanged to the user. Other failures are logged on the worker with the error name and a redacted message and reported as a generic failure.
 
 ## Security and activation
 
 Disabled by default. Set `MUSE_BOT_ONE_PLAYBACK=true` on **both** the orchestrator and muse-01, using `deploy/docker-compose.bot-one-playback.yml` as an additional Compose file. Do not set it on the other four bots.
+
+Bot 01 reaches the orchestrator at `MUSE_ORCHESTRATOR_URL` (default `http://orchestrator:3100`; must be an http(s) URL without credentials, query or fragment, validated at startup).
 
 The existing `control_token_01` authenticates this narrowly scoped pilot endpoint. It does not grant access to the orchestrator administration API, which still requires its separate API token. Bot 01 never receives that administration token. Neither Discord bot tokens nor Discord interaction tokens are sent through the playback API. No new host ports, services, secrets or Docker socket mounts are required.
 

@@ -2,9 +2,9 @@ import {ChannelType} from 'discord.js';
 import {Readable} from 'node:stream';
 import {readFile} from 'node:fs/promises';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import BotOnePlaybackWorker from '../src/playback/worker.js';
-import {handleBotOneProxy, sendPlayback} from '../src/playback/transport.js';
-import {handleBotOneInteraction} from '../src/playback/controller.js';
+import PlaybackWorker from '../src/playback/worker.js';
+import {handlePlaybackProxy, sendPlayback} from '../src/playback/transport.js';
+import {handlePlaybackInteraction} from '../src/playback/controller.js';
 import {isPlaybackWorkerEnabled, parsePlaybackRequest} from '../src/playback/protocol.js';
 
 vi.mock('../src/utils/get-guild-settings.js', () => ({
@@ -70,7 +70,7 @@ describe('bot-two playback activation', () => {
 
     const response = outgoing();
     await expect(
-      handleBotOneProxy(incoming('worker-02-key') as never, response as never, orchestratorConfig),
+      handlePlaybackProxy(incoming('worker-02-key') as never, response as never, orchestratorConfig),
     ).resolves.toBe(true);
 
     expect(fetcher).toHaveBeenCalledWith(
@@ -89,7 +89,7 @@ describe('bot-two playback activation', () => {
     vi.stubGlobal('fetch', fetcher);
 
     await expect(
-      handleBotOneProxy(incoming('worker-01-key') as never, outgoing() as never, orchestratorConfig),
+      handlePlaybackProxy(incoming('worker-01-key') as never, outgoing() as never, orchestratorConfig),
     ).rejects.toMatchObject({statusCode: 401});
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -99,7 +99,7 @@ describe('bot-two playback activation', () => {
 
     await expect(
       sendPlayback('http://orchestrator:3100/v1/playback', 'worker-02-key', request, 'muse-02'),
-    ).rejects.toMatchObject({statusCode: 503});
+    ).rejects.toMatchObject({statusCode: 504});
   });
 });
 
@@ -137,7 +137,7 @@ describe('bot-two worker and Discord controller', () => {
 
   it('reports muse-02 as the worker identity', async () => {
     const h = harness();
-    const worker = new BotOnePlaybackWorker(
+    const worker = new PlaybackWorker(
       h.client as never,
       {get: () => h.player} as never,
       {} as never,
@@ -174,7 +174,7 @@ describe('bot-two worker and Discord controller', () => {
     };
 
     await expect(
-      handleBotOneInteraction(
+      handlePlaybackInteraction(
         interaction as never,
         {WORKER_ID: 'muse-02', CONTROL_TOKEN: 'worker-02-key'} as never,
       ),

@@ -55,6 +55,7 @@ GET   /health
 GET   /v1/status
 GET   /v1/guilds/:guildId/settings
 PATCH /v1/guilds/:guildId/settings
+POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "true")
 ```
 
 The settings endpoint only accepts the existing Muse guild settings:
@@ -87,7 +88,29 @@ GET    /v1/guilds/:guildId/groups
 POST   /v1/guilds/:guildId/groups
 PATCH  /v1/guilds/:guildId/groups/:groupId
 DELETE /v1/guilds/:guildId/groups/:groupId
+POST   /v1/playback        (worker control token, not the API token; see below)
 ```
+
+`:guildId` must be a Discord snowflake (`^[1-9]\d{9,21}$`); other values are rejected with 400 before any worker is contacted. When `workerIds` is given in a settings update, only listed workers that are reachable and members of the guild are patched; the others are reported in `failed` with `WorkerNotInGuild`.
+
+The orchestrator API token and every worker control token must be at least 32 characters (`openssl rand -hex 32` produces 64). Token, worker token and state paths are normalized before the `/run/secrets/` and `/state/` prefix checks.
+
+## Playback relay
+
+`POST /v1/playback` is used by the orchestrated playback pilots (`BOT_*_PLAYBACK.md`):
+
+```text
+muse-0N  --POST /v1/playback, Bearer control_token_0N-->  orchestrator
+orchestrator  --POST /v1/playback, Bearer control_token_0N-->  muse-0N
+```
+
+The orchestrator identifies the caller only from its bearer token, which must match exactly one enabled worker, and forwards the validated request to that same worker. Workers reach the orchestrator at `MUSE_ORCHESTRATOR_URL` (default `http://orchestrator:3100`).
+
+Status codes are preserved end to end. Short, fixed 4xx messages from the worker are shown to the user unchanged. `503` means the bot is not ready. `504` means the outcome could not be confirmed (timeout, lost connection, malformed response or the 170-second worker deadline): the user is told to check `/queue` before retrying, and nothing is retried automatically.
+
+### Control token reuse and rotation
+
+Each worker's control token authenticates both directions: the orchestrator calling the worker control API, and the worker calling the orchestrator playback relay. It never grants access to the orchestrator administration API. Because the same secret is read by both containers at startup, rotate it by replacing `control_token_0N` and then restarting the orchestrator and `muse-0N` together; restarting only one side leaves them with mismatched tokens until the other restarts.
 
 Example multi-worker update request:
 
@@ -127,3 +150,9 @@ while another Discord server can define completely different groups using the sa
 A worker may belong to multiple groups. A group remains persisted if one of its workers is temporarily unavailable; the dashboard identifies unavailable members rather than silently deleting them.
 
 The group state is included in production backup and rollback together with the five worker SQLite databases.
+
+Writes are durable and atomic: the next state is written to a temporary file, fsynced and renamed over `groups.json` (the directory is fsynced where the platform supports it), and only then applied in memory. Before each write the previous good state is saved as `groups.json.bak`. On startup the file is schema-validated; if it is unreadable or invalid the orchestrator falls back to `groups.json.bak` (with a warning), and refuses to start with a clear error if neither is valid.
+
+### Single instance
+
+The orchestrator keeps the group store in memory and is the only writer of `/state/groups.json`. Run exactly one orchestrator instance per state volume; multiple replicas would silently overwrite each other's changes.

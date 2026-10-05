@@ -1,10 +1,11 @@
 import type {Interaction} from 'discord.js';
 import type Config from '../services/config.js';
-import {PLAYBACK_ACTIONS, isPlaybackWorkerEnabled, parsePlaybackRequest} from './protocol.js';
+import {HttpError} from '../control/http.js';
+import {PLAYBACK_ACTIONS, isPlaybackWorkerEnabled, parsePlaybackRequest, resolveOrchestratorPlaybackUrl} from './protocol.js';
 import {sendPlayback} from './transport.js';
 
 /** Keep the real Discord interaction and its token inside the command-receiving worker. */
-export const handleBotOneInteraction = async (interaction: Interaction, config: Config): Promise<boolean> => {
+export const handlePlaybackInteraction = async (interaction: Interaction, config: Config): Promise<boolean> => {
   if (!isPlaybackWorkerEnabled(config.WORKER_ID)) {
     return false;
   }
@@ -49,7 +50,21 @@ export const handleBotOneInteraction = async (interaction: Interaction, config: 
     ...(action === 'queue' ? {page: interaction.options.getInteger('page') ?? 1, ...(interaction.options.getInteger('page-size') === null ? {} : {pageSize: interaction.options.getInteger('page-size')})} : {}),
     ...(action === 'volume' ? {volume: interaction.options.getInteger('level') ?? 100} : {}),
   });
-  const result = await sendPlayback('http://orchestrator:3100/v1/playback', config.CONTROL_TOKEN, request, config.WORKER_ID);
-  await interaction.editReply({content: result.message, allowedMentions: {parse: []}});
+  try {
+    const result = await sendPlayback(resolveOrchestratorPlaybackUrl(), config.CONTROL_TOKEN, request, config.WORKER_ID);
+    await interaction.editReply({content: result.message, allowedMentions: {parse: []}});
+  } catch (error: unknown) {
+    if (!(error instanceof HttpError)) {
+      throw error;
+    }
+
+    console.warn('Orchestrated playback request failed', {statusCode: error.statusCode, guildId: request.guildId, requestId: request.requestId});
+    // HttpError messages are produced by the playback hops and are safe to show verbatim.
+    await interaction.editReply({content: error.message, allowedMentions: {parse: []}});
+  }
+
   return true;
 };
+
+/** @deprecated Kept for existing call sites; use handlePlaybackInteraction. */
+export const handleBotOneInteraction = handlePlaybackInteraction;

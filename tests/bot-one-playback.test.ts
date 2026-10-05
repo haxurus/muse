@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import PlaybackGate from '../src/playback/gate.js';
-import {isBotOnePlaybackEnabled, parsePlaybackRequest, type PlaybackResult} from '../src/playback/protocol.js';
+import {isPlaybackWorkerEnabled, parsePlaybackRequest, type PlaybackResult} from '../src/playback/protocol.js';
 
 const raw = {
   requestId: '123456789012345678', guildId: '223456789012345678',
@@ -14,11 +14,11 @@ afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe('bot-one playback protocol', () => {
   it('is opt-in and never enables another worker', () => {
     vi.stubEnv('MUSE_BOT_ONE_PLAYBACK', 'false');
-    expect(isBotOnePlaybackEnabled('muse-01')).toBe(false);
+    expect(isPlaybackWorkerEnabled('muse-01')).toBe(false);
     vi.stubEnv('MUSE_BOT_ONE_PLAYBACK', 'true');
-    expect(isBotOnePlaybackEnabled('muse-01')).toBe(true);
+    expect(isPlaybackWorkerEnabled('muse-01')).toBe(true);
     for (const id of ['muse-02', 'muse-03', 'muse-04', 'muse-05', '']) {
-      expect(isBotOnePlaybackEnabled(id)).toBe(false);
+      expect(isPlaybackWorkerEnabled(id)).toBe(false);
     }
   });
   it('normalizes an allowlisted request without credentials', () => {

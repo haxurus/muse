@@ -1,4 +1,5 @@
 import {HttpError} from '../control/http.js';
+import {isSnowflake} from '../control/snowflake.js';
 
 export const PLAYBACK_ACTIONS = ['play', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'queue', 'volume'] as const;
 export const PLAYBACK_WORKER_IDS = ['muse-01', 'muse-02', 'muse-03', 'muse-04', 'muse-05'] as const;
@@ -44,8 +45,28 @@ export const isPlaybackWorkerId = (workerId: string): workerId is PlaybackWorker
 export const isPlaybackWorkerEnabled = (workerId: string): workerId is PlaybackWorkerId =>
   isPlaybackWorkerId(workerId) && process.env[PLAYBACK_FLAG_BY_WORKER[workerId]] === 'true';
 
-export const isBotOnePlaybackEnabled = (workerId: string): boolean =>
-  workerId === 'muse-01' && isPlaybackWorkerEnabled(workerId);
+/** Shared by every hop so an unknown outcome is never mistaken for a retryable "not ready" error. */
+export const PLAYBACK_OUTCOME_UNKNOWN_STATUS = 504;
+export const PLAYBACK_OUTCOME_UNKNOWN_MESSAGE = 'Playback outcome could not be confirmed. No local fallback or automatic replay was attempted. Check /queue before retrying.';
+
+const DEFAULT_ORCHESTRATOR_URL = 'http://orchestrator:3100';
+
+/** Resolve the private playback endpoint from MUSE_ORCHESTRATOR_URL (http/https origin with an optional path). */
+export const resolveOrchestratorPlaybackUrl = (value: string | undefined = process.env.MUSE_ORCHESTRATOR_URL): string => {
+  const configured = value?.trim();
+  let url: URL;
+  try {
+    url = new URL(configured ? configured : DEFAULT_ORCHESTRATOR_URL);
+  } catch {
+    throw new Error('MUSE_ORCHESTRATOR_URL must be a valid http(s) URL');
+  }
+
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password || url.search || url.hash) {
+    throw new Error('MUSE_ORCHESTRATOR_URL must be an http(s) URL without credentials, query or fragment');
+  }
+
+  return `${url.origin}${url.pathname.replace(/\/+$/u, '')}/v1/playback`;
+};
 
 export const parsePlaybackRequest = (input: unknown): PlaybackRequest => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -66,7 +87,7 @@ export const parsePlaybackRequest = (input: unknown): PlaybackRequest => {
   }
 
   for (const key of identityKeys) {
-    if (typeof body[key] !== 'string' || !/^[1-9]\d{9,21}$/u.test(body[key] as string)) {
+    if (!isSnowflake(body[key])) {
       throw new HttpError(400, 'Invalid Discord identifier.');
     }
   }

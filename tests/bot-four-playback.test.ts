@@ -1,8 +1,8 @@
 import {Readable} from 'node:stream';
 import {readFile} from 'node:fs/promises';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {handleBotOneProxy, sendPlayback} from '../src/playback/transport.js';
-import {handleBotOneInteraction} from '../src/playback/controller.js';
+import {handlePlaybackProxy, sendPlayback} from '../src/playback/transport.js';
+import {handlePlaybackInteraction} from '../src/playback/controller.js';
 import {isPlaybackWorkerEnabled, isPlaybackWorkerId, parsePlaybackRequest, type PlaybackResult, type PlaybackWorkerId} from '../src/playback/protocol.js';
 
 const workers = ['muse-01', 'muse-02', 'muse-03', 'muse-04'] as const;
@@ -73,7 +73,7 @@ describe('four-worker private routing', () => {
     const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify(result(workerId))));
     vi.stubGlobal('fetch', fetcher);
     const response = outgoing();
-    await expect(handleBotOneProxy(incoming(worker.token) as never, response as never, config)).resolves.toBe(true);
+    await expect(handlePlaybackProxy(incoming(worker.token) as never, response as never, config)).resolves.toBe(true);
     expect(fetcher).toHaveBeenCalledOnce();
     expect(fetcher).toHaveBeenCalledWith(`${worker.baseUrl}/v1/playback`, expect.objectContaining({
       method: 'POST', redirect: 'error',
@@ -89,7 +89,7 @@ describe('four-worker private routing', () => {
     vi.stubEnv('MUSE_BOT_FOUR_PLAYBACK', 'true');
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming(token) as never, outgoing() as never, config))
+    await expect(handlePlaybackProxy(incoming(token) as never, outgoing() as never, config))
       .rejects.toMatchObject({statusCode: 401});
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -100,7 +100,7 @@ describe('four-worker private routing', () => {
     }
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-04-key') as never, outgoing() as never, config))
+    await expect(handlePlaybackProxy(incoming('test-worker-04-key') as never, outgoing() as never, config))
       .rejects.toMatchObject({statusCode: 401});
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -112,7 +112,7 @@ describe('four-worker private routing', () => {
     ))};
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-04-key') as never, outgoing() as never, conflicting))
+    await expect(handlePlaybackProxy(incoming('test-worker-04-key') as never, outgoing() as never, conflicting))
       .rejects.toMatchObject({statusCode: 401});
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -121,7 +121,7 @@ describe('four-worker private routing', () => {
     enableAll();
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-04-key', {...request, ...fields}) as never, outgoing() as never, config))
+    await expect(handlePlaybackProxy(incoming('test-worker-04-key', {...request, ...fields}) as never, outgoing() as never, config))
       .rejects.toMatchObject({statusCode: 400});
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -130,7 +130,7 @@ describe('four-worker private routing', () => {
     vi.stubEnv('MUSE_BOT_FOUR_PLAYBACK', 'true');
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-04-key', request, 'GET') as never, outgoing() as never, config))
+    await expect(handlePlaybackProxy(incoming('test-worker-04-key', request, 'GET') as never, outgoing() as never, config))
       .rejects.toMatchObject({statusCode: 405});
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -141,14 +141,14 @@ describe('four-worker private routing', () => {
   ])('rejects mismatched response identity %o', async mismatch => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({...result(), ...mismatch}))));
     await expect(sendPlayback('http://orchestrator:3100/v1/playback', 'test-worker-04-key', request, 'muse-04'))
-      .rejects.toMatchObject({statusCode: 503});
+      .rejects.toMatchObject({statusCode: 504});
   });
 
   it('does not retry an uncertain mutation locally or on another bot', async () => {
     enableAll();
     const fetcher = vi.fn(async () => { throw new Error('private network detail'); });
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-04-key') as never, outgoing() as never, config))
+    await expect(handlePlaybackProxy(incoming('test-worker-04-key') as never, outgoing() as never, config))
       .rejects.toThrow(/No local fallback or automatic replay/);
     expect(fetcher).toHaveBeenCalledOnce();
     expect(fetcher).toHaveBeenCalledWith('http://muse-04:3101/v1/playback', expect.anything());
@@ -182,7 +182,7 @@ describe('bot-four Discord controller', () => {
       deferReply: vi.fn(async () => { events.push('defer'); }),
       editReply: vi.fn(async () => undefined),
     };
-    await expect(handleBotOneInteraction(interaction as never, {
+    await expect(handlePlaybackInteraction(interaction as never, {
       WORKER_ID: 'muse-04', CONTROL_TOKEN: 'test-worker-04-key', DISCORD_TOKEN: 'private-discord-token',
     } as never)).resolves.toBe(true);
     expect(events).toEqual(['defer', 'fetch']);
@@ -193,7 +193,7 @@ describe('bot-four Discord controller', () => {
     enableAll();
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneInteraction({} as never, {WORKER_ID: 'muse-05'} as never)).resolves.toBe(false);
+    await expect(handlePlaybackInteraction({} as never, {WORKER_ID: 'muse-05'} as never)).resolves.toBe(false);
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

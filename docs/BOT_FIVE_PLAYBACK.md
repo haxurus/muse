@@ -50,7 +50,7 @@ With distinct configured control credentials, the orchestrator forwards a reques
 
 Discord bot tokens and interaction tokens are not forwarded by this playback API. Each worker retains its own player, queue and per-guild admission guard. Guild/voice membership and channel permissions are rechecked before acting and around media lookup/voice connection. A session already assigned to another voice channel is not moved or controlled.
 
-Deduplication is bounded and process-local, not a durable exactly-once guarantee across restarts. An uncertain transport timeout never triggers an automatic retry, local fallback or another worker. Inspect the playback state before retrying manually. These controls are not a guarantee against every possible compromise.
+Deduplication is bounded and process-local, not a durable exactly-once guarantee across restarts. An uncertain transport timeout never triggers an automatic retry, local fallback or another worker; it is reported as HTTP 504 and the user is told to check `/queue` before retrying manually. The shared deduplication window, 170-second worker deadline and error semantics for all five bots are described in `BOT_ONE_PLAYBACK.md`. These controls are not a guarantee against every possible compromise.
 
 ## Verification
 

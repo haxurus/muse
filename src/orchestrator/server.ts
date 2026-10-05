@@ -4,7 +4,8 @@ import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
-import {handleBotOneProxy} from '../playback/transport.js';
+import {handlePlaybackProxy} from '../playback/transport.js';
+import {assertGuildId} from '../control/snowflake.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -71,7 +72,7 @@ export default class OrchestratorServer {
         return;
       }
 
-      if (await handleBotOneProxy(request, response, this.config)) {
+      if (await handlePlaybackProxy(request, response, this.config)) {
         return;
       }
 
@@ -188,6 +189,7 @@ export default class OrchestratorServer {
   }
 
   private async guildWorkers(guildId: string) {
+    assertGuildId(guildId);
     const statuses = await this.workerStatuses();
     const present = statuses.filter(result => result.ok && result.value.guilds.some(guild => guild.id === guildId));
 
@@ -211,6 +213,7 @@ export default class OrchestratorServer {
   }
 
   private async updateGuildWorkers(guildId: string, input: unknown) {
+    assertGuildId(guildId);
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
       throw new HttpError(400, 'request body must be an object');
     }
@@ -218,28 +221,34 @@ export default class OrchestratorServer {
     const body = input as {workerIds?: unknown; settings?: unknown};
     const patch = sanitizeGuildSettingsPatch(body.settings);
 
-    let selected: WorkerClient[];
-    if (body.workerIds === undefined) {
-      const statuses = await this.workerStatuses();
-      const presentIds = new Set(statuses
-        .filter(result => result.ok && result.value.guilds.some(guild => guild.id === guildId))
-        .map(result => result.workerId));
-      selected = this.workers.filter(worker => presentIds.has(worker.id));
-    } else {
+    let requested: Set<string> | undefined;
+    if (body.workerIds !== undefined) {
       if (!Array.isArray(body.workerIds)
         || body.workerIds.length === 0
         || body.workerIds.some(workerId => typeof workerId !== 'string')) {
         throw new HttpError(400, 'workerIds must be a non-empty string array');
       }
 
-      const requestedIds = new Set(body.workerIds as string[]);
-      const unknownIds = [...requestedIds].filter(id => !this.workers.some(worker => worker.id === id));
+      requested = new Set(body.workerIds as string[]);
+      const unknownIds = [...requested].filter(id => !this.workers.some(worker => worker.id === id));
       if (unknownIds.length > 0) {
         throw new HttpError(400, `unknown workers: ${unknownIds.join(', ')}`);
       }
-
-      selected = this.workers.filter(worker => requestedIds.has(worker.id));
     }
+
+    const requestedIds = requested;
+    // Only workers that are reachable and members of the guild are ever patched.
+    const statuses = await this.workerStatuses();
+    const presentIds = new Set(statuses
+      .filter(result => result.ok && result.value.guilds.some(guild => guild.id === guildId))
+      .map(result => result.workerId));
+    const candidates = requestedIds === undefined
+      ? this.workers
+      : this.workers.filter(worker => requestedIds.has(worker.id));
+    const selected = candidates.filter(worker => presentIds.has(worker.id));
+    const absent: Array<WorkerResult<never>> = candidates
+      .filter(worker => !presentIds.has(worker.id))
+      .map((worker): WorkerResult<never> => ({workerId: worker.id, ok: false, error: 'WorkerNotInGuild'}));
 
     if (selected.length === 0) {
       throw new HttpError(404, 'no matching workers are available in that guild');
@@ -254,7 +263,7 @@ export default class OrchestratorServer {
       guildId,
       requestedWorkers: selected.map(worker => worker.id),
       updated: results.filter(result => result.ok),
-      failed: results.filter(result => !result.ok),
+      failed: [...results.filter(result => !result.ok), ...(requestedIds === undefined ? [] : absent)],
     };
   }
 
