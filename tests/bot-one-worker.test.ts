@@ -7,6 +7,7 @@ import type {PlaybackWorkerId} from '../src/playback/protocol.js';
 
 vi.mock('../src/utils/get-guild-settings.js', () => ({getGuildSettings: async () => ({defaultQueuePageSize: 5})}));
 
+const workerIds = ['muse-01', 'muse-02', 'muse-03', 'muse-04', 'muse-05'] as const;
 const ids = {
   requestId: '123456789012345678', guildId: '223456789012345678', userId: '323456789012345678',
   voiceChannelId: '423456789012345678', textChannelId: '523456789012345678',
@@ -46,7 +47,7 @@ const makeHarness = (workerId: PlaybackWorkerId, connected = true) => {
   return {worker, member, permissions, voice, text, guild, client, player, enqueue};
 };
 
-describe.each(['muse-01', 'muse-02', 'muse-03', 'muse-04'] as const)('playback worker %s', workerId => {
+describe.each(workerIds)('playback worker %s', workerId => {
   const harness = (connected = true) => makeHarness(workerId, connected);
 
   it('reuses native enqueue options, rechecks permissions and never needs an interaction token', async () => {
@@ -164,20 +165,20 @@ describe('independent worker admission', () => {
     expect(second.player.pause).toHaveBeenCalledOnce();
   });
 
-  it('deduplicates bot 04 while bots 01-03 remain independently usable in the same guild', async () => {
-    const fourth = makeHarness('muse-04');
-    const others = (['muse-01', 'muse-02', 'muse-03'] as const).map(workerId => ({workerId, ...makeHarness(workerId)}));
+  it.each(workerIds)('deduplicates %s while all other workers remain usable in the same guild', async workerId => {
+    const active = makeHarness(workerId);
+    const others = workerIds.filter(id => id !== workerId).map(id => ({workerId: id, ...makeHarness(id)}));
     let release!: () => void;
     const hold = new Promise<void>(resolve => { release = resolve; });
-    fourth.enqueue.addToQueue.mockImplementation(async options => {
+    active.enqueue.addToQueue.mockImplementation(async options => {
       await hold;
-      await options.interaction.editReply('Fourth bot ready.');
+      await options.interaction.editReply('Worker ready.');
     });
     const request = {...ids, action: 'play', query: 'song'};
-    const pending = fourth.worker.execute(request);
-    const duplicate = fourth.worker.execute(request);
+    const pending = active.worker.execute(request);
+    const duplicate = active.worker.execute(request);
     try {
-      await expect(fourth.worker.execute({...ids, requestId: '823456789012345678', action: 'pause'}))
+      await expect(active.worker.execute({...ids, requestId: '823456789012345678', action: 'pause'}))
         .rejects.toMatchObject({statusCode: 409});
       await Promise.all(others.map(async other => {
         await expect(other.worker.execute({...ids, action: 'pause'}))
@@ -187,8 +188,8 @@ describe('independent worker admission', () => {
       release();
       await Promise.all([pending, duplicate]);
     }
-    expect(fourth.enqueue.addToQueue).toHaveBeenCalledOnce();
-    expect(fourth.player.pause).not.toHaveBeenCalled();
+    expect(active.enqueue.addToQueue).toHaveBeenCalledOnce();
+    expect(active.player.pause).not.toHaveBeenCalled();
     for (const other of others) {
       expect(other.player.pause).toHaveBeenCalledOnce();
       expect(other.enqueue.addToQueue).not.toHaveBeenCalled();

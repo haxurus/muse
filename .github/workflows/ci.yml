@@ -51,15 +51,15 @@ jobs:
           MUSE_IMAGE: ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: |
           set -euo pipefail
-          for selection in \
-            "one" "two" "three" "four" \
-            "one two" "one three" "one four" "two three" "two four" "three four" \
-            "one two three" "one two four" "one three four" "two three four" \
-            "one two three four"; do
+          pilots=(one two three four five)
+          for ((mask=1; mask<32; mask++)); do
             compose_files=(-f deploy/docker-compose.prod.yml)
-            for worker in $selection; do
-              compose_files+=(-f "deploy/docker-compose.bot-${worker}-playback.yml")
+            for index in "${!pilots[@]}"; do
+              if (( (mask & (1 << index)) != 0 )); then
+                compose_files+=(-f "deploy/docker-compose.bot-${pilots[$index]}-playback.yml")
+              fi
             done
+            echo "Checking playback pilot combination $mask of 31"
             docker compose --env-file deploy/.env "${compose_files[@]}" config -q
           done
       - name: Build production image

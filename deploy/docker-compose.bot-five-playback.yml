@@ -1,0 +1,9 @@
+# Opt-in pilot for the fifth worker only.
+# Apply together with deploy/docker-compose.prod.yml, never standalone.
+services:
+  orchestrator:
+    environment:
+      MUSE_BOT_FIVE_PLAYBACK: "true"
+  muse-05:
+    environment:
+      MUSE_BOT_FIVE_PLAYBACK: "true"

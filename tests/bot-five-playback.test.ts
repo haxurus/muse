@@ -5,13 +5,15 @@ import {handleBotOneProxy, sendPlayback} from '../src/playback/transport.js';
 import {handleBotOneInteraction} from '../src/playback/controller.js';
 import {isPlaybackWorkerEnabled, isPlaybackWorkerId, parsePlaybackRequest, type PlaybackResult, type PlaybackWorkerId} from '../src/playback/protocol.js';
 
+const workers = ['muse-01', 'muse-02', 'muse-03', 'muse-04', 'muse-05'] as const;
+const flags = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE'] as const;
 const ids = {
   requestId: '123456789012345678', guildId: '223456789012345678',
   userId: '323456789012345678', voiceChannelId: '423456789012345678',
   textChannelId: '523456789012345678',
 };
 const request = parsePlaybackRequest({...ids, action: 'queue', page: 1});
-const result = (workerId: PlaybackWorkerId = 'muse-03'): PlaybackResult => ({
+const result = (workerId: PlaybackWorkerId = 'muse-05'): PlaybackResult => ({
   workerId, guildId: ids.guildId, requestId: ids.requestId,
   channelId: ids.voiceChannelId, state: 'PLAYING', message: 'ok',
 });
@@ -26,15 +28,15 @@ const incoming = (token: string, body: unknown = request, method = 'POST') => Ob
   {url: '/v1/playback', method, headers: {authorization: `Bearer ${token}`}},
 );
 const outgoing = () => ({writeHead: vi.fn(), end: vi.fn()});
-const enableFirstThree = () => {
-  for (const name of ['ONE', 'TWO', 'THREE']) {
-    vi.stubEnv(`MUSE_BOT_${name}_PLAYBACK`, 'true');
+const enableAll = () => {
+  for (const flag of flags) {
+    vi.stubEnv(`MUSE_BOT_${flag}_PLAYBACK`, 'true');
   }
 };
 
 beforeEach(() => {
-  for (const name of ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE']) {
-    vi.stubEnv(`MUSE_BOT_${name}_PLAYBACK`, 'false');
+  for (const flag of flags) {
+    vi.stubEnv(`MUSE_BOT_${flag}_PLAYBACK`, 'false');
   }
 });
 afterEach(() => {
@@ -42,40 +44,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('bot-three playback activation', () => {
-  it('recognizes bot 03 but keeps every pilot disabled by default', () => {
-    expect(isPlaybackWorkerId('muse-03')).toBe(true);
-    for (const worker of config.workers) {
-      expect(isPlaybackWorkerEnabled(worker.id)).toBe(false);
-    }
-  });
-
-  it('enables only bot 03 with its own flag', () => {
-    vi.stubEnv('MUSE_BOT_THREE_PLAYBACK', 'true');
-    expect(isPlaybackWorkerEnabled('muse-03')).toBe(true);
-    for (const id of ['muse-01', 'muse-02', 'muse-04', 'muse-05', '', 'muse-99']) {
-      expect(isPlaybackWorkerEnabled(id)).toBe(false);
-    }
-  });
-
-  it('does not enable bot 03 through the first two flags', () => {
-    vi.stubEnv('MUSE_BOT_ONE_PLAYBACK', 'true');
-    vi.stubEnv('MUSE_BOT_TWO_PLAYBACK', 'true');
-    expect(isPlaybackWorkerEnabled('muse-03')).toBe(false);
-  });
-
-  it('keeps bots 04 and 05 disabled without their own flags', () => {
-    enableFirstThree();
-    for (const workerId of ['muse-04', 'muse-05']) {
+describe('five-worker independent activation', () => {
+  it.each(Array.from({length: 32}, (_, mask) => mask))('honors every independent flag combination including all-off: %s', mask => {
+    const enabled = workers.map((_workerId, index) => Math.floor(mask / (2 ** index)) % 2 === 1);
+    flags.forEach((flag, index) => vi.stubEnv(`MUSE_BOT_${flag}_PLAYBACK`, String(enabled[index])));
+    workers.forEach((workerId, index) => {
       expect(isPlaybackWorkerId(workerId)).toBe(true);
+      expect(isPlaybackWorkerEnabled(workerId)).toBe(enabled[index]);
+    });
+    vi.stubEnv('MUSE_BOT_SIX_PLAYBACK', 'true');
+    for (const workerId of ['muse-06', 'muse-99', 'muse-5', 'MUSE-05', '']) {
+      expect(isPlaybackWorkerId(workerId)).toBe(false);
       expect(isPlaybackWorkerEnabled(workerId)).toBe(false);
     }
   });
+
+  it.each(['1', 'TRUE', 'yes', ' true ', 'false', ''])('refuses noncanonical bot 05 opt-in value %s', value => {
+    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', value);
+    expect(isPlaybackWorkerEnabled('muse-05')).toBe(false);
+  });
 });
 
-describe('bot-three private routing', () => {
-  it.each(['muse-01', 'muse-02', 'muse-03'] as const)('routes %s only to its authenticated destination with all three enabled', async workerId => {
-    enableFirstThree();
+describe('five-worker private routing', () => {
+  it.each(workers)('routes %s only to its authenticated destination with all five enabled', async workerId => {
+    enableAll();
     const worker = config.workers.find(candidate => candidate.id === workerId)!;
     const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify(result(workerId))));
     vi.stubGlobal('fetch', fetcher);
@@ -86,15 +78,16 @@ describe('bot-three private routing', () => {
       method: 'POST', redirect: 'error',
       headers: {'content-type': 'application/json', authorization: `Bearer ${worker.token}`},
     }));
-    const sent = fetcher.mock.calls[0][1];
-    expect(JSON.parse(sent.body as string)).toEqual(request);
-    expect(sent.body).not.toContain(worker.token);
-    expect(sent.body).not.toContain(config.apiToken);
+    const body = fetcher.mock.calls[0][1].body as string;
+    expect(JSON.parse(body)).toEqual(request);
+    for (const credential of [...config.workers.map(candidate => candidate.token), config.apiToken]) {
+      expect(body).not.toContain(credential);
+    }
     expect(response.end).toHaveBeenCalledWith(JSON.stringify(result(workerId)));
   });
 
-  it.each(['test-admin-key', 'test-worker-01-key', 'test-worker-02-key', 'test-worker-04-key', 'test-worker-05-key', 'wrong'])('rejects credential %s when only bot 03 is enabled', async token => {
-    vi.stubEnv('MUSE_BOT_THREE_PLAYBACK', 'true');
+  it.each(['test-admin-key', 'test-worker-01-key', 'test-worker-02-key', 'test-worker-03-key', 'test-worker-04-key', 'wrong'])('rejects credential %s with only bot 05 enabled', async token => {
+    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', 'true');
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
     await expect(handleBotOneProxy(incoming(token) as never, outgoing() as never, config))
@@ -102,60 +95,80 @@ describe('bot-three private routing', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('refuses bot 03 credentials when its pilot is disabled', async () => {
-    vi.stubEnv('MUSE_BOT_ONE_PLAYBACK', 'true');
+  it('rejects bot 05 credentials when only the first four pilots are enabled', async () => {
+    for (const flag of flags.slice(0, 4)) {
+      vi.stubEnv(`MUSE_BOT_${flag}_PLAYBACK`, 'true');
+    }
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-03-key') as never, outgoing() as never, config))
+    await expect(handleBotOneProxy(incoming('test-worker-05-key') as never, outgoing() as never, config))
       .rejects.toMatchObject({statusCode: 401});
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('fails closed if enabled workers share the same control credential', async () => {
-    enableFirstThree();
+  it('rejects a credential for a worker absent from the configured registry', async () => {
+    enableAll();
+    const absent = {...config, workers: config.workers.filter(worker => worker.id !== 'muse-05')};
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    await expect(handleBotOneProxy(incoming('test-worker-05-key') as never, outgoing() as never, absent))
+      .rejects.toMatchObject({statusCode: 401});
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(['muse-01', 'muse-02', 'muse-03', 'muse-04'])('refuses ambiguous credentials shared with %s', async otherId => {
+    enableAll();
     const conflicting = {...config, workers: config.workers.map(worker => (
-      worker.id === 'muse-01' ? {...worker, token: 'test-worker-03-key'} : worker
+      worker.id === otherId ? {...worker, token: 'test-worker-05-key'} : worker
     ))};
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-03-key') as never, outgoing() as never, conflicting))
+    await expect(handleBotOneProxy(incoming('test-worker-05-key') as never, outgoing() as never, conflicting))
       .rejects.toMatchObject({statusCode: 401});
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('does not accept a caller-supplied target worker', async () => {
-    enableFirstThree();
+  it.each([{workerId: 'muse-01'}, {workerId: 'muse-04'}, {token: 'unexpected'}, {url: 'http://muse-01:3101/v1/playback'}])('rejects caller-supplied routing or credential fields %o', async fields => {
+    enableAll();
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    const forged = incoming('test-worker-03-key', {...request, workerId: 'muse-01'});
-    await expect(handleBotOneProxy(forged as never, outgoing() as never, config))
+    await expect(handleBotOneProxy(incoming('test-worker-05-key', {...request, ...fields}) as never, outgoing() as never, config))
       .rejects.toMatchObject({statusCode: 400});
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('rejects a non-POST mutation before forwarding', async () => {
+    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', 'true');
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    await expect(handleBotOneProxy(incoming('test-worker-05-key', request, 'GET') as never, outgoing() as never, config))
+      .rejects.toMatchObject({statusCode: 405});
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([
-    {workerId: 'muse-01'}, {workerId: 'muse-02'},
+    {workerId: 'muse-01'}, {workerId: 'muse-02'}, {workerId: 'muse-03'}, {workerId: 'muse-04'},
     {guildId: '923456789012345678'}, {requestId: '823456789012345678'},
-  ])('rejects a mismatched response identity %o', async mismatch => {
+  ])('rejects mismatched response identity %o', async mismatch => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({...result(), ...mismatch}))));
-    await expect(sendPlayback('http://orchestrator:3100/v1/playback', 'test-worker-03-key', request, 'muse-03'))
+    await expect(sendPlayback('http://orchestrator:3100/v1/playback', 'test-worker-05-key', request, 'muse-05'))
       .rejects.toMatchObject({statusCode: 503});
   });
 
-  it('never retries an uncertain mutation on another bot', async () => {
-    vi.stubEnv('MUSE_BOT_THREE_PLAYBACK', 'true');
+  it('does not retry an uncertain mutation locally or on another bot', async () => {
+    enableAll();
     const fetcher = vi.fn(async () => { throw new Error('private network detail'); });
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneProxy(incoming('test-worker-03-key') as never, outgoing() as never, config))
+    await expect(handleBotOneProxy(incoming('test-worker-05-key') as never, outgoing() as never, config))
       .rejects.toThrow(/No local fallback or automatic replay/);
     expect(fetcher).toHaveBeenCalledOnce();
-    expect(fetcher).toHaveBeenCalledWith('http://muse-03:3101/v1/playback', expect.anything());
+    expect(fetcher).toHaveBeenCalledWith('http://muse-05:3101/v1/playback', expect.anything());
   });
 });
 
-describe('bot-three Discord controller', () => {
+describe('bot-five Discord controller', () => {
   it.each(['play', 'pause', 'resume', 'skip', 'next', 'stop', 'disconnect', 'queue', 'volume'])('forwards /%s without transferring Discord credentials', async commandName => {
-    vi.stubEnv('MUSE_BOT_THREE_PLAYBACK', 'true');
+    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', 'true');
     const events: string[] = [];
     const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
       events.push('fetch');
@@ -181,29 +194,31 @@ describe('bot-three Discord controller', () => {
       editReply: vi.fn(async () => undefined),
     };
     await expect(handleBotOneInteraction(interaction as never, {
-      WORKER_ID: 'muse-03', CONTROL_TOKEN: 'test-worker-03-key', DISCORD_TOKEN: 'private-discord-token',
+      WORKER_ID: 'muse-05', CONTROL_TOKEN: 'test-worker-05-key', DISCORD_TOKEN: 'private-discord-token',
     } as never)).resolves.toBe(true);
     expect(events).toEqual(['defer', 'fetch']);
     expect(interaction.editReply).toHaveBeenCalledWith({content: 'ok', allowedMentions: {parse: []}});
   });
 
-  it.each(['muse-04', 'muse-05'])('leaves %s on its unchanged local command path', async workerId => {
-    enableFirstThree();
+  it('keeps bot 05 on its local command path without its own flag', async () => {
+    for (const flag of flags.slice(0, 4)) {
+      vi.stubEnv(`MUSE_BOT_${flag}_PLAYBACK`, 'true');
+    }
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
-    await expect(handleBotOneInteraction({} as never, {WORKER_ID: workerId} as never)).resolves.toBe(false);
+    await expect(handleBotOneInteraction({} as never, {WORKER_ID: 'muse-05'} as never)).resolves.toBe(false);
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
-describe('bot-three overlay scope', () => {
-  it('changes only the orchestrator and bot 03 without adding a service or credential mount', async () => {
-    const overlay = await readFile(new URL('../deploy/docker-compose.bot-three-playback.yml', import.meta.url), 'utf8');
-    const services = [...overlay.matchAll(/^  ([a-z0-9-]+):$/gm)].map(match => match[1]);
-    expect(services).toEqual(['orchestrator', 'muse-03']);
-    expect(overlay.match(/MUSE_BOT_THREE_PLAYBACK: "true"/g)).toHaveLength(2);
+describe('bot-five overlay scope', () => {
+  it('changes only the orchestrator and bot 05 environments', async () => {
+    const overlay = await readFile(new URL('../deploy/docker-compose.bot-five-playback.yml', import.meta.url), 'utf8');
+    expect([...overlay.matchAll(/^  ([a-z0-9-]+):$/gm)].map(match => match[1])).toEqual(['orchestrator', 'muse-05']);
+    expect(overlay.match(/MUSE_BOT_FIVE_PLAYBACK: "true"/g)).toHaveLength(2);
     expect(overlay).not.toMatch(/\b(?:ports|secrets|volumes|networks|privileged):/);
-    expect(overlay).not.toContain('MUSE_BOT_ONE_PLAYBACK');
-    expect(overlay).not.toContain('MUSE_BOT_TWO_PLAYBACK');
+    for (const flag of flags.slice(0, 4)) {
+      expect(overlay).not.toContain(`MUSE_BOT_${flag}_PLAYBACK`);
+    }
   });
 });

@@ -52,8 +52,9 @@ describe('bot-four independent activation', () => {
       expect(isPlaybackWorkerId(workerId)).toBe(true);
       expect(isPlaybackWorkerEnabled(workerId)).toBe(enabled);
     });
-    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', 'true');
-    for (const workerId of ['muse-05', 'muse-99', '']) {
+    expect(isPlaybackWorkerId('muse-05')).toBe(true);
+    expect(isPlaybackWorkerEnabled('muse-05')).toBe(false);
+    for (const workerId of ['muse-99', '']) {
       expect(isPlaybackWorkerId(workerId)).toBe(false);
       expect(isPlaybackWorkerEnabled(workerId)).toBe(false);
     }
@@ -188,9 +189,8 @@ describe('bot-four Discord controller', () => {
     expect(interaction.editReply).toHaveBeenCalledWith({content: 'ok', allowedMentions: {parse: []}});
   });
 
-  it('leaves bot 05 unchanged even if its unsupported flag is supplied', async () => {
+  it('leaves bot 05 unchanged without its own activation flag', async () => {
     enableAll();
-    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', 'true');
     const fetcher = vi.fn();
     vi.stubGlobal('fetch', fetcher);
     await expect(handleBotOneInteraction({} as never, {WORKER_ID: 'muse-05'} as never)).resolves.toBe(false);
