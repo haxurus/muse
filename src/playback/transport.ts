@@ -1,10 +1,10 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {HttpError, hasBearerToken, readJsonBody, sendJson} from '../control/http.js';
 import type {OrchestratorConfig} from '../orchestrator/config.js';
-import {parsePlaybackRequest, type PlaybackRequest, type PlaybackResult} from './protocol.js';
+import {isPlaybackWorkerEnabled, parsePlaybackRequest, type PlaybackRequest, type PlaybackResult, type PlaybackWorkerId} from './protocol.js';
 
 /** Fixed internal destinations only. Never retry a timed-out audio mutation locally. */
-export const sendPlayback = async (url: string, token: string, body: PlaybackRequest): Promise<PlaybackResult> => {
+export const sendPlayback = async (url: string, token: string, body: PlaybackRequest, expectedWorkerId: PlaybackWorkerId = 'muse-01'): Promise<PlaybackResult> => {
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -54,7 +54,7 @@ export const sendPlayback = async (url: string, token: string, body: PlaybackReq
       throw new HttpError(response.status, safeMessages[response.status] ?? 'Playback request failed.');
     }
 
-    if (payload.workerId !== 'muse-01' || payload.guildId !== body.guildId || payload.requestId !== body.requestId
+    if (payload.workerId !== expectedWorkerId || payload.guildId !== body.guildId || payload.requestId !== body.requestId
       || typeof payload.message !== 'string' || payload.message.length > 1900
       || !['FREE', 'PLAYING', 'PAUSED', 'IDLE'].includes(payload.state ?? '')
       || (payload.channelId !== null && typeof payload.channelId !== 'string')) {
@@ -76,12 +76,22 @@ export const handleBotOneProxy = async (
   response: ServerResponse,
   config: OrchestratorConfig,
 ): Promise<boolean> => {
-  if (request.url !== '/v1/playback' || process.env.MUSE_BOT_ONE_PLAYBACK !== 'true') {
+  if (request.url !== '/v1/playback') {
     return false;
   }
 
-  const worker = config.workers.find(candidate => candidate.id === 'muse-01');
-  if (!worker || !hasBearerToken(request, worker.token)) {
+  const enabledWorkers = config.workers.filter(worker => isPlaybackWorkerEnabled(worker.id));
+  if (enabledWorkers.length === 0) {
+    return false;
+  }
+
+  const authenticatedWorkers = enabledWorkers.filter(worker => hasBearerToken(request, worker.token));
+  if (authenticatedWorkers.length !== 1) {
+    throw new HttpError(401, 'Unauthorized playback controller.');
+  }
+
+  const worker = authenticatedWorkers[0];
+  if (!isPlaybackWorkerEnabled(worker.id)) {
     throw new HttpError(401, 'Unauthorized playback controller.');
   }
 
@@ -90,6 +100,10 @@ export const handleBotOneProxy = async (
   }
 
   const body = parsePlaybackRequest(await readJsonBody(request));
-  sendJson(response, 200, await sendPlayback(`${worker.baseUrl}/v1/playback`, worker.token, body));
+  sendJson(
+    response,
+    200,
+    await sendPlayback(`${worker.baseUrl}/v1/playback`, worker.token, body, worker.id),
+  );
   return true;
 };
