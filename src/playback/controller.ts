@@ -1,16 +1,16 @@
 import type {Interaction} from 'discord.js';
 import type Config from '../services/config.js';
-import {PLAYBACK_ACTIONS, isBotOnePlaybackEnabled, parsePlaybackRequest} from './protocol.js';
+import {PLAYBACK_ACTIONS, isPlaybackWorkerEnabled, parsePlaybackRequest} from './protocol.js';
 import {sendPlayback} from './transport.js';
 
-/** Keep the real Discord interaction and its token inside bot 01. */
+/** Keep the real Discord interaction and its token inside the command-receiving worker. */
 export const handleBotOneInteraction = async (interaction: Interaction, config: Config): Promise<boolean> => {
-  if (!isBotOnePlaybackEnabled(config.WORKER_ID)) {
+  if (!isPlaybackWorkerEnabled(config.WORKER_ID)) {
     return false;
   }
 
   if (interaction.isButton()) {
-    await interaction.reply({content: 'Use slash commands while bot-one pilot mode is enabled.', ephemeral: true});
+    await interaction.reply({content: 'Use slash commands while orchestrated playback pilot mode is enabled.', ephemeral: true});
     return true;
   }
 
@@ -20,7 +20,7 @@ export const handleBotOneInteraction = async (interaction: Interaction, config: 
 
   const action = interaction.commandName === 'next' ? 'skip' : interaction.commandName;
   if (!PLAYBACK_ACTIONS.some(candidate => candidate === action)) {
-    await interaction.reply({content: 'This command is not yet part of the bot-one playback pilot.', ephemeral: true});
+    await interaction.reply({content: 'This command is not yet part of the orchestrated playback pilot.', ephemeral: true});
     return true;
   }
 
@@ -49,7 +49,7 @@ export const handleBotOneInteraction = async (interaction: Interaction, config: 
     ...(action === 'queue' ? {page: interaction.options.getInteger('page') ?? 1, ...(interaction.options.getInteger('page-size') === null ? {} : {pageSize: interaction.options.getInteger('page-size')})} : {}),
     ...(action === 'volume' ? {volume: interaction.options.getInteger('level') ?? 100} : {}),
   });
-  const result = await sendPlayback('http://orchestrator:3100/v1/playback', config.CONTROL_TOKEN, request);
+  const result = await sendPlayback('http://orchestrator:3100/v1/playback', config.CONTROL_TOKEN, request, config.WORKER_ID);
   await interaction.editReply({content: result.message, allowedMentions: {parse: []}});
   return true;
 };

@@ -1,0 +1,9 @@
+# Opt-in pilot for the second worker only.
+# Apply together with deploy/docker-compose.prod.yml.
+services:
+  orchestrator:
+    environment:
+      MUSE_BOT_TWO_PLAYBACK: "true"
+  muse-02:
+    environment:
+      MUSE_BOT_TWO_PLAYBACK: "true"

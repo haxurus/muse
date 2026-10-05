@@ -13,7 +13,7 @@ import {Client} from 'discord.js';
 import WorkerControlServer from './control/worker-server.js';
 import AddQueryToQueue from './services/add-query-to-queue.js';
 import BotOnePlaybackWorker from './playback/worker.js';
-import {isBotOnePlaybackEnabled} from './playback/protocol.js';
+import {isPlaybackWorkerEnabled} from './playback/protocol.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
@@ -65,8 +65,13 @@ const startBot = async () => {
   if (config.WORKER_ID) {
     const client = container.get<Client>(TYPES.Client);
     const players = container.get<PlayerManager>(TYPES.Managers.Player);
-    const playback = isBotOnePlaybackEnabled(config.WORKER_ID)
-      ? new BotOnePlaybackWorker(client, players, container.get<AddQueryToQueue>(TYPES.Services.AddQueryToQueue))
+    const playback = isPlaybackWorkerEnabled(config.WORKER_ID)
+      ? new BotOnePlaybackWorker(
+        client,
+        players,
+        container.get<AddQueryToQueue>(TYPES.Services.AddQueryToQueue),
+        config.WORKER_ID,
+      )
       : undefined;
     workerControlServer = new WorkerControlServer(config, client, players, playback);
     await workerControlServer.start();

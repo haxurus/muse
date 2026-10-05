@@ -5,7 +5,7 @@ import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {STATUS} from '../services/player-types.js';
 import {HttpError} from '../control/http.js';
 import PlaybackGate from './gate.js';
-import {parsePlaybackRequest, type PlaybackRequest, type PlaybackResult} from './protocol.js';
+import {parsePlaybackRequest, type PlaybackRequest, type PlaybackResult, type PlaybackWorkerId} from './protocol.js';
 
 export default class BotOnePlaybackWorker {
   private readonly gate = new PlaybackGate();
@@ -14,6 +14,7 @@ export default class BotOnePlaybackWorker {
     private readonly client: Client,
     private readonly players: PlayerManager,
     private readonly enqueue: AddQueryToQueue,
+    private readonly workerId: PlaybackWorkerId = 'muse-01',
   ) {}
 
   async execute(input: unknown): Promise<PlaybackResult> {
@@ -27,7 +28,7 @@ export default class BotOnePlaybackWorker {
         }
 
         // Native media errors may contain provider URLs or credentials.
-        console.error('Bot-one playback failed', {guildId: request.guildId, requestId: request.requestId});
+        console.error('Orchestrated playback failed', {workerId: this.workerId, guildId: request.guildId, requestId: request.requestId});
         throw new HttpError(502, 'Playback failed. Check the worker status before retrying.');
       }
     });
@@ -166,7 +167,7 @@ export default class BotOnePlaybackWorker {
     }
 
     return {
-      workerId: 'muse-01',
+      workerId: this.workerId,
       guildId: request.guildId,
       requestId: request.requestId,
       channelId: player.voiceConnection?.joinConfig.channelId ?? null,
