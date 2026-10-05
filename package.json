@@ -29,8 +29,7 @@
     "prisma:generate": "prisma generate",
     "env:set-database-url": "tsx src/scripts/run-with-database-url.ts",
     "release": "release-it",
-    "build": "tsc",
-    "postinstall": "patch-package"
+    "build": "tsc"
   },
   "devDependencies": {
     "@release-it/keep-a-changelog": "^2.3.0",

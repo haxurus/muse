@@ -1,33 +1,108 @@
 #!/bin/bash
 set -euo pipefail
+umask 077
 
 BASE=/srv/docker/muse
+PROJECT=muse
 COMPOSE="$BASE/docker-compose.yml"
+WORKERS_FILE="$BASE/config/workers.json"
+OVERLAY_DIR="$BASE/overlays"
 ENV_FILE="$BASE/.env"
 BACKUPS="$BASE/backups"
 STATE="$BASE/.deploy-state"
 CURRENT="$STATE/current-image"
 PREVIOUS="$STATE/previous-image"
+# Backup taken immediately before the current release replaced previous-image.
+# Together with previous-config it describes exactly what `rollback` restores.
+PREVIOUS_BACKUP="$STATE/previous-backup"
+PREVIOUS_CONFIG="$STATE/previous-config"
 LAST_BACKUP="$STATE/last-backup"
+LOCK_FILE=/run/lock/muse-deploy.lock
+# Deployment bundle shipped inside every image (see Dockerfile).
+BUNDLE_PATH=/opt/muse-deploy
+EDGE_NETWORK=muse-edge
+NO_STATE_MARKER=none
 RUNTIME_UID=10001
 RUNTIME_GID=10001
 SERVICES=(dashboard-edge dashboard orchestrator muse-01 muse-02 muse-03 muse-04 muse-05)
-WORKERS=(muse-01 muse-02 muse-03 muse-04 muse-05)
+WORKER_NUMBERS=(01 02 03 04 05)
+ALLOWED_OVERLAYS=(bot-one-playback bot-two-playback bot-three-playback bot-four-playback bot-five-playback)
+COMPOSE_FILES=()
+TMP_DIRS=()
+BACKUP_RESULT=""
+TMP_RESULT=""
 
-compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE" "$@"
+cleanup() {
+  local dir
+  for dir in "${TMP_DIRS[@]}"; do
+    rm -rf -- "$dir"
+  done
+}
+trap cleanup EXIT
+
+die() {
+  local code="$1"
+  shift
+  printf '%s\n' "$*" >&2
+  exit "$code"
+}
+
+acquire_lock() {
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || die 75 "Another muse-deploy operation is already running (lock: $LOCK_FILE). Retry after it finishes."
 }
 
 validate_image() {
-  [[ "$1" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ ]] || {
-    echo "Refusing non-immutable or unexpected image reference." >&2
-    exit 64
-  }
+  [[ "$1" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ ]] \
+    || die 64 "Refusing non-immutable or unexpected image reference."
+  [[ ! "$1" =~ @sha256:0{64}$ ]] || die 64 "Refusing the placeholder image digest."
+}
+
+is_release_image() {
+  [[ "$1" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ && ! "$1" =~ @sha256:0{64}$ ]]
 }
 
 env_value() {
   local key="$1"
   awk -F= -v key="$key" '$1==key{print substr($0,index($0,"=")+1)}' "$ENV_FILE" | tail -n1
+}
+
+is_allowed_overlay() {
+  local candidate="$1" allowed
+  for allowed in "${ALLOWED_OVERLAYS[@]}"; do
+    [[ "$candidate" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+
+# Builds COMPOSE_FILES from a base Compose file plus the overlays selected by
+# MUSE_COMPOSE_OVERLAYS in .env. Every compose invocation uses this list.
+build_compose_files() {
+  local base_file="$1" overlay_dir="$2" raw name overlay seen=","
+  local -a names=()
+
+  [[ -f "$base_file" ]] || die 1 "Compose file not found: $base_file"
+  COMPOSE_FILES=(-f "$base_file")
+
+  raw="$(env_value MUSE_COMPOSE_OVERLAYS)"
+  [[ -n "$raw" ]] || return 0
+  [[ "$raw" =~ ^[a-z-]+(,[a-z-]+)*$ ]] \
+    || die 64 "MUSE_COMPOSE_OVERLAYS must be a comma-separated list without spaces."
+
+  IFS=, read -r -a names <<<"$raw"
+  for name in "${names[@]}"; do
+    is_allowed_overlay "$name" || die 64 "Unknown overlay in MUSE_COMPOSE_OVERLAYS: $name"
+    [[ "$seen" != *",$name,"* ]] || die 64 "Duplicate overlay in MUSE_COMPOSE_OVERLAYS: $name"
+    seen="$seen$name,"
+    overlay="$overlay_dir/docker-compose.$name.yml"
+    [[ -f "$overlay" ]] || die 1 "Selected overlay is not installed: $overlay"
+    COMPOSE_FILES+=(-f "$overlay")
+  done
+}
+
+compose() {
+  docker compose --project-name "$PROJECT" --project-directory "$BASE" \
+    --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
 }
 
 validate_runtime_config() {
@@ -37,24 +112,22 @@ validate_runtime_config() {
     discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
     youtube_api_key dashboard_discord_client_secret orchestrator_api_token \
     control_token_01 control_token_02 control_token_03 control_token_04 control_token_05; do
-    [[ -s "$BASE/secrets/$secret" ]] || {
-      echo "Required secret is empty: $secret" >&2
-      exit 64
-    }
+    [[ -s "$BASE/secrets/$secret" ]] || die 64 "Required secret is empty: $secret"
   done
 
   client_id="$(env_value MUSE_DASHBOARD_DISCORD_CLIENT_ID)"
   public_url="$(env_value MUSE_DASHBOARD_PUBLIC_URL)"
 
-  [[ "$client_id" =~ ^[0-9]{10,32}$ && ! "$client_id" =~ ^0+$ ]] || {
-    echo "MUSE_DASHBOARD_DISCORD_CLIENT_ID is not configured." >&2
-    exit 64
-  }
+  [[ "$client_id" =~ ^[0-9]{10,32}$ && ! "$client_id" =~ ^0+$ ]] \
+    || die 64 "MUSE_DASHBOARD_DISCORD_CLIENT_ID is not configured."
 
-  [[ "$public_url" =~ ^https://[^/]+/?$ && "$public_url" != *"example.com"* ]] || {
-    echo "MUSE_DASHBOARD_PUBLIC_URL must be a real https origin." >&2
-    exit 64
-  }
+  [[ "$public_url" =~ ^https://[^/]+/?$ && "$public_url" != *"example.com"* ]] \
+    || die 64 "MUSE_DASHBOARD_PUBLIC_URL must be a real https origin."
+}
+
+require_edge_network() {
+  docker network inspect "$EDGE_NETWORK" >/dev/null 2>&1 \
+    || die 1 "Docker network $EDGE_NETWORK is missing. Run ops/install-vps.sh and connect Nginx Proxy Manager to it (docs/DEPLOYMENT.md)."
 }
 
 set_env_key() {
@@ -71,50 +144,174 @@ set_env_key() {
   mv "$tmp" "$ENV_FILE"
 }
 
+write_state() {
+  local file="$1" value="$2" tmp
+  tmp="$(mktemp "$STATE/.state.XXXXXX")"
+  printf '%s\n' "$value" > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
+}
+
+ensure_dirs() {
+  install -d -m 700 -o root -g root "$BACKUPS" "$STATE"
+  install -d -m 700 -o root -g root "$OVERLAY_DIR"
+  install -d -m 755 -o root -g root "$BASE/config"
+}
+
+# Creates a private temporary directory (removed on exit) and stores its path
+# in TMP_RESULT; not used through $(...) so TMP_DIRS is updated in this shell.
+make_tmp_dir() {
+  TMP_RESULT="$(mktemp -d "$STATE/$1.XXXXXX")"
+  TMP_DIRS+=("$TMP_RESULT")
+}
+
+# --- Release configuration (Compose file, workers.json, overlays) -----------
+
+# Copies the deployment bundle out of the exact image digest being deployed.
+extract_bundle() {
+  local image="$1" stage="$2" cid name status=0
+  cid="$(docker create "$image")"
+  docker cp "$cid:$BUNDLE_PATH/." "$stage/" || status=$?
+  docker rm -f "$cid" >/dev/null 2>&1 || true
+  [[ "$status" -eq 0 ]] || die 1 "Image does not contain the deployment bundle at $BUNDLE_PATH."
+
+  for name in docker-compose.prod.yml workers.json; do
+    [[ -f "$stage/$name" && ! -L "$stage/$name" ]] || die 1 "Deployment bundle is missing $name."
+  done
+  for name in "${ALLOWED_OVERLAYS[@]}"; do
+    [[ -f "$stage/docker-compose.$name.yml" && ! -L "$stage/docker-compose.$name.yml" ]] \
+      || die 1 "Deployment bundle is missing docker-compose.$name.yml."
+  done
+}
+
+# Validates a candidate configuration with the real .env and the target image.
+validate_config_set() {
+  local compose_file="$1" overlay_dir="$2" image="$3"
+  build_compose_files "$compose_file" "$overlay_dir"
+  MUSE_IMAGE="$image" compose config -q \
+    || die 1 "Compose configuration for $image failed validation; nothing was changed."
+}
+
+snapshot_config() {
+  local dest="$1" file
+  install -d -m 700 "$dest/config" "$dest/overlays"
+  [[ -f "$COMPOSE" ]] && cp -p -- "$COMPOSE" "$dest/docker-compose.yml"
+  [[ -f "$WORKERS_FILE" ]] && cp -p -- "$WORKERS_FILE" "$dest/config/workers.json"
+  for file in "$OVERLAY_DIR"/docker-compose.*.yml; do
+    [[ -f "$file" ]] && cp -p -- "$file" "$dest/overlays/"
+  done
+  return 0
+}
+
+install_file() {
+  local src="$1" dst="$2" mode="$3"
+  install -m "$mode" -o root -g root "$src" "$dst.new"
+  mv -f "$dst.new" "$dst"
+}
+
+clear_overlays() {
+  local file
+  for file in "$OVERLAY_DIR"/docker-compose.*.yml; do
+    [[ -e "$file" ]] && rm -f -- "$file"
+  done
+  return 0
+}
+
+install_bundle() {
+  local stage="$1" name
+  install_file "$stage/docker-compose.prod.yml" "$COMPOSE" 600
+  install_file "$stage/workers.json" "$WORKERS_FILE" 644
+  clear_overlays
+  for name in "${ALLOWED_OVERLAYS[@]}"; do
+    install_file "$stage/docker-compose.$name.yml" "$OVERLAY_DIR/docker-compose.$name.yml" 600
+  done
+}
+
+restore_config() {
+  local src="$1" file
+  [[ -f "$src/docker-compose.yml" ]] && install_file "$src/docker-compose.yml" "$COMPOSE" 600
+  [[ -f "$src/config/workers.json" ]] && install_file "$src/config/workers.json" "$WORKERS_FILE" 644
+  clear_overlays
+  for file in "$src"/overlays/docker-compose.*.yml; do
+    [[ -f "$file" ]] && install_file "$file" "$OVERLAY_DIR/$(basename "$file")" 600
+  done
+  return 0
+}
+
+# --- Fleet lifecycle -------------------------------------------------------
+
+project_containers() {
+  docker ps -q --filter "label=com.docker.compose.project=$PROJECT"
+}
+
+# Stops every running container of the Compose project (independent of which
+# Compose files are installed) and refuses to continue unless all are stopped.
+stop_fleet() {
+  local ids
+  local -a running=()
+  ids="$(project_containers)"
+  if [[ -n "$ids" ]]; then
+    mapfile -t running <<<"$ids"
+    docker stop -t 30 "${running[@]}" >/dev/null || true
+  fi
+
+  ids="$(project_containers)"
+  [[ -z "$ids" ]] || die 1 "Muse containers are still running after stop; refusing to touch fleet state."
+}
+
 wait_healthy() {
-  local deadline=$((SECONDS + 240)) service cid status all_healthy
+  local deadline=$((SECONDS + 240)) service cid info state health all_healthy
   while (( SECONDS < deadline )); do
     all_healthy=1
     for service in "${SERVICES[@]}"; do
-      cid="$(compose ps -q "$service" || true)"
+      # -a includes exited containers so a crashed service fails fast.
+      cid="$(compose ps -a -q "$service" 2>/dev/null | head -n1 || true)"
       if [[ -z "$cid" ]]; then
         all_healthy=0
         continue
       fi
 
-      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
-      if [[ "$status" == "exited" || "$status" == "dead" ]]; then
-        echo "$service entered $status state." >&2
+      info="$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || true)"
+      state="${info%% *}"
+      health="${info#* }"
+      if [[ "$state" == "exited" || "$state" == "dead" ]]; then
+        echo "$service entered $state state." >&2
         return 1
       fi
 
-      [[ "$status" == "healthy" ]] || all_healthy=0
+      [[ "$state" == "running" && "$health" == "healthy" ]] || all_healthy=0
     done
 
     [[ "$all_healthy" -eq 1 ]] && return 0
     sleep 3
   done
 
+  echo "Timed out waiting for the fleet to become healthy." >&2
   return 1
 }
 
-stop_for_backup() {
-  compose stop -t 30 "${SERVICES[@]}" >/dev/null 2>&1 || true
+start_fleet() {
+  compose up -d --remove-orphans && wait_healthy
 }
 
-backup_db() {
-  mkdir -p "$BACKUPS" "$STATE"
-  chmod 700 "$BACKUPS" "$STATE"
+dump_logs() {
+  compose logs --tail=120 "${SERVICES[@]}" >&2 || true
+}
 
-  local stamp backup worker file
-  local files=()
+# --- Fleet state backups ---------------------------------------------------
+
+# Archives worker databases and orchestrator groups. Sets BACKUP_RESULT to the
+# archive path, or to "none" when no state existed yet. Must run while stopped.
+create_backup() {
+  local prefix="$1" stamp backup number file
+  local -a files=()
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  backup="$BACKUPS/muse-$stamp.tar.gz"
+  backup="$BACKUPS/$prefix-$stamp.tar.gz"
 
-  for worker in 01 02 03 04 05; do
+  for number in "${WORKER_NUMBERS[@]}"; do
     for file in db.sqlite db.sqlite-wal db.sqlite-shm; do
-      if [[ -f "$BASE/data/bot-$worker/$file" ]]; then
-        files+=("data/bot-$worker/$file")
+      if [[ -f "$BASE/data/bot-$number/$file" ]]; then
+        files+=("data/bot-$number/$file")
       fi
     done
   done
@@ -123,136 +320,223 @@ backup_db() {
     files+=("data/orchestrator/groups.json")
   fi
 
-  if [[ "${#files[@]}" -gt 0 ]]; then
-    tar -C "$BASE" -czf "$backup" "${files[@]}"
-    chmod 600 "$backup"
-    printf '%s\n' "$backup" > "$LAST_BACKUP"
-    find "$BACKUPS" -type f -name 'muse-*.tar.gz' -mtime +14 -delete
-    echo "Fleet state backup: $backup"
-  else
-    : > "$LAST_BACKUP"
+  if [[ "${#files[@]}" -eq 0 ]]; then
+    BACKUP_RESULT="$NO_STATE_MARKER"
     echo "No existing worker databases or orchestrator group state to back up."
+    return 0
   fi
+
+  tar -C "$BASE" -czf "$backup" -- "${files[@]}"
+  chmod 600 "$backup"
+  BACKUP_RESULT="$backup"
+  echo "Fleet state backup: $backup"
 }
 
 restore_backup() {
-  [[ -s "$LAST_BACKUP" ]] || return 0
+  local backup="$1" number
 
-  local backup worker
-  backup="$(cat "$LAST_BACKUP")"
-  [[ -f "$backup" ]] || return 0
+  if [[ "$backup" != "$NO_STATE_MARKER" ]]; then
+    [[ -f "$backup" ]] || die 1 "Backup archive not found: $backup"
+    tar -tzf "$backup" >/dev/null || die 1 "Backup archive is unreadable: $backup"
+  fi
 
-  for worker in 01 02 03 04 05; do
-    rm -f       "$BASE/data/bot-$worker/db.sqlite"       "$BASE/data/bot-$worker/db.sqlite-wal"       "$BASE/data/bot-$worker/db.sqlite-shm"
+  for number in "${WORKER_NUMBERS[@]}"; do
+    rm -f -- "$BASE/data/bot-$number/db.sqlite" \
+      "$BASE/data/bot-$number/db.sqlite-wal" \
+      "$BASE/data/bot-$number/db.sqlite-shm"
   done
-  rm -f "$BASE/data/orchestrator/groups.json"
+  rm -f -- "$BASE/data/orchestrator/groups.json"
 
-  tar -C "$BASE" -xzf "$backup"
+  if [[ "$backup" != "$NO_STATE_MARKER" ]]; then
+    tar -C "$BASE" --no-same-owner -xzf "$backup"
+  fi
   chown -R "$RUNTIME_UID:$RUNTIME_GID" "$BASE/data"
 }
 
-deploy_image() {
-  local image="$1" old=""
-  validate_image "$image"
+# Removes archives older than 14 days, except those still referenced by state.
+prune_backups() {
+  local keep_previous keep_last file
+  keep_previous="$(cat "$PREVIOUS_BACKUP" 2>/dev/null || true)"
+  keep_last="$(cat "$LAST_BACKUP" 2>/dev/null || true)"
+  while IFS= read -r -d '' file; do
+    [[ "$file" == "$keep_previous" || "$file" == "$keep_last" ]] && continue
+    rm -f -- "$file"
+  done < <(find "$BACKUPS" -maxdepth 1 -type f -name 'muse-*.tar.gz' -mtime +14 -print0)
+}
 
-  mkdir -p "$STATE"
-  chmod 700 "$STATE"
+# --- Commands --------------------------------------------------------------
 
+current_image() {
+  local image=""
   if [[ -s "$CURRENT" ]]; then
-    old="$(cat "$CURRENT")"
+    image="$(cat "$CURRENT")"
   else
-    old="$(awk -F= '$1=="MUSE_IMAGE"{print substr($0,index($0,"=")+1)}' "$ENV_FILE" | tail -n1)"
+    image="$(env_value MUSE_IMAGE)"
   fi
+  if is_release_image "$image"; then
+    printf '%s\n' "$image"
+  fi
+}
 
-  if [[ ! "$old" =~ ^ghcr\.io/haxurus/muse@sha256:[a-f0-9]{64}$ ]]; then
-    old=""
-  fi
+deploy_image() {
+  local image="$1" old stage snapshot pre_backup
+  validate_image "$image"
+  ensure_dirs
+
+  old="$(current_image)"
 
   validate_runtime_config
+  require_edge_network
   docker pull "$image"
-  stop_for_backup
-  backup_db
 
-  if [[ -n "$old" && "$old" != "$image" ]]; then
-    printf '%s\n' "$old" > "$PREVIOUS"
-  fi
+  # 1. Stage and validate the release's own Compose bundle before touching anything.
+  make_tmp_dir stage
+  stage="$TMP_RESULT"
+  extract_bundle "$image" "$stage"
+  validate_config_set "$stage/docker-compose.prod.yml" "$stage" "$image"
 
+  # 2. Remember the configuration that belongs to the running release.
+  make_tmp_dir config-snapshot
+  snapshot="$TMP_RESULT"
+  snapshot_config "$snapshot"
+
+  # 3. Stop cleanly and back up the state that belongs to the running release.
+  stop_fleet
+  create_backup muse
+  pre_backup="$BACKUP_RESULT"
+  write_state "$LAST_BACKUP" "$pre_backup"
+
+  # 4. Install the new configuration and start the new digest.
+  install_bundle "$stage"
+  build_compose_files "$COMPOSE" "$OVERLAY_DIR"
   set_env_key MUSE_IMAGE "$image"
-  compose up -d --remove-orphans
 
-  if wait_healthy; then
-    printf '%s\n' "$image" > "$CURRENT"
-    chmod 600 "$CURRENT" "$PREVIOUS" 2>/dev/null || true
+  if start_fleet; then
+    # Rollback pointers are committed only once the new release is healthy.
+    if [[ -n "$old" && "$old" != "$image" ]]; then
+      rm -rf -- "$PREVIOUS_CONFIG"
+      mv -- "$snapshot" "$PREVIOUS_CONFIG"
+      write_state "$PREVIOUS_BACKUP" "$pre_backup"
+      write_state "$PREVIOUS" "$old"
+    fi
+    write_state "$CURRENT" "$image"
+    prune_backups
     echo "Muse dashboard, orchestrator and all five workers deployed successfully."
     return 0
   fi
 
   echo "New fleet release failed health checks." >&2
-  compose logs --tail=120 "${SERVICES[@]}" >&2 || true
-  compose stop -t 15 "${SERVICES[@]}" >/dev/null 2>&1 || true
+  dump_logs
+  stop_fleet
 
-  if [[ -n "$old" ]]; then
-    echo "Restoring previous application image and worker databases." >&2
-    restore_backup
-    set_env_key MUSE_IMAGE "$old"
-    compose up -d --remove-orphans
-    wait_healthy || {
-      echo "Automatic fleet rollback also failed." >&2
-      exit 1
-    }
-    printf '%s\n' "$old" > "$CURRENT"
+  restore_config "$snapshot"
+  if [[ -z "$old" ]]; then
+    echo "No previous release is recorded; the fleet was left stopped." >&2
+    exit 1
   fi
 
+  echo "Restoring previous application image, configuration and fleet state." >&2
+  restore_backup "$pre_backup"
+  build_compose_files "$COMPOSE" "$OVERLAY_DIR"
+  set_env_key MUSE_IMAGE "$old"
+  start_fleet || die 1 "Automatic fleet rollback also failed."
+  write_state "$CURRENT" "$old"
   exit 1
 }
 
 rollback() {
-  [[ -s "$PREVIOUS" ]] || { echo "No previous image recorded." >&2; exit 1; }
+  local target target_backup current snapshot safety retired
 
-  local target current
+  [[ -s "$PREVIOUS" ]] || die 1 "No previous image recorded; nothing to roll back to."
+  [[ -s "$PREVIOUS_BACKUP" && -f "$PREVIOUS_CONFIG/docker-compose.yml" ]] \
+    || die 1 "No pre-deploy backup/configuration is recorded for the previous image; refusing an unsafe rollback. See 'Manual recovery' in docs/DEPLOYMENT.md."
+
   target="$(cat "$PREVIOUS")"
-  current="$(cat "$CURRENT" 2>/dev/null || true)"
+  target_backup="$(cat "$PREVIOUS_BACKUP")"
   validate_image "$target"
+  [[ "$target_backup" == "$NO_STATE_MARKER" || -f "$target_backup" ]] \
+    || die 1 "The backup recorded for the previous image is missing: $target_backup"
+  current="$(current_image)"
+  ensure_dirs
 
+  validate_config_set "$PREVIOUS_CONFIG/docker-compose.yml" "$PREVIOUS_CONFIG/overlays" "$target"
   docker pull "$target"
-  stop_for_backup
-  backup_db
-  set_env_key MUSE_IMAGE "$target"
-  compose up -d --remove-orphans
-  wait_healthy || {
-    compose logs --tail=120 "${SERVICES[@]}" >&2 || true
-    exit 1
-  }
 
-  printf '%s\n' "$target" > "$CURRENT"
-  [[ -n "$current" ]] && printf '%s\n' "$current" > "$PREVIOUS"
-  echo "Muse fleet rollback completed."
+  make_tmp_dir config-snapshot
+  snapshot="$TMP_RESULT"
+  snapshot_config "$snapshot"
+
+  stop_fleet
+  # Safety copy of the release being rolled back. It never replaces the
+  # last-backup or previous-backup pointers.
+  create_backup muse-rollback-safety
+  safety="$BACKUP_RESULT"
+
+  restore_backup "$target_backup"
+  restore_config "$PREVIOUS_CONFIG"
+  build_compose_files "$COMPOSE" "$OVERLAY_DIR"
+  set_env_key MUSE_IMAGE "$target"
+
+  if start_fleet; then
+    write_state "$CURRENT" "$target"
+    # Retire the consumed rollback pointers so a second rollback cannot
+    # restore the same pre-deploy state again.
+    retired="$STATE/rolled-back-$(date -u +%Y%m%dT%H%M%SZ)"
+    install -d -m 700 "$retired"
+    mv -- "$PREVIOUS" "$retired/target-image"
+    mv -- "$PREVIOUS_BACKUP" "$retired/target-backup"
+    mv -- "$PREVIOUS_CONFIG" "$retired/target-config"
+    [[ -n "$current" ]] && printf '%s\n' "$current" > "$retired/rolled-back-image"
+    printf '%s\n' "$safety" > "$retired/safety-backup"
+    echo "Muse fleet rollback completed. Safety backup of the replaced release: $safety"
+    return 0
+  fi
+
+  echo "Rolled-back release failed health checks." >&2
+  dump_logs
+  stop_fleet
+  restore_config "$snapshot"
+  if [[ -z "$current" ]]; then
+    die 1 "Rollback failed and no current release is recorded; the fleet was left stopped."
+  fi
+
+  echo "Restoring the release that was running before the rollback." >&2
+  restore_backup "$safety"
+  build_compose_files "$COMPOSE" "$OVERLAY_DIR"
+  set_env_key MUSE_IMAGE "$current"
+  start_fleet || die 1 "Rollback failed and restoring the original release also failed."
+  die 1 "Rollback failed; the original release was restored."
 }
 
 status() {
+  build_compose_files "$COMPOSE" "$OVERLAY_DIR"
   compose ps
   echo
-  printf 'Current:  %s\n' "$(cat "$CURRENT" 2>/dev/null || echo unknown)"
-  printf 'Previous: %s\n' "$(cat "$PREVIOUS" 2>/dev/null || echo none)"
+  printf 'Current:         %s\n' "$(cat "$CURRENT" 2>/dev/null || echo unknown)"
+  printf 'Previous:        %s\n' "$(cat "$PREVIOUS" 2>/dev/null || echo none)"
+  printf 'Previous backup: %s\n' "$(cat "$PREVIOUS_BACKUP" 2>/dev/null || echo none)"
+  printf 'Overlays:        %s\n' "$(env_value MUSE_COMPOSE_OVERLAYS)"
 }
 
-[[ "$(id -u)" -eq 0 ]] || { echo "Run through the restricted deploy entrypoint or as root." >&2; exit 1; }
+[[ "$(id -u)" -eq 0 ]] || die 1 "Run through the restricted deploy entrypoint or as root."
 cd "$BASE"
 
 case "${1:-status}" in
   deploy)
-    [[ $# -eq 2 ]] || { echo "Usage: muse-deploy deploy <digest>" >&2; exit 64; }
+    [[ $# -eq 2 ]] || die 64 "Usage: muse-deploy deploy <ghcr.io/haxurus/muse@sha256:digest>"
+    acquire_lock
     deploy_image "$2"
     ;;
   rollback)
-    [[ $# -eq 1 ]] || exit 64
+    [[ $# -eq 1 ]] || die 64 "Usage: muse-deploy rollback"
+    acquire_lock
     rollback
     ;;
   status)
-    [[ $# -eq 1 ]] || exit 64
+    [[ $# -le 1 ]] || die 64 "Usage: muse-deploy status"
     status
     ;;
   *)
-    exit 64
+    die 64 "Usage: muse-deploy {status|deploy <digest>|rollback}"
     ;;
 esac

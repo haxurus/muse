@@ -41,9 +41,12 @@ services:
       MUSE_DASHBOARD_EDGE_HOST: 0.0.0.0
       MUSE_DASHBOARD_EDGE_PORT: "8080"
       MUSE_DASHBOARD_UPSTREAM: http://dashboard:3000
+    # The public edge joins only the dedicated muse-edge network (shared with the
+    # Nginx Proxy Manager container) and the internal dashboard-web network.
+    # It is never attached to proxy_net and has no route to the Internet.
     networks:
       dashboard-web:
-      proxy_net:
+      muse-edge:
         aliases:
           - muse-dashboard
     security_opt:
@@ -269,52 +272,63 @@ services:
       - control-05
 
 networks:
-  proxy_net:
+  # Created once by ops/install-vps.sh as an internal bridge (muse-ed); the Nginx
+  # Proxy Manager container must be connected to it. See docs/DEPLOYMENT.md.
+  muse-edge:
     external: true
-    name: proxy_net
+    name: muse-edge
   egress:
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-eg
       com.docker.network.bridge.enable_icc: "false"
   dashboard-egress:
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-deg
       com.docker.network.bridge.enable_icc: "false"
   dashboard-web:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-dw
   dashboard-control:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-dc
   control-01:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-c01
   control-02:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-c02
   control-03:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-c03
   control-04:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-c04
   control-05:
     internal: true
     driver: bridge
+    enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-c05
 

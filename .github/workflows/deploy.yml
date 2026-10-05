@@ -5,22 +5,24 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-  attestations: write
-  id-token: write
+permissions: {}
 
+# Serialise whole runs so images are built and deployed in commit order.
+# The deploy job additionally shares the muse-production group with rollback.yml.
 concurrency:
-  group: muse-production
+  group: muse-build-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
           cache: yarn
@@ -31,18 +33,31 @@ jobs:
       - run: yarn test
 
   build:
+    if: github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
+      - name: Record build time
+        id: meta
+        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Multi-arch is kept on purpose: the VPS architecture is not pinned here.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -50,7 +65,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
@@ -61,17 +76,31 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.build_date }}
           build-args: |
             COMMIT_HASH=${{ github.sha }}
-            BUILD_DATE=${{ github.event.repository.updated_at }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
           sbom: true
           provenance: mode=max
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/haxurus/muse
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          # Storage records are only available to organization-owned repositories.
+          create-storage-record: false
+
   deploy:
-    if: vars.ENABLE_VPS_DEPLOY == 'true'
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_VPS_DEPLOY == 'true'
     needs: build
     runs-on: ubuntu-latest
+    permissions: {}
     environment: production
+    concurrency:
+      group: muse-production
+      cancel-in-progress: false
     steps:
       - name: Configure restricted SSH client
         env:
@@ -92,5 +121,12 @@ jobs:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
           set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "Unexpected digest" >&2; exit 1; }
           image="ghcr.io/haxurus/muse@${IMAGE_DIGEST}"
-          ssh -i ~/.ssh/id_ed25519             -p "${VPS_PORT:-22}"             -o BatchMode=yes             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=yes             "muse-deploy@${VPS_HOST}"             "deploy ${image}"
+          ssh -i ~/.ssh/id_ed25519 \
+            -p "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "muse-deploy@${VPS_HOST}" \
+            "deploy ${image}"

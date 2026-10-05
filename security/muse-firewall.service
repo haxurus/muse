@@ -1,7 +1,13 @@
 [Unit]
-Description=Muse Docker egress isolation
-After=docker.service
-Requires=docker.service
+Description=Muse Docker bridge isolation firewall
+# Install the rules before Docker starts any container, so there is no boot
+# window in which Muse bridges are unfiltered. The script creates DOCKER-USER
+# itself when needed; Docker keeps an existing DOCKER-USER chain on start.
+DefaultDependencies=no
+Wants=network-pre.target local-fs.target
+After=local-fs.target netfilter-persistent.service ufw.service firewalld.service
+Before=network-pre.target docker.service shutdown.target
+Conflicts=shutdown.target
 
 [Service]
 Type=oneshot

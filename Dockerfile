@@ -1,7 +1,15 @@
-FROM node:22-bookworm-slim AS base
+# Base image pinned by multi-arch index digest; Dependabot (docker ecosystem) proposes updates.
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS base
 
-ARG YT_DLP_VERSION=
-ENV MUSE_BUNDLED_YT_DLP_PATH=/opt/yt-dlp/bin/yt-dlp
+# yt-dlp is installed from a hash-locked requirements file. The ARG documents the
+# locked release and is cross-checked against the lock and the installed binary.
+# Bump both together with .github/scripts/yt-dlp-lock.py (the yt-dlp refresh
+# workflow opens a pull request doing exactly that).
+ARG YT_DLP_VERSION=2026.08.19
+ENV MUSE_BUNDLED_YT_DLP_PATH=/opt/yt-dlp/bin/yt-dlp \
+    CHECKPOINT_DISABLE=1
+
+COPY deploy/yt-dlp-requirements.txt /tmp/yt-dlp-requirements.txt
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
@@ -11,13 +19,13 @@ RUN apt-get update \
     ca-certificates \
     python3 \
     python3-venv \
+    && grep -Fqx "yt-dlp[default]==${YT_DLP_VERSION} \\" /tmp/yt-dlp-requirements.txt \
     && python3 -m venv /opt/yt-dlp \
-    && if [ -n "${YT_DLP_VERSION}" ]; then \
-        /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default]==${YT_DLP_VERSION}"; \
-    else \
-        /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default]"; \
-    fi \
+    && /opt/yt-dlp/bin/pip install --no-cache-dir --disable-pip-version-check \
+        --require-hashes --only-binary=:all: -r /tmp/yt-dlp-requirements.txt \
+    && test "$(/opt/yt-dlp/bin/yt-dlp --version)" = "${YT_DLP_VERSION}" \
     && ln -s /opt/yt-dlp/bin/yt-dlp /usr/local/bin/yt-dlp \
+    && rm -f /tmp/yt-dlp-requirements.txt \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -59,17 +67,34 @@ ENV DATA_DIR=/data \
     BUILD_DATE=${BUILD_DATE} \
     ENV_FILE=/config \
     MUSE_READY_FILE=/tmp/muse-ready \
-    YT_DLP_AUTO_UPDATE=false
+    YT_DLP_AUTO_UPDATE=false \
+    CHECKPOINT_DISABLE=1
 
-COPY --from=builder --chown=10001:10001 /usr/app/dist ./dist
-COPY --from=builder --chown=10001:10001 /usr/app/dashboard ./dashboard
-COPY --from=dependencies --chown=10001:10001 /usr/app/prod_node_modules ./node_modules
-COPY --from=builder --chown=10001:10001 /usr/app/node_modules/.prisma/client ./node_modules/.prisma/client
-COPY --from=builder --chown=10001:10001 /usr/app/migrations ./migrations
-COPY --from=builder --chown=10001:10001 /usr/app/schema.prisma ./schema.prisma
-COPY --from=builder --chown=10001:10001 /usr/app/package.json ./package.json
+# Application code is root-owned and therefore read-only for the runtime user.
+# Only /data (a volume in production) is owned by uid 10001.
+COPY --from=builder /usr/app/dist ./dist
+COPY --from=builder /usr/app/dashboard ./dashboard
+COPY --from=dependencies /usr/app/prod_node_modules ./node_modules
+COPY --from=builder /usr/app/node_modules/.prisma/client ./node_modules/.prisma/client
+COPY --from=builder /usr/app/migrations ./migrations
+COPY --from=builder /usr/app/schema.prisma ./schema.prisma
+COPY --from=builder /usr/app/package.json ./package.json
 
-RUN mkdir -p /data && chown 10001:10001 /data
+# Deployment bundle: muse-deploy extracts these root-owned files from the exact
+# image digest it deploys, so the VPS Compose project always matches the release.
+COPY deploy/docker-compose.prod.yml \
+     deploy/workers.json \
+     deploy/docker-compose.bot-one-playback.yml \
+     deploy/docker-compose.bot-two-playback.yml \
+     deploy/docker-compose.bot-three-playback.yml \
+     deploy/docker-compose.bot-four-playback.yml \
+     deploy/docker-compose.bot-five-playback.yml \
+     /opt/muse-deploy/
+
+RUN chmod 0755 /opt/muse-deploy \
+    && chmod 0444 /opt/muse-deploy/* \
+    && mkdir -p /data \
+    && chown 10001:10001 /data
 
 USER 10001:10001
 

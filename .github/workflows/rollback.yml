@@ -3,13 +3,18 @@ name: Rollback production
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   rollback:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions: {}
     environment: production
+    # Shared with the deploy job in deploy.yml: never run both at once.
+    concurrency:
+      group: muse-production
+      cancel-in-progress: false
     steps:
       - name: Configure restricted SSH client
         env:
@@ -29,4 +34,9 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519             -p "${VPS_PORT:-22}"             -o BatchMode=yes             -o IdentitiesOnly=yes             -o StrictHostKeyChecking=yes             "muse-deploy@${VPS_HOST}" rollback
+          ssh -i ~/.ssh/id_ed25519 \
+            -p "${VPS_PORT:-22}" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "muse-deploy@${VPS_HOST}" rollback

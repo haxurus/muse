@@ -1,15 +1,14 @@
-name: Refresh yt-dlp image
+name: Refresh yt-dlp pin
 
+# Opens a pull request against main when yt-dlp publishes a new release. The PR
+# bumps ARG YT_DLP_VERSION in the Dockerfile and regenerates the hash-locked
+# deploy/yt-dlp-requirements.txt; merging it builds and deploys normally.
 on:
   schedule:
     - cron: "17 9 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-  attestations: write
-  id-token: write
+permissions: {}
 
 concurrency:
   group: muse-yt-dlp-refresh
@@ -17,41 +16,51 @@ concurrency:
 
 jobs:
   refresh:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: main
 
-      - name: Resolve latest yt-dlp version
-        id: version
+      - name: Open bump pull request when a new yt-dlp release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          version="$(curl -fsSL https://pypi.org/pypi/yt-dlp/json | jq -r '.info.version')"
-          [[ "$version" =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
-          echo "value=$version" >> "$GITHUB_OUTPUT"
+          latest="$(gh api repos/yt-dlp/yt-dlp/releases/latest -q .tag_name)"
+          [[ "$latest" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?$ ]] || { echo "Unexpected tag: $latest" >&2; exit 1; }
+          current="$(sed -n 's/^ARG YT_DLP_VERSION=//p' Dockerfile)"
+          if [[ "$latest" == "$current" ]]; then
+            echo "yt-dlp $current is already pinned."
+            exit 0
+          fi
 
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
+          branch="deps/yt-dlp-${latest}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Branch $branch already exists; not opening another pull request."
+            exit 0
+          fi
 
-      - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          sed -i "s/^ARG YT_DLP_VERSION=.*/ARG YT_DLP_VERSION=${latest}/" Dockerfile
+          python3 .github/scripts/yt-dlp-lock.py "$latest" deploy/yt-dlp-requirements.txt
 
-      - name: Build immutable refreshed image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/haxurus/muse:yt-dlp-latest
-            ghcr.io/haxurus/muse:yt-dlp-${{ steps.version.outputs.value }}
-          build-args: |
-            YT_DLP_VERSION=${{ steps.version.outputs.value }}
-            COMMIT_HASH=${{ github.sha }}
-          sbom: true
-          provenance: mode=max
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add Dockerfile deploy/yt-dlp-requirements.txt
+          git commit -m "chore(deps): bump yt-dlp from ${current} to ${latest}"
+          git push origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(deps): bump yt-dlp to ${latest}" \
+            --body "Automated bump of the pinned yt-dlp release from \`${current}\` to \`${latest}\` with a regenerated hash lock (\`deploy/yt-dlp-requirements.txt\`, the dependency set yt-dlp publishes as its \`pin\` extra).
+
+          Release notes: https://github.com/yt-dlp/yt-dlp/releases/tag/${latest}
+
+          Pull requests opened with GITHUB_TOKEN do not trigger CI automatically: close and reopen this PR to run CI before merging."

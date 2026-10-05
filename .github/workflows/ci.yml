@@ -6,19 +6,22 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         node-version: ["22.12.0", "22"]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: yarn
@@ -51,6 +54,7 @@ jobs:
           MUSE_IMAGE: ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: |
           set -euo pipefail
+          # Mirrors muse-deploy: same project directory, --env-file and -f ordering.
           pilots=(one two three four five)
           for ((mask=1; mask<32; mask++)); do
             compose_files=(-f deploy/docker-compose.prod.yml)
@@ -60,8 +64,52 @@ jobs:
               fi
             done
             echo "Checking playback pilot combination $mask of 31"
-            docker compose --env-file deploy/.env "${compose_files[@]}" config -q
+            docker compose --project-name muse --project-directory deploy \
+              --env-file deploy/.env "${compose_files[@]}" config -q
           done
       - name: Build production image
         if: matrix.node-version == '22'
         run: docker build -t muse-ci .
+      - name: Verify deployment bundle and yt-dlp pin in the image
+        if: matrix.node-version == '22'
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^ARG YT_DLP_VERSION=//p' Dockerfile)"
+          test "$(docker run --rm --entrypoint yt-dlp muse-ci --version)" = "$version"
+          cid="$(docker create muse-ci)"
+          trap 'docker rm -f "$cid" >/dev/null' EXIT
+          bundle="$(mktemp -d)"
+          docker cp "$cid:/opt/muse-deploy/." "$bundle/"
+          for file in docker-compose.prod.yml workers.json \
+            docker-compose.bot-one-playback.yml docker-compose.bot-two-playback.yml \
+            docker-compose.bot-three-playback.yml docker-compose.bot-four-playback.yml \
+            docker-compose.bot-five-playback.yml; do
+            cmp "$bundle/$file" "deploy/$file"
+          done
+
+  shell:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Syntax check
+        run: |
+          set -euo pipefail
+          bash -n ops/install-vps.sh
+          bash -n ops/muse-deploy
+          sh -n ops/muse-deploy-entrypoint
+          sh -n security/host-firewall.sh
+          python3 -m py_compile .github/scripts/yt-dlp-lock.py
+      - name: ShellCheck
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          shellcheck ops/*.sh ops/muse-deploy ops/muse-deploy-entrypoint security/*.sh
+      - name: yt-dlp lock matches the Dockerfile pin
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^ARG YT_DLP_VERSION=//p' Dockerfile)"
+          grep -Fqx "yt-dlp[default]==${version} \\" deploy/yt-dlp-requirements.txt

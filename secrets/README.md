@@ -33,4 +33,4 @@ Spotify is optional. If disabled, keep both Spotify files empty.
 
 The orchestrator never receives a Discord token. Each worker receives only its own Discord token and its own control token. The dashboard receives the OAuth client secret and orchestrator token, but no Discord bot token. The public `dashboard-edge` receives no secrets.
 
-All secret files are root-owned on the host and must never be committed.
+All secret files are root-owned on the host (`640 root:10001`, so only the non-root Muse runtime group can read them) and must never be committed. `.dockerignore` excludes every `secrets/` directory and `.env` file from the image build context.

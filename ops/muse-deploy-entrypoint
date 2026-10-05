@@ -1,4 +1,6 @@
 #!/bin/sh
+# Forced SSH command for the muse-deploy key. Only three operations are
+# accepted; everything else is rejected before sudo is invoked.
 set -eu
 
 command_line=${SSH_ORIGINAL_COMMAND:-status}
@@ -10,8 +12,14 @@ case "$command_line" in
   rollback)
     exec sudo -n /usr/local/sbin/muse-deploy rollback
     ;;
-  deploy ghcr.io/haxurus/muse@sha256:*)
+  "deploy ghcr.io/haxurus/muse@sha256:"*)
     image=${command_line#deploy }
+    case "$image" in
+      *[!a-z0-9./@:]*)
+        echo "Unsupported deploy command." >&2
+        exit 64
+        ;;
+    esac
     exec sudo -n /usr/local/sbin/muse-deploy deploy "$image"
     ;;
   *)
