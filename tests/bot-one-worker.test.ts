@@ -3,6 +3,7 @@ import {describe, expect, it, vi} from 'vitest';
 import type AddQueryToQueue from '../src/services/add-query-to-queue.js';
 import {STATUS} from '../src/services/player-types.js';
 import BotOnePlaybackWorker from '../src/playback/worker.js';
+import type {PlaybackWorkerId} from '../src/playback/protocol.js';
 
 vi.mock('../src/utils/get-guild-settings.js', () => ({getGuildSettings: async () => ({defaultQueuePageSize: 5})}));
 
@@ -11,7 +12,7 @@ const ids = {
   voiceChannelId: '423456789012345678', textChannelId: '523456789012345678',
 };
 type Options = Parameters<AddQueryToQueue['addToQueue']>[0];
-const harness = (connected = true) => {
+const makeHarness = (workerId: PlaybackWorkerId, connected = true) => {
   const member = {user: {bot: false, id: ids.userId}, voice: {channelId: ids.voiceChannelId}};
   const permissions = {has: vi.fn(() => true)};
   const voice = {id: ids.voiceChannelId, guildId: ids.guildId, type: ChannelType.GuildVoice, permissionsFor: () => permissions};
@@ -41,15 +42,17 @@ const harness = (connected = true) => {
     await options.beforeEnqueue?.();
     await options.interaction.editReply('Song added.');
   })};
-  const worker = new BotOnePlaybackWorker(client as never, {get: () => player} as never, enqueue as never);
+  const worker = new BotOnePlaybackWorker(client as never, {get: () => player} as never, enqueue as never, workerId);
   return {worker, member, permissions, voice, text, guild, client, player, enqueue};
 };
 
-describe('bot-one worker', () => {
+describe.each(['muse-01', 'muse-02', 'muse-03'] as const)('playback worker %s', workerId => {
+  const harness = (connected = true) => makeHarness(workerId, connected);
+
   it('reuses native enqueue options, rechecks permissions and never needs an interaction token', async () => {
     const h = harness(false);
     const response = await h.worker.execute({...ids, action: 'play', query: 'song', immediate: true, split: true});
-    expect(response).toMatchObject({workerId: 'muse-01', channelId: ids.voiceChannelId, state: 'PLAYING', message: 'Song added.'});
+    expect(response).toMatchObject({workerId, channelId: ids.voiceChannelId, state: 'PLAYING', message: 'Song added.'});
     expect(h.enqueue.addToQueue).toHaveBeenCalledWith(expect.objectContaining({query: 'song', addToFrontOfQueue: true, shouldSplitChapters: true}));
     expect(h.guild.members.fetch).toHaveBeenCalledTimes(3);
     expect(h.enqueue.addToQueue.mock.calls[0][0].interaction).not.toHaveProperty('token');
@@ -131,5 +134,33 @@ describe('bot-one worker', () => {
     });
     await expect(h.worker.execute({...ids, action: 'play', query: 'song'})).rejects.toMatchObject({statusCode: 403});
     expect(h.player.voiceConnection).toBeNull();
+  });
+});
+
+describe('independent worker admission', () => {
+  it('deduplicates bot 03 requests without blocking bot 02 in the same guild', async () => {
+    const second = makeHarness('muse-02');
+    const third = makeHarness('muse-03');
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    third.enqueue.addToQueue.mockImplementation(async options => {
+      await hold;
+      await options.interaction.editReply('Third bot ready.');
+    });
+    const request = {...ids, action: 'play', query: 'song'};
+    const first = third.worker.execute(request);
+    const duplicate = third.worker.execute(request);
+    try {
+      await expect(third.worker.execute({...ids, requestId: '823456789012345678', action: 'pause'}))
+        .rejects.toMatchObject({statusCode: 409});
+      await expect(second.worker.execute({...ids, action: 'pause'}))
+        .resolves.toMatchObject({workerId: 'muse-02', state: 'PAUSED'});
+    } finally {
+      release();
+      await Promise.all([first, duplicate]);
+    }
+    expect(third.enqueue.addToQueue).toHaveBeenCalledOnce();
+    expect(third.player.pause).not.toHaveBeenCalled();
+    expect(second.player.pause).toHaveBeenCalledOnce();
   });
 });
