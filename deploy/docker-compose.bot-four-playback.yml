@@ -1,0 +1,9 @@
+# Opt-in pilot for the fourth worker only.
+# Apply together with deploy/docker-compose.prod.yml, never standalone.
+services:
+  orchestrator:
+    environment:
+      MUSE_BOT_FOUR_PLAYBACK: "true"
+  muse-04:
+    environment:
+      MUSE_BOT_FOUR_PLAYBACK: "true"
