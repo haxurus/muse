@@ -1,0 +1,9 @@
+# Opt-in pilot for the third worker only.
+# Apply together with deploy/docker-compose.prod.yml, never standalone.
+services:
+  orchestrator:
+    environment:
+      MUSE_BOT_THREE_PLAYBACK: "true"
+  muse-03:
+    environment:
+      MUSE_BOT_THREE_PLAYBACK: "true"

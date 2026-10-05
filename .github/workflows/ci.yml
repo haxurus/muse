@@ -45,6 +45,19 @@ jobs:
           done
           MUSE_IMAGE="ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
             docker compose -f deploy/docker-compose.prod.yml config -q
+      - name: Validate playback pilot overlays
+        if: matrix.node-version == '22'
+        env:
+          MUSE_IMAGE: ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: |
+          set -euo pipefail
+          for selection in "one" "two" "three" "one two" "one three" "two three" "one two three"; do
+            compose_files=(-f deploy/docker-compose.prod.yml)
+            for worker in $selection; do
+              compose_files+=(-f "deploy/docker-compose.bot-${worker}-playback.yml")
+            done
+            docker compose --env-file deploy/.env "${compose_files[@]}" config -q
+          done
       - name: Build production image
         if: matrix.node-version == '22'
         run: docker build -t muse-ci .
