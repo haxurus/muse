@@ -5,6 +5,7 @@ import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
 import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
+import type BotOnePlaybackWorker from '../playback/worker.js';
 
 export default class WorkerControlServer {
   private server?: Server;
@@ -13,6 +14,7 @@ export default class WorkerControlServer {
     private readonly config: Config,
     private readonly client: Client,
     private readonly playerManager: PlayerManager,
+    private readonly playback?: BotOnePlaybackWorker,
   ) {}
 
   async start(): Promise<void> {
@@ -67,6 +69,11 @@ export default class WorkerControlServer {
 
       if (!hasBearerToken(request, this.config.CONTROL_TOKEN)) {
         sendJson(response, 401, {error: 'unauthorized'});
+        return;
+      }
+
+      if (request.method === 'POST' && request.url === '/v1/playback' && this.playback) {
+        sendJson(response, 200, await this.playback.execute(await readJsonBody(request)));
         return;
       }
 
