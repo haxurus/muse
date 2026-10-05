@@ -46,7 +46,7 @@ const makeHarness = (workerId: PlaybackWorkerId, connected = true) => {
   return {worker, member, permissions, voice, text, guild, client, player, enqueue};
 };
 
-describe.each(['muse-01', 'muse-02', 'muse-03'] as const)('playback worker %s', workerId => {
+describe.each(['muse-01', 'muse-02', 'muse-03', 'muse-04'] as const)('playback worker %s', workerId => {
   const harness = (connected = true) => makeHarness(workerId, connected);
 
   it('reuses native enqueue options, rechecks permissions and never needs an interaction token', async () => {
@@ -162,5 +162,36 @@ describe('independent worker admission', () => {
     expect(third.enqueue.addToQueue).toHaveBeenCalledOnce();
     expect(third.player.pause).not.toHaveBeenCalled();
     expect(second.player.pause).toHaveBeenCalledOnce();
+  });
+
+  it('deduplicates bot 04 while bots 01-03 remain independently usable in the same guild', async () => {
+    const fourth = makeHarness('muse-04');
+    const others = (['muse-01', 'muse-02', 'muse-03'] as const).map(workerId => ({workerId, ...makeHarness(workerId)}));
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    fourth.enqueue.addToQueue.mockImplementation(async options => {
+      await hold;
+      await options.interaction.editReply('Fourth bot ready.');
+    });
+    const request = {...ids, action: 'play', query: 'song'};
+    const pending = fourth.worker.execute(request);
+    const duplicate = fourth.worker.execute(request);
+    try {
+      await expect(fourth.worker.execute({...ids, requestId: '823456789012345678', action: 'pause'}))
+        .rejects.toMatchObject({statusCode: 409});
+      await Promise.all(others.map(async other => {
+        await expect(other.worker.execute({...ids, action: 'pause'}))
+          .resolves.toMatchObject({workerId: other.workerId, state: 'PAUSED'});
+      }));
+    } finally {
+      release();
+      await Promise.all([pending, duplicate]);
+    }
+    expect(fourth.enqueue.addToQueue).toHaveBeenCalledOnce();
+    expect(fourth.player.pause).not.toHaveBeenCalled();
+    for (const other of others) {
+      expect(other.player.pause).toHaveBeenCalledOnce();
+      expect(other.enqueue.addToQueue).not.toHaveBeenCalled();
+    }
   });
 });
