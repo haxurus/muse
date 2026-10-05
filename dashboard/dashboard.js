@@ -46,6 +46,10 @@ const api = async (url, options = {}) => {
   });
 
   if (response.status === 401) {
+    if (session) {
+      showLogin();
+    }
+
     throw new Error('AUTH_REQUIRED');
   }
 
@@ -448,7 +452,13 @@ const selectGuild = async guildId => {
   }
 
   try {
-    guildDetails = await api(`/api/guilds/${encodeURIComponent(guildId)}`);
+    const details = await api(`/api/guilds/${encodeURIComponent(guildId)}`);
+    if (selectedGuildId !== guildId) {
+      // A newer selection superseded this request; ignore the stale response.
+      return;
+    }
+
+    guildDetails = details;
     document.getElementById('page-title').textContent = guildDetails.guild.name;
     document.getElementById('page-subtitle').textContent = 'Configura uno, più o tutti i music bot disponibili in questo server.';
     emptyState.hidden = true;
@@ -458,6 +468,10 @@ const selectGuild = async guildId => {
     statusPill.textContent = `${guildDetails.workers.filter(worker => worker.ok).length} worker online`;
     statusPill.className = 'status-pill ok';
   } catch (error) {
+    if (selectedGuildId !== guildId) {
+      return;
+    }
+
     formMessage.textContent = error.message;
     formMessage.className = 'error';
     statusPill.textContent = 'Errore';
@@ -573,8 +587,21 @@ document.getElementById('logout-button').addEventListener('click', async () => {
   }
 });
 
+const showLoginFailure = () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('login') !== 'failed') {
+    return;
+  }
+
+  const loginMessage = document.getElementById('login-message');
+  loginMessage.textContent = 'Accesso con Discord non riuscito o annullato. Riprova.';
+  loginMessage.hidden = false;
+  window.history.replaceState(null, '', '/');
+};
+
 const boot = async () => {
   renderSettingsForm();
+  showLoginFailure();
 
   try {
     session = await api('/api/session');

@@ -4,6 +4,61 @@ import {HttpError} from '../control/http.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 
+export type HttpErrorDetails = {
+  retryAfterSeconds?: number;
+  causeName?: string;
+  causeStatus?: number;
+};
+
+/**
+ * HttpError carrying optional client hints (Retry-After) and sanitized
+ * diagnostics about an upstream failure (error name and HTTP status only).
+ */
+export class DashboardHttpError extends HttpError {
+  constructor(statusCode: number, message: string, public readonly details: HttpErrorDetails = {}) {
+    super(statusCode, message);
+  }
+}
+
+export type UpstreamFailure = {
+  name: string;
+  statusCode?: number;
+  headers: Record<string, string | string[] | undefined>;
+  body?: unknown;
+};
+
+/**
+ * Extracts the non-secret parts of a got HTTPError (or any thrown value):
+ * the error name, the upstream status code, response headers and body.
+ */
+export const describeUpstreamError = (error: unknown): UpstreamFailure => {
+  if (typeof error !== 'object' || error === null) {
+    return {name: 'UnknownError', headers: {}};
+  }
+
+  const {name, response} = error as {name?: unknown; response?: unknown};
+  const failure: UpstreamFailure = {
+    name: typeof name === 'string' ? name : 'Error',
+    headers: {},
+  };
+
+  if (typeof response !== 'object' || response === null) {
+    return failure;
+  }
+
+  const {statusCode, headers, body} = response as {statusCode?: unknown; headers?: unknown; body?: unknown};
+  if (typeof statusCode === 'number') {
+    failure.statusCode = statusCode;
+  }
+
+  if (typeof headers === 'object' && headers !== null) {
+    failure.headers = headers as Record<string, string | string[] | undefined>;
+  }
+
+  failure.body = body;
+  return failure;
+};
+
 export const securityHeaders = (): Record<string, string> => ({
   'content-security-policy': 'default-src \'self\'; img-src \'self\' https://cdn.discordapp.com data:; style-src \'self\'; script-src \'self\'; connect-src \'self\'; object-src \'none\'; frame-src \'none\'; frame-ancestors \'none\'; base-uri \'none\'; form-action \'self\'',
   'cross-origin-opener-policy': 'same-origin',
@@ -32,8 +87,13 @@ export const send = (
   response.end(body);
 };
 
-export const sendJson = (response: ServerResponse, statusCode: number, body: unknown): void => {
-  send(response, statusCode, 'application/json; charset=utf-8', JSON.stringify(body));
+export const sendJson = (
+  response: ServerResponse,
+  statusCode: number,
+  body: unknown,
+  extraHeaders: Record<string, string | string[]> = {},
+): void => {
+  send(response, statusCode, 'application/json; charset=utf-8', JSON.stringify(body), extraHeaders);
 };
 
 export const redirect = (

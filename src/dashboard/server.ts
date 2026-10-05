@@ -4,8 +4,9 @@ import path from 'node:path';
 import {HttpError} from '../control/http.js';
 import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
-import {readJsonBody, send, sendJson} from './http.js';
+import {DashboardHttpError, describeUpstreamError, readJsonBody, send, sendJson} from './http.js';
 import OrchestratorClient, {GuildSettingsUpdate} from './orchestrator-client.js';
+import type {DashboardSession} from './session-store.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
 
@@ -25,14 +26,50 @@ const guildIconUrl = (guildId: string, icon?: string | null): string | null =>
 const routeSegments = (request: IncomingMessage, publicUrl: URL): string[] =>
   new URL(request.url ?? '/', publicUrl).pathname.split('/').filter(Boolean);
 
+type MutationResult = {
+  statusCode: number;
+  body: unknown;
+};
+
+type MutationAudit = {
+  action: string;
+  guildId: string;
+  groupId?: string;
+  workerIds?: string[];
+};
+
+const auditMutation = (session: DashboardSession, audit: MutationAudit, outcome: string): void => {
+  console.log(JSON.stringify({
+    event: 'dashboard_mutation',
+    timestamp: new Date().toISOString(),
+    userId: session.user.id,
+    guildId: audit.guildId,
+    action: audit.action,
+    ...(audit.groupId === undefined ? {} : {groupId: audit.groupId}),
+    workerCount: audit.workerIds?.length ?? null,
+    workerIds: audit.workerIds ?? null,
+    outcome,
+  }));
+};
+
+export type DashboardServerDependencies = {
+  auth?: DashboardAuth;
+  orchestrator?: OrchestratorClient;
+};
+
 export default class DashboardServer {
   private server?: Server;
   private readonly auth: DashboardAuth;
   private readonly orchestrator: OrchestratorClient;
 
-  constructor(private readonly config: DashboardConfig) {
-    this.auth = new DashboardAuth(config);
-    this.orchestrator = new OrchestratorClient(config);
+  constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
+    this.auth = dependencies.auth ?? new DashboardAuth(config);
+    this.orchestrator = dependencies.orchestrator ?? new OrchestratorClient(config);
+  }
+
+  get port(): number | undefined {
+    const address = this.server?.address();
+    return typeof address === 'object' && address !== null ? address.port : undefined;
   }
 
   async start(): Promise<void> {
@@ -52,6 +89,7 @@ export default class DashboardServer {
   }
 
   async close(): Promise<void> {
+    this.auth.close();
     if (!this.server) {
       return;
     }
@@ -144,15 +182,34 @@ export default class DashboardServer {
 
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
-      const statusCode = error instanceof HttpError ? error.statusCode : 500;
-      const message = error instanceof HttpError ? error.message : 'request failed';
-
-      if (!(error instanceof HttpError)) {
-        console.error(`Dashboard request failed: ${request.method ?? 'UNKNOWN'} ${pathname}`);
-      }
-
-      sendJson(response, statusCode, {error: message});
+      this.sendError(request, response, pathname, error);
     }
+  }
+
+  private sendError(request: IncomingMessage, response: ServerResponse, pathname: string, error: unknown): void {
+    const statusCode = error instanceof HttpError ? error.statusCode : 500;
+    const message = error instanceof HttpError ? error.message : 'request failed';
+    const details = error instanceof DashboardHttpError ? error.details : {};
+
+    if (statusCode >= 500) {
+      // Log only the error class and upstream HTTP status, never messages that may echo secrets.
+      const failure = describeUpstreamError(error);
+      const causeName = details.causeName ?? failure.name;
+      const causeStatus = details.causeStatus ?? failure.statusCode;
+      console.error(`Dashboard request failed: ${request.method ?? 'UNKNOWN'} ${pathname} status=${statusCode} error=${causeName} upstreamStatus=${causeStatus === undefined ? 'none' : causeStatus}`);
+    }
+
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
+
+    sendJson(
+      response,
+      statusCode,
+      {error: message},
+      details.retryAfterSeconds === undefined ? {} : {'retry-after': String(details.retryAfterSeconds)},
+    );
   }
 
   private async sessionResponse(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -187,8 +244,7 @@ export default class DashboardServer {
     });
   }
 
-  private async assertGuildAccess(request: IncomingMessage, guildId: string, forceRefresh: boolean) {
-    const session = this.auth.requireSession(request);
+  private async assertGuildAccess(session: DashboardSession, guildId: string, forceRefresh: boolean) {
     const guilds = await this.auth.manageableGuilds(session, forceRefresh);
     const guild = guilds.find(candidate => candidate.id === guildId);
     if (!guild) {
@@ -200,11 +256,41 @@ export default class DashboardServer {
       throw new HttpError(404, 'Muse is not available in this Discord server');
     }
 
-    return {session, guild};
+    return guild;
+  }
+
+  /**
+   * Runs a mutation with checks ordered cheapest-first: session, Origin + CSRF,
+   * mutation rate budget, then a forced Discord permission refresh. Every attempt by
+   * an authenticated user is written to stdout as a structured audit line.
+   */
+  private async mutate(
+    request: IncomingMessage,
+    response: ServerResponse,
+    audit: MutationAudit,
+    execute: (entry: MutationAudit) => Promise<MutationResult>,
+  ): Promise<void> {
+    const session = this.auth.requireSession(request);
+    let outcome = 'failed';
+
+    try {
+      this.auth.assertCsrf(request, session);
+      this.auth.assertMutationAllowed(session);
+      await this.assertGuildAccess(session, audit.guildId, true);
+      const result = await execute(audit);
+      sendJson(response, result.statusCode, result.body);
+      outcome = 'ok';
+    } catch (error: unknown) {
+      outcome = error instanceof HttpError ? `rejected_${error.statusCode}` : 'failed';
+      throw error;
+    } finally {
+      auditMutation(session, audit, outcome);
+    }
   }
 
   private async guildResponse(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
-    const {guild} = await this.assertGuildAccess(request, guildId, false);
+    const session = this.auth.requireSession(request);
+    const guild = await this.assertGuildAccess(session, guildId, false);
     const details = await this.orchestrator.guildWorkers(guildId);
 
     sendJson(response, 200, {
@@ -218,26 +304,30 @@ export default class DashboardServer {
   }
 
   private async createGroup(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
-    const {session} = await this.assertGuildAccess(request, guildId, true);
-    this.auth.assertCsrf(request, session);
-    this.auth.assertMutationAllowed(session);
+    await this.mutate(request, response, {action: 'group.create', guildId}, async audit => {
+      const input = await readJsonBody(request);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new HttpError(400, 'group body must be an object');
+      }
 
-    const input = await readJsonBody(request);
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-      throw new HttpError(400, 'group body must be an object');
-    }
+      const body = input as {name?: unknown; workerIds?: unknown};
+      if (typeof body.name !== 'string'
+        || !Array.isArray(body.workerIds)
+        || body.workerIds.some(workerId => typeof workerId !== 'string')) {
+        throw new HttpError(400, 'group requires a name and workerIds string array');
+      }
 
-    const body = input as {name?: unknown; workerIds?: unknown};
-    if (typeof body.name !== 'string'
-      || !Array.isArray(body.workerIds)
-      || body.workerIds.some(workerId => typeof workerId !== 'string')) {
-      throw new HttpError(400, 'group requires a name and workerIds string array');
-    }
+      const workerIds = body.workerIds as string[];
+      audit.workerIds = workerIds;
 
-    sendJson(response, 201, await this.orchestrator.createGuildGroup(guildId, {
-      name: body.name,
-      workerIds: body.workerIds as string[],
-    }));
+      return {
+        statusCode: 201,
+        body: await this.orchestrator.createGuildGroup(guildId, {
+          name: body.name,
+          workerIds,
+        }),
+      };
+    });
   }
 
   private async updateGroup(
@@ -246,30 +336,34 @@ export default class DashboardServer {
     guildId: string,
     groupId: string,
   ): Promise<void> {
-    const {session} = await this.assertGuildAccess(request, guildId, true);
-    this.auth.assertCsrf(request, session);
-    this.auth.assertMutationAllowed(session);
+    await this.mutate(request, response, {action: 'group.update', guildId, groupId}, async audit => {
+      const input = await readJsonBody(request);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new HttpError(400, 'group body must be an object');
+      }
 
-    const input = await readJsonBody(request);
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-      throw new HttpError(400, 'group body must be an object');
-    }
+      const body = input as {name?: unknown; workerIds?: unknown};
+      if (body.name !== undefined && typeof body.name !== 'string') {
+        throw new HttpError(400, 'group name must be a string');
+      }
 
-    const body = input as {name?: unknown; workerIds?: unknown};
-    if (body.name !== undefined && typeof body.name !== 'string') {
-      throw new HttpError(400, 'group name must be a string');
-    }
+      if (body.workerIds !== undefined
+        && (!Array.isArray(body.workerIds)
+          || body.workerIds.some(workerId => typeof workerId !== 'string'))) {
+        throw new HttpError(400, 'workerIds must be a string array');
+      }
 
-    if (body.workerIds !== undefined
-      && (!Array.isArray(body.workerIds)
-        || body.workerIds.some(workerId => typeof workerId !== 'string'))) {
-      throw new HttpError(400, 'workerIds must be a string array');
-    }
+      const workerIds = body.workerIds as string[] | undefined;
+      audit.workerIds = workerIds;
 
-    sendJson(response, 200, await this.orchestrator.updateGuildGroup(guildId, groupId, {
-      ...(body.name === undefined ? {} : {name: body.name}),
-      ...(body.workerIds === undefined ? {} : {workerIds: body.workerIds as string[]}),
-    }));
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.updateGuildGroup(guildId, groupId, {
+          ...(body.name === undefined ? {} : {name: body.name}),
+          ...(workerIds === undefined ? {} : {workerIds}),
+        }),
+      };
+    });
   }
 
   private async deleteGroup(
@@ -278,39 +372,42 @@ export default class DashboardServer {
     guildId: string,
     groupId: string,
   ): Promise<void> {
-    const {session} = await this.assertGuildAccess(request, guildId, true);
-    this.auth.assertCsrf(request, session);
-    this.auth.assertMutationAllowed(session);
-
-    sendJson(response, 200, await this.orchestrator.deleteGuildGroup(guildId, groupId));
+    await this.mutate(request, response, {action: 'group.delete', guildId, groupId}, async () => ({
+      statusCode: 200,
+      body: await this.orchestrator.deleteGuildGroup(guildId, groupId),
+    }));
   }
 
   private async updateGuild(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
-    const {session} = await this.assertGuildAccess(request, guildId, true);
-    this.auth.assertCsrf(request, session);
-    this.auth.assertMutationAllowed(session);
+    await this.mutate(request, response, {action: 'settings.update', guildId}, async audit => {
+      const input = await readJsonBody(request);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new HttpError(400, 'request body must be an object');
+      }
 
-    const input = await readJsonBody(request);
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-      throw new HttpError(400, 'request body must be an object');
-    }
+      const candidate = input as {workerIds?: unknown; settings?: unknown};
+      if (candidate.workerIds !== undefined
+        && (!Array.isArray(candidate.workerIds)
+          || candidate.workerIds.some(workerId => typeof workerId !== 'string'))) {
+        throw new HttpError(400, 'workerIds must be an array of strings');
+      }
 
-    const candidate = input as {workerIds?: unknown; settings?: unknown};
-    if (candidate.workerIds !== undefined
-      && (!Array.isArray(candidate.workerIds)
-        || candidate.workerIds.some(workerId => typeof workerId !== 'string'))) {
-      throw new HttpError(400, 'workerIds must be an array of strings');
-    }
+      if (typeof candidate.settings !== 'object' || candidate.settings === null || Array.isArray(candidate.settings)) {
+        throw new HttpError(400, 'settings must be an object');
+      }
 
-    if (typeof candidate.settings !== 'object' || candidate.settings === null || Array.isArray(candidate.settings)) {
-      throw new HttpError(400, 'settings must be an object');
-    }
+      const workerIds = candidate.workerIds as string[] | undefined;
+      audit.workerIds = workerIds;
 
-    const body: GuildSettingsUpdate = {
-      ...(candidate.workerIds === undefined ? {} : {workerIds: candidate.workerIds as string[]}),
-      settings: candidate.settings as Record<string, unknown>,
-    };
+      const body: GuildSettingsUpdate = {
+        ...(workerIds === undefined ? {} : {workerIds}),
+        settings: candidate.settings as Record<string, unknown>,
+      };
 
-    sendJson(response, 200, await this.orchestrator.updateGuildSettings(guildId, body));
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.updateGuildSettings(guildId, body),
+      };
+    });
   }
 }

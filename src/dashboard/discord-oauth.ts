@@ -5,6 +5,18 @@ const DISCORD_API = 'https://discord.com/api/v10';
 const DISCORD_AUTHORIZE = 'https://discord.com/oauth2/authorize';
 const DISCORD_TOKEN = 'https://discord.com/api/oauth2/token';
 const DISCORD_REVOKE = 'https://discord.com/api/oauth2/token/revoke';
+const GUILD_PAGE_SIZE = 200;
+const MAX_GUILD_PAGES = 10;
+export const REQUIRED_SCOPES = ['identify', 'guilds'];
+
+export const hasRequiredScopes = (scope: unknown): boolean => {
+  if (typeof scope !== 'string') {
+    return false;
+  }
+
+  const granted = new Set(scope.split(/\s+/u).filter(Boolean));
+  return REQUIRED_SCOPES.every(required => granted.has(required));
+};
 
 export type DiscordOAuthToken = {
   access_token: string;
@@ -65,7 +77,7 @@ export default class DiscordOAuthClient {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.config.discordClientId);
     url.searchParams.set('redirect_uri', this.config.oauthRedirectUri);
-    url.searchParams.set('scope', 'identify guilds');
+    url.searchParams.set('scope', REQUIRED_SCOPES.join(' '));
     url.searchParams.set('state', state);
     return url.toString();
   }
@@ -92,10 +104,7 @@ export default class DiscordOAuthClient {
   }
 
   async currentUserGuilds(accessToken: string): Promise<DiscordGuild[]> {
-    return got.get(
-      `${DISCORD_API}/users/@me/guilds?limit=200`,
-      requestOptions(accessToken),
-    ).json<DiscordGuild[]>();
+    return this.guildPages(accessToken, undefined, 0);
   }
 
   async revoke(accessToken: string): Promise<void> {
@@ -109,5 +118,21 @@ export default class DiscordOAuthClient {
       retry: {limit: 0},
       timeout: {request: 5000},
     });
+  }
+
+  private async guildPages(accessToken: string, after: string | undefined, page: number): Promise<DiscordGuild[]> {
+    const url = new URL(`${DISCORD_API}/users/@me/guilds`);
+    url.searchParams.set('limit', String(GUILD_PAGE_SIZE));
+    if (after) {
+      url.searchParams.set('after', after);
+    }
+
+    const guilds = await got.get(url.toString(), requestOptions(accessToken)).json<DiscordGuild[]>();
+    if (guilds.length < GUILD_PAGE_SIZE || page + 1 >= MAX_GUILD_PAGES) {
+      return guilds;
+    }
+
+    const next = await this.guildPages(accessToken, guilds[guilds.length - 1].id, page + 1);
+    return [...guilds, ...next];
   }
 }

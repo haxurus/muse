@@ -1,8 +1,10 @@
-import {createServer, request as httpRequest} from 'node:http';
+import {createServer} from 'node:http';
+import {createEdgeHandler} from './edge-proxy.js';
 
 const host = process.env.MUSE_DASHBOARD_EDGE_HOST ?? '0.0.0.0';
 const port = Number.parseInt(process.env.MUSE_DASHBOARD_EDGE_PORT ?? '8080', 10);
 const upstream = new URL(process.env.MUSE_DASHBOARD_UPSTREAM ?? 'http://dashboard:3000');
+const SHUTDOWN_GRACE_MS = 10_000;
 
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
   throw new Error('MUSE_DASHBOARD_EDGE_PORT must be a valid TCP port');
@@ -12,69 +14,38 @@ if (upstream.protocol !== 'http:' || upstream.hostname !== 'dashboard' || upstre
   throw new Error('MUSE_DASHBOARD_UPSTREAM must be the internal dashboard service');
 }
 
-const HOP_BY_HOP = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-]);
+const server = createServer(createEdgeHandler(upstream));
+let shuttingDown = false;
 
-const server = createServer((incoming, outgoing) => {
-  if (incoming.method === 'GET' && incoming.url === '/edge-health') {
-    outgoing.writeHead(200, {'content-type': 'application/json'});
-    outgoing.end('{"ok":true}');
+const shutdown = (signal: NodeJS.Signals): void => {
+  if (shuttingDown) {
     return;
   }
 
-  const headers: Record<string, string | string[] | undefined> = {};
-  for (const [name, value] of Object.entries(incoming.headers)) {
-    if (!HOP_BY_HOP.has(name.toLowerCase())) {
-      headers[name] = value;
-    }
-  }
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down dashboard edge...`);
 
-  headers.host = upstream.host;
+  const forceExit = setTimeout(() => {
+    console.error('Dashboard edge shutdown timed out');
+    process.exit(1);
+  }, SHUTDOWN_GRACE_MS);
+  forceExit.unref();
 
-  const proxy = httpRequest({
-    protocol: upstream.protocol,
-    hostname: upstream.hostname,
-    port: upstream.port,
-    method: incoming.method,
-    path: incoming.url,
-    headers,
-  }, proxiedResponse => {
-    const responseHeaders: Record<string, string | string[] | undefined> = {};
-    for (const [name, value] of Object.entries(proxiedResponse.headers)) {
-      if (!HOP_BY_HOP.has(name.toLowerCase())) {
-        responseHeaders[name] = value;
-      }
+  server.close(error => {
+    if (error) {
+      console.error(`Dashboard edge shutdown failed: ${error.name}`);
+      process.exit(1);
     }
 
-    outgoing.writeHead(proxiedResponse.statusCode ?? 502, responseHeaders);
-    proxiedResponse.pipe(outgoing);
+    process.exit(0);
   });
+};
 
-  proxy.setTimeout(30_000, () => {
-    proxy.destroy(new Error('upstream timeout'));
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    shutdown(signal);
   });
-
-  proxy.on('error', () => {
-    if (!outgoing.headersSent) {
-      outgoing.writeHead(502, {
-        'content-type': 'application/json',
-        'cache-control': 'no-store',
-      });
-    }
-
-    outgoing.end('{"error":"dashboard unavailable"}');
-  });
-
-  incoming.pipe(proxy);
-});
+}
 
 server.listen(port, host, () => {
   console.log(`Muse dashboard edge listening on ${host}:${port}`);
