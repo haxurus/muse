@@ -29,6 +29,8 @@ export const sendPlayback = async (url: string, token: string, body: PlaybackReq
 
       size += chunk.value.byteLength;
       if (size > 8192) {
+        // Cancel this single response stream before rejecting it.
+        // eslint-disable-next-line no-await-in-loop
         await reader.cancel();
         throw new Error('Oversized playback response');
       }

@@ -10,6 +10,8 @@ export default class PlaybackGate {
 
   constructor(private readonly maxEntries = 512, private readonly ttlMs = 15 * 60_000) {}
 
+  // Admission throws synchronously and duplicates retain the exact cached promise.
+  // eslint-disable-next-line @typescript-eslint/promise-function-async
   run(request: PlaybackRequest, operation: () => Promise<PlaybackResult>): Promise<PlaybackResult> {
     const now = Date.now();
     for (const [key, entry] of this.entries) {

@@ -16,7 +16,7 @@ export default class BotOnePlaybackWorker {
     private readonly enqueue: AddQueryToQueue,
   ) {}
 
-  execute(input: unknown): Promise<PlaybackResult> {
+  async execute(input: unknown): Promise<PlaybackResult> {
     const request = parsePlaybackRequest(input);
     return this.gate.run(request, async () => {
       try {
@@ -50,10 +50,14 @@ export default class BotOnePlaybackWorker {
       throw new HttpError(400, 'The pilot supports ordinary text and voice channels only.');
     }
 
+    if (voice.guildId !== guild.id || text.guildId !== guild.id) {
+      throw new HttpError(403, 'Channels must belong to the requested guild.');
+    }
+
     const bot = guild.members.me;
     if (member.user.bot || member.voice.channelId !== voice.id || !bot
       || !voice.permissionsFor(member).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect])
-      || !text.permissionsFor(member).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])
+      || !text.permissionsFor(member).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.UseApplicationCommands])
       || !voice.permissionsFor(bot).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])
       || !text.permissionsFor(bot).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
       throw new HttpError(403, 'Voice membership or channel permissions changed.');
@@ -80,7 +84,9 @@ export default class BotOnePlaybackWorker {
           shuffleAdditions: request.shuffle ?? false,
           shouldSplitChapters: request.split ?? false,
           skipCurrentTrack: request.skip ?? false,
-          beforeEnqueue: async () => { await this.authorize(request); },
+          beforeEnqueue: async () => {
+            await this.authorize(request);
+          },
           interaction: {
             guild: context.guild,
             member: context.member,
@@ -116,6 +122,10 @@ export default class BotOnePlaybackWorker {
 
       switch (request.action) {
         case 'pause':
+          if (player.status === STATUS.IDLE) {
+            throw new HttpError(409, 'Nothing is playing.');
+          }
+
           if (player.status === STATUS.PLAYING) {
             player.pause();
           }
@@ -124,6 +134,7 @@ export default class BotOnePlaybackWorker {
           break;
         case 'resume':
           await player.ensureVoiceConnectionReady();
+          await this.authorize(request);
           if (player.status !== STATUS.PLAYING) {
             await player.play();
           }

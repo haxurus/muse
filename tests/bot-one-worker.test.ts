@@ -14,8 +14,8 @@ type Options = Parameters<AddQueryToQueue['addToQueue']>[0];
 const harness = (connected = true) => {
   const member = {user: {bot: false, id: ids.userId}, voice: {channelId: ids.voiceChannelId}};
   const permissions = {has: vi.fn(() => true)};
-  const voice = {id: ids.voiceChannelId, type: ChannelType.GuildVoice, permissionsFor: () => permissions};
-  const text = {id: ids.textChannelId, type: ChannelType.GuildText, permissionsFor: () => permissions};
+  const voice = {id: ids.voiceChannelId, guildId: ids.guildId, type: ChannelType.GuildVoice, permissionsFor: () => permissions};
+  const text = {id: ids.textChannelId, guildId: ids.guildId, type: ChannelType.GuildText, permissionsFor: () => permissions};
   const guild = {
     id: ids.guildId,
     members: {me: {}, fetch: vi.fn(async () => member)},
@@ -65,6 +65,12 @@ describe('bot-one worker', () => {
     h.player.voiceConnection!.joinConfig.channelId = '623456789012345678';
     await expect(h.worker.execute({...ids, action: 'play', query: 'song'})).rejects.toMatchObject({statusCode: 409});
     expect(h.enqueue.addToQueue).not.toHaveBeenCalled();
+  });
+  it('rejects a text channel belonging to another guild', async () => {
+    const h = harness();
+    h.text.guildId = '923456789012345678';
+    await expect(h.worker.execute({...ids, action: 'pause'})).rejects.toMatchObject({statusCode: 403});
+    expect(h.player.pause).not.toHaveBeenCalled();
   });
   it('rejects missing channel permissions and an unready Discord client', async () => {
     const h = harness();
