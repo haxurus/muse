@@ -64,13 +64,12 @@ describe('bot-three playback activation', () => {
     expect(isPlaybackWorkerEnabled('muse-03')).toBe(false);
   });
 
-  it('keeps bot 04 disabled without its own flag and bot 05 unsupported', () => {
+  it('keeps bots 04 and 05 disabled without their own flags', () => {
     enableFirstThree();
-    vi.stubEnv('MUSE_BOT_FIVE_PLAYBACK', 'true');
-    expect(isPlaybackWorkerId('muse-04')).toBe(true);
-    expect(isPlaybackWorkerEnabled('muse-04')).toBe(false);
-    expect(isPlaybackWorkerId('muse-05')).toBe(false);
-    expect(isPlaybackWorkerEnabled('muse-05')).toBe(false);
+    for (const workerId of ['muse-04', 'muse-05']) {
+      expect(isPlaybackWorkerId(workerId)).toBe(true);
+      expect(isPlaybackWorkerEnabled(workerId)).toBe(false);
+    }
   });
 });
 
