@@ -558,6 +558,21 @@ describe('FileCacheProvider eviction', () => {
     expect(await fs.readFile(path.join(cacheDirectory, 'newest'), 'utf8')).toBe('new!');
   });
 
+  it('continues eviction when the oldest indexed file is already missing from disk', async () => {
+    const {cacheDirectory, provider} = await makeProvider(4);
+    const missing = makeRow('missing', 4, new Date('2026-01-01T00:00:00Z'));
+    const newest = makeRow('newest', 4, new Date('2026-01-02T00:00:00Z'));
+    dependencyMocks.rows.set(missing.hash, missing);
+    dependencyMocks.rows.set(newest.hash, newest);
+    await fs.writeFile(path.join(cacheDirectory, newest.hash), 'new!');
+
+    await expect((provider as unknown as {evictOldest(): Promise<void>}).evictOldest()).resolves.toBeUndefined();
+
+    expect(dependencyMocks.rows.has('missing')).toBe(false);
+    expect(dependencyMocks.rows.has('newest')).toBe(true);
+    expect(await fs.readFile(path.join(cacheDirectory, 'newest'), 'utf8')).toBe('new!');
+  });
+
   it('rejects cleanup after one no-progress check when usage is above limit but no row is evictable', async () => {
     const {provider} = await makeProvider(0);
     dependencyMocks.fileCache.aggregate

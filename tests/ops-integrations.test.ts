@@ -3,6 +3,7 @@ import {promises as fs} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
+import {WriteStream as CapacitorWriteStream} from 'fs-capacitor';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const dependencyMocks = vi.hoisted(() => ({
@@ -486,6 +487,7 @@ describe('OPS-11 yt-dlp extraction and ffmpeg handoff', () => {
       isLive: true,
     });
     expect(dependencyMocks.execa).toHaveBeenCalledWith('/fake/yt-dlp', [
+      '--ignore-config',
       '--dump-single-json',
       '--no-playlist',
       '--skip-download',
@@ -497,6 +499,7 @@ describe('OPS-11 yt-dlp extraction and ffmpeg handoff', () => {
       'bestaudio/best',
       '-S',
       'proto:https',
+      '--',
       'https://www.youtube.com/watch?v=abcdefghijk',
     ], {
       timeout: 45_000,
@@ -943,6 +946,71 @@ describe('OPS-11 yt-dlp extraction and ffmpeg handoff', () => {
     await flushAsyncWork();
 
     expect(destroyCacheDestination).toHaveBeenCalledOnce();
+  });
+
+  it('releases the playback buffer so its temp file is removed once every reader closes', async () => {
+    const release = vi.spyOn(CapacitorWriteStream.prototype, 'release');
+    const player = new Player({
+      getEntryFor: vi.fn().mockResolvedValue({generation: 'cached-generation', path: '/cached/audio.webm'}),
+    } as never, GUILD_ID);
+    const song: QueuedSong = {
+      title: 'Released buffer',
+      artist: 'Artist',
+      url: 'abcdefghijk',
+      length: 100,
+      offset: 0,
+      playlist: null,
+      isLive: false,
+      thumbnailUrl: null,
+      source: MediaSource.Youtube,
+      addedInChannelId: 'text-channel-id',
+      requestedBy: 'requester-id',
+    };
+
+    const stream = await (player as unknown as {
+      getStream(input: QueuedSong): Promise<Readable>;
+    }).getStream(song);
+
+    expect(release).toHaveBeenCalledOnce();
+    const capacitor = release.mock.contexts[0] as CapacitorWriteStream;
+    expect(capacitor.destroyed).toBe(false);
+
+    stream.destroy();
+    await vi.waitFor(() => {
+      expect(capacitor.destroyed).toBe(true);
+    });
+  });
+
+  it('passes protocol and read-timeout limits to FFmpeg for direct HTTP streams', async () => {
+    const player = new Player({} as never, GUILD_ID);
+    const song: QueuedSong = {
+      title: 'https://radio.example/live.m3u8',
+      artist: 'https://radio.example/live.m3u8',
+      url: 'https://radio.example/live.m3u8',
+      length: 0,
+      offset: 0,
+      playlist: null,
+      isLive: true,
+      thumbnailUrl: null,
+      source: MediaSource.HLS,
+      addedInChannelId: 'text-channel-id',
+      requestedBy: 'requester-id',
+    };
+
+    const stream = await (player as unknown as {
+      getStream(input: QueuedSong): Promise<Readable>;
+    }).getStream(song);
+    const command = dependencyMocks.ffmpeg.mock.results[0].value as ReturnType<typeof makeFfmpegCommand>;
+
+    expect(command.inputOptions).toHaveBeenCalledWith([
+      '-re',
+      '-protocol_whitelist',
+      'https,tls,tcp,crypto,httpproxy',
+      '-rw_timeout',
+      '15000000',
+    ]);
+    stream.destroy();
+    await flushAsyncWork();
   });
 });
 

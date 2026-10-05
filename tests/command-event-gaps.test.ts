@@ -225,6 +225,37 @@ describe('queue exhaustion disconnect delay', () => {
     expect(player.voiceConnection).toBe(voiceConnection);
   });
 
+  it('replaces rather than stacks an idle disconnect timer when the queue empties again', async () => {
+    const player = new Player({} as never, GUILD_ID);
+    const voiceConnection = makeVoiceConnection();
+    player.voiceConnection = voiceConnection as never;
+    mocks.getGuildSettings.mockResolvedValue({secondsToWaitAfterQueueEmpties: 5});
+
+    await getPrivateState(player).finishQueue();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await getPrivateState(player).finishQueue();
+
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(voiceConnection.destroy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(voiceConnection.destroy).toHaveBeenCalledOnce();
+    expect(getPrivateState(player).disconnectTimer).toBeNull();
+  });
+
+  it('clears a pending idle disconnect timer when stopped', async () => {
+    const player = new Player({} as never, GUILD_ID);
+    const voiceConnection = makeVoiceConnection();
+    player.voiceConnection = voiceConnection as never;
+    mocks.getGuildSettings.mockResolvedValue({secondsToWaitAfterQueueEmpties: 5});
+
+    await getPrivateState(player).finishQueue();
+    player.stop();
+
+    expect(getPrivateState(player).disconnectTimer).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('cancels a pending idle disconnect when playback starts again', async () => {
     const player = new Player({} as never, GUILD_ID);
     const voiceConnection = makeVoiceConnection();

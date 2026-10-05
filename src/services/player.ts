@@ -34,6 +34,7 @@ import {destroyVoiceConnection, recoverVoiceConnection} from './voice-connection
 import debug from '../utils/debug.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {buildPlayingMessageEmbed} from '../utils/build-embed.js';
+import {getHttpStreamInputOptions} from '../utils/http-stream.js';
 import {getSoundCloudMediaSource, getYouTubeMediaSource, YtDlpMediaUnavailableError} from '../utils/yt-dlp.js';
 import {Setting} from '@prisma/client';
 
@@ -180,6 +181,7 @@ export default class {
     this.pendingConnection = undefined;
     this.playbackAttempts.invalidate();
     this.voiceActivitySessionGeneration++;
+    this.clearDisconnectTimer();
 
     if (this.voiceConnection) {
       if (this.status === STATUS.PLAYING) {
@@ -552,10 +554,12 @@ export default class {
         }
       });
 
-      voiceConnection.on(
-        VoiceConnectionStatus.Disconnected,
-        this.onVoiceConnectionDisconnect.bind(this, voiceConnection),
-      );
+      voiceConnection.on(VoiceConnectionStatus.Disconnected, () => {
+        // Event emitters ignore returned promises, so recovery failures must be handled here.
+        void this.onVoiceConnectionDisconnect(voiceConnection).catch((error: unknown) => {
+          console.error(`Voice connection recovery failed for guild ${this.guildId}:`, error);
+        });
+      });
 
       try {
         // Handshakes must run sequentially so only one connection owns the guild.
@@ -699,10 +703,7 @@ export default class {
     }
 
     // Cancel any pending idle disconnection
-    if (this.disconnectTimer) {
-      clearInterval(this.disconnectTimer);
-      this.disconnectTimer = null;
-    }
+    this.clearDisconnectTimer();
 
     // Resume from paused state
     if (this.status === STATUS.PAUSED
@@ -818,7 +819,11 @@ export default class {
     }
 
     if (song.source === MediaSource.HLS) {
-      return this.createReadStream({url: song.url, cacheKey: song.url});
+      return this.createReadStream({
+        url: song.url,
+        cacheKey: song.url,
+        ffmpegInputOptions: ['-re', ...getHttpStreamInputOptions(song.url)],
+      });
     }
 
     let ffmpegInput: string | null;
@@ -1076,14 +1081,24 @@ export default class {
     const settings = await getGuildSettings(this.guildId);
 
     const {secondsToWaitAfterQueueEmpties} = settings;
+    // A previous queue exhaustion may still have a pending timer.
+    this.clearDisconnectTimer();
     if (secondsToWaitAfterQueueEmpties !== 0) {
       this.disconnectTimer = setTimeout(() => {
+        this.disconnectTimer = null;
         // Make sure we are not accidentally playing
         // when disconnecting
         if (this.status === STATUS.IDLE) {
           this.disconnect();
         }
       }, secondsToWaitAfterQueueEmpties * 1000);
+    }
+  }
+
+  private clearDisconnectTimer(): void {
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
     }
   }
 
@@ -1114,9 +1129,14 @@ export default class {
       }
 
       const returnedStream = capacitor.createReadStream();
+      // Every reader now exists. Releasing lets the capacitor delete its temp file,
+      // close its descriptor and drop its process exit listener once they all close.
+      capacitor.release();
       let cacheWriteAborted = false;
       let cacheReadEnded = false;
       let ffmpegEnded = false;
+      let ffmpegExited = false;
+      let ffmpegKillRequested = false;
       let hasReturnedStreamClosed = false;
       let startupSettled = false;
       let startupTimedOut = false;
@@ -1192,6 +1212,7 @@ export default class {
 
       const onFfmpegEnd = () => {
         ffmpegEnded = true;
+        ffmpegExited = true;
         finalizeCacheWriteIfComplete();
         if (startupProbeStream.readableEnded) {
           onEndBeforePlayablePacket();
@@ -1219,6 +1240,7 @@ export default class {
         .audioCodec('libopus')
         .outputFormat('webm')
         .on('error', error => {
+          ffmpegExited = true;
           destroyCacheWrite();
 
           if (hasReturnedStreamClosed) {
@@ -1231,7 +1253,7 @@ export default class {
           }
 
           console.error(`FFmpeg stream failed after playback began for guild ${this.guildId}: ${sanitizeFfmpegError(error)}`);
-          if (!capacitor.writableEnded) {
+          if (!capacitor.writableEnded && !capacitor.destroyed) {
             capacitor.end();
           }
         })
@@ -1266,10 +1288,21 @@ export default class {
         ));
       }, FFMPEG_STARTUP_TIMEOUT_MS);
 
+      // The released capacitor closes once playback and any cache reader are done.
+      // If FFmpeg is still producing output, it would otherwise block forever on
+      // an unpiped stdout. Output that already ended means FFmpeg is exiting anyway.
+      capacitor.once('close', () => {
+        if (!ffmpegExited && !ffmpegKillRequested && !startupTimedOut && !capacitor.writableEnded) {
+          ffmpegKillRequested = true;
+          stream.kill('SIGKILL');
+        }
+      });
+
       stream.pipe(capacitor);
 
       returnedStream.on('close', () => {
         if (!options.cache) {
+          ffmpegKillRequested = true;
           stream.kill('SIGKILL');
         }
 

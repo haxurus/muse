@@ -9,6 +9,7 @@ import ThirdParty from '../services/third-party.js';
 import getYouTubeAndSpotifySuggestionsFor, {SpotifySuggestionsUnavailableError} from '../utils/get-youtube-and-spotify-suggestions-for.js';
 import KeyValueCacheProvider from '../services/key-value-cache.js';
 import {ONE_HOUR_IN_SECONDS} from '../utils/constants.js';
+import {toDiscordAutocompleteChoices} from '../utils/string.js';
 import AddQueryToQueue from '../services/add-query-to-queue.js';
 
 @injectable()
@@ -104,6 +105,6 @@ export default class implements Command {
       }
     }
 
-    await interaction.respond(suggestions);
+    await interaction.respond(toDiscordAutocompleteChoices(suggestions));
   }
 }

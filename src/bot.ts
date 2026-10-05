@@ -15,7 +15,7 @@ import {generateDependencyReport} from '@discordjs/voice';
 import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
-import {handleBotOneInteraction} from './playback/controller.js';
+import {handlePlaybackInteraction} from './playback/controller.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -35,6 +35,38 @@ const sanitizeErrorForLog = (error: unknown) => {
   return `${name}: ${detail || 'unknown error'}`;
 };
 
+const GENERIC_USER_ERROR = 'something went wrong, please try again later';
+const MAX_USER_ERROR_LENGTH = 200;
+
+// Intentional command errors are short, plain sentences. Long or diagnostic-looking
+// messages (tool stderr, database errors, stack frames, file paths) stay in the logs.
+const looksInternal = (error: unknown, detail: string) => (
+  detail.length > MAX_USER_ERROR_LENGTH
+  || (error instanceof Error && error.name.startsWith('Prisma'))
+  || /\bat \S+ \(?\S+:\d+:\d+\)?/.test(detail)
+  || /(?:^|[\s'"(])(?:\/[\w.-]+){2,}/.test(detail)
+  || /\b[a-z]:\\/i.test(detail)
+  || /\b(?:yt-dlp|ffmpeg|ffprobe|prisma)\b/i.test(detail)
+  || /\bE[A-Z]{3,}\b/.test(detail)
+);
+
+const getUserSafeErrorMessage = (error: unknown) => {
+  const detail = sanitizeErrorDetail(error);
+
+  return !detail || looksInternal(error, detail) ? GENERIC_USER_ERROR : detail;
+};
+
+const logListenerFailures = <Args extends unknown[]>(
+  eventName: string,
+  listener: (...args: Args) => Promise<void>,
+) => async (...args: Args): Promise<void> => {
+  try {
+    await listener(...args);
+  } catch (error: unknown) {
+    console.error(`Discord ${eventName} handler failed: ${sanitizeErrorForLog(error)}`);
+  }
+};
+
 @injectable()
 export default class {
   private readonly client: Client;
@@ -42,6 +74,7 @@ export default class {
   private readonly shouldRegisterCommandsOnBot: boolean;
   private readonly commandsByName!: Collection<string, Command>;
   private readonly commandsByButtonId!: Collection<string, Command>;
+  private hasCompletedStartup = false;
 
   constructor(@inject(TYPES.Client) client: Client, @inject(TYPES.Config) config: Config) {
     this.client = client;
@@ -83,7 +116,7 @@ export default class {
     // eslint-disable-next-line complexity
     this.client.on('interactionCreate', async interaction => {
       try {
-        if (await handleBotOneInteraction(interaction, this.config)) {
+        if (await handlePlaybackInteraction(interaction, this.config)) {
           return;
         }
 
@@ -138,7 +171,7 @@ export default class {
             ? `button:${interaction.customId}`
             : interaction.type.toString();
         console.error(`Discord interaction failed (${interactionName}, guild=${interaction.guildId ?? 'dm'}, channel=${interaction.channelId ?? 'unknown'}, user=${interaction.user.id}): ${sanitizedError}`);
-        const userSafeError = new Error(sanitizeErrorDetail(error));
+        const userSafeError = new Error(getUserSafeErrorMessage(error));
 
         // This can fail if the message was deleted, and we don't want to crash the whole bot
         try {
@@ -153,33 +186,43 @@ export default class {
 
     const spinner = ora('📡 connecting to Discord...').start();
 
-    this.client.once('ready', async () => {
+    this.client.once('ready', logListenerFailures('ready', async () => {
       debug(generateDependencyReport());
 
-      // Update commands
+      // Update commands. A registration failure must not keep the bot from serving
+      // the commands Discord already has, so failures are logged and startup continues.
       const rest = new REST({version: '10'}).setToken(this.config.DISCORD_TOKEN);
       if (this.shouldRegisterCommandsOnBot) {
         spinner.text = '📡 updating commands on bot...';
-        await rest.put(
-          Routes.applicationCommands(this.client.user!.id),
-          {body: this.commandsByName.map(command => command.slashCommand.toJSON())},
-        );
+        try {
+          await rest.put(
+            Routes.applicationCommands(this.client.user!.id),
+            {body: this.commandsByName.map(command => command.slashCommand.toJSON())},
+          );
+        } catch (error: unknown) {
+          console.error(`Failed to register commands on bot: ${sanitizeErrorForLog(error)}`);
+        }
       } else {
         spinner.text = '📡 updating commands in all guilds...';
 
-        await Promise.all([
-          ...this.client.guilds.cache.map(async guild => {
-            await registerCommandsOnGuild({
-              rest,
-              guildId: guild.id,
-              applicationId: this.client.user!.id,
-              commands: this.commandsByName.map(c => c.slashCommand),
-            });
-          }),
+        const guildIds = this.client.guilds.cache.map(guild => guild.id);
+        const results = await Promise.allSettled([
+          ...guildIds.map(async guildId => registerCommandsOnGuild({
+            rest,
+            guildId,
+            applicationId: this.client.user!.id,
+            commands: this.commandsByName.map(c => c.slashCommand),
+          })),
           // Remove commands registered on bot (if they exist)
           rest.put(Routes.applicationCommands(this.client.user!.id), {body: []}),
-        ],
-        );
+        ]);
+
+        for (const [index, result] of results.entries()) {
+          if (result.status === 'rejected') {
+            const target = index < guildIds.length ? `guild ${guildIds[index]}` : 'bot (global cleanup)';
+            console.error(`Failed to update commands for ${target}: ${sanitizeErrorForLog(result.reason)}`);
+          }
+        }
       }
 
       this.client.user!.setPresence({
@@ -194,8 +237,9 @@ export default class {
       });
 
       spinner.succeed(`Ready! Invite the bot with https://discordapp.com/oauth2/authorize?client_id=${this.client.user?.id ?? ''}&scope=bot%20applications.commands&permissions=36700160`);
+      this.hasCompletedStartup = true;
       this.setReady(true);
-    });
+    }));
 
     this.client.on('error', console.error);
     this.client.on('debug', debug);
@@ -205,21 +249,32 @@ export default class {
     this.client.on('shardResume', () => {
       this.setReady(true);
     });
+    // A reconnect that cannot resume starts a new session and emits shardReady, not shardResume.
+    this.client.on('shardReady', () => {
+      if (this.hasCompletedStartup) {
+        this.setReady(true);
+      }
+    });
 
-    this.client.on('guildCreate', handleGuildCreate);
-    this.client.on('voiceStateUpdate', handleVoiceStateUpdate);
+    this.client.on('guildCreate', logListenerFailures('guildCreate', handleGuildCreate));
+    this.client.on('voiceStateUpdate', logListenerFailures('voiceStateUpdate', handleVoiceStateUpdate));
     await this.client.login();
   }
 
   private setReady(ready: boolean): void {
     const readyFile = this.config.READY_FILE ?? '/tmp/muse-ready';
-    if (ready) {
-      writeFileSync(readyFile, 'ready\n', {mode: 0o600});
-      return;
-    }
+    // The ready file is only a health signal; failing to update it must not crash the bot.
+    try {
+      if (ready) {
+        writeFileSync(readyFile, 'ready\n', {mode: 0o600});
+        return;
+      }
 
-    if (existsSync(readyFile)) {
-      unlinkSync(readyFile);
+      if (existsSync(readyFile)) {
+        unlinkSync(readyFile);
+      }
+    } catch (error: unknown) {
+      console.error(`Failed to ${ready ? 'write' : 'remove'} ready file ${readyFile}: ${sanitizeErrorForLog(error)}`);
     }
   }
 }

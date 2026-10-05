@@ -52,7 +52,8 @@ intents.push(GatewayIntentBits.GuildVoiceStates); // To listen for voice state c
 
 // Bot
 container.bind<Bot>(TYPES.Bot).to(Bot).inSingletonScope();
-container.bind<Client>(TYPES.Client).toConstantValue(new Client({intents}));
+// Never let interpolated user/media text (titles, queries) ping users, roles or @everyone.
+container.bind<Client>(TYPES.Client).toConstantValue(new Client({intents, allowedMentions: {parse: []}}));
 
 // Managers
 container.bind<PlayerManager>(TYPES.Managers.Player).to(PlayerManager).inSingletonScope();

@@ -5,6 +5,11 @@ import {prisma} from '../utils/db.js';
 import Command from './index.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 
+// Matches the dashboard validator; each playlist track costs provider API quota.
+const MAX_PLAYLIST_LIMIT = 500;
+// One day. Delays past ~24.8 days would overflow setTimeout and fire immediately.
+const MAX_WAIT_AFTER_QUEUE_EMPTIES_SECONDS = 86_400;
+
 @injectable()
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
@@ -17,6 +22,8 @@ export default class implements Command {
       .addIntegerOption(option => option
         .setName('limit')
         .setDescription('maximum number of tracks')
+        .setMinValue(1)
+        .setMaxValue(MAX_PLAYLIST_LIMIT)
         .setRequired(true)))
     .addSubcommand(subcommand => subcommand
       .setName('set-wait-after-queue-empties')
@@ -25,7 +32,8 @@ export default class implements Command {
         .setName('delay')
         .setDescription('delay in seconds (set to 0 to never leave)')
         .setRequired(true)
-        .setMinValue(0)))
+        .setMinValue(0)
+        .setMaxValue(MAX_WAIT_AFTER_QUEUE_EMPTIES_SECONDS)))
     .addSubcommand(subcommand => subcommand
       .setName('set-leave-if-no-listeners')
       .setDescription('set whether to leave when all other participants leave')
@@ -93,8 +101,8 @@ export default class implements Command {
       case 'set-playlist-limit': {
         const limit: number = interaction.options.getInteger('limit')!;
 
-        if (limit < 1) {
-          throw new Error('invalid limit');
+        if (limit < 1 || limit > MAX_PLAYLIST_LIMIT) {
+          throw new Error(`invalid limit, must be between 1 and ${MAX_PLAYLIST_LIMIT}`);
         }
 
         await prisma.setting.update({
@@ -113,6 +121,10 @@ export default class implements Command {
 
       case 'set-wait-after-queue-empties': {
         const delay = interaction.options.getInteger('delay')!;
+
+        if (delay < 0 || delay > MAX_WAIT_AFTER_QUEUE_EMPTIES_SECONDS) {
+          throw new Error(`invalid delay, must be between 0 and ${MAX_WAIT_AFTER_QUEUE_EMPTIES_SECONDS} seconds`);
+        }
 
         await prisma.setting.update({
           where: {

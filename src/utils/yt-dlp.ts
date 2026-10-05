@@ -312,6 +312,8 @@ const extractMedia = async (url: string, playlistLimit?: number, useYouTubeCooki
   try {
     return await withTemporaryCookies(async cookiesPath => {
       const args = [
+        // Ignore host/user yt-dlp config files that could alter output or execute hooks.
+        '--ignore-config',
         '--dump-single-json',
         ...(playlistLimit === undefined ? ['--no-playlist'] : ['--flat-playlist', '--playlist-end', String(playlistLimit)]),
         '--skip-download',
@@ -329,7 +331,8 @@ const extractMedia = async (url: string, playlistLimit?: number, useYouTubeCooki
         args.push('--cookies', cookiesPath);
       }
 
-      args.push(url);
+      // End option parsing so a URL can never be interpreted as a yt-dlp flag.
+      args.push('--', url);
 
       const {stdout} = await execa(getExecutable(), args, {
         timeout: YT_DLP_EXTRACT_TIMEOUT_MS,

@@ -12,12 +12,32 @@ import {prisma} from './utils/db.js';
 import {Client} from 'discord.js';
 import WorkerControlServer from './control/worker-server.js';
 import AddQueryToQueue from './services/add-query-to-queue.js';
-import BotOnePlaybackWorker from './playback/worker.js';
+import PlaybackWorker from './playback/worker.js';
 import {isPlaybackWorkerEnabled} from './playback/protocol.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
 let workerControlServer: WorkerControlServer | undefined;
+
+// Docker's stop grace period is 30s for workers; leave room for Prisma to disconnect.
+const CONTROL_DRAIN_TIMEOUT_MS = 5000;
+const PRISMA_DISCONNECT_TIMEOUT_MS = 3000;
+
+const settleWithin = async (promise: Promise<unknown>, timeoutMs: number) => {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>(resolve => {
+    timer = setTimeout(resolve, timeoutMs);
+    timer.unref();
+  });
+
+  try {
+    await Promise.race([promise.catch((error: unknown) => {
+      console.error('Shutdown step failed:', error);
+    }), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const shutdown = async (signal: NodeJS.Signals) => {
   if (shuttingDown) {
@@ -28,15 +48,20 @@ const shutdown = async (signal: NodeJS.Signals) => {
   console.log(`Received ${signal}, shutting down...`);
 
   try {
+    // Stop accepting control requests first; in-flight playback gets a short drain window
+    // instead of holding shutdown until Docker sends SIGKILL.
+    if (workerControlServer) {
+      await settleWithin(workerControlServer.close(), CONTROL_DRAIN_TIMEOUT_MS);
+    }
+
     bot.shutdown();
-    await workerControlServer?.close();
     container.get<PlayerManager>(TYPES.Managers.Player).cleanup();
 
     if (container.isBound(TYPES.ThirdParty)) {
       container.get<ThirdParty>(TYPES.ThirdParty).cleanup();
     }
 
-    await prisma.$disconnect();
+    await settleWithin(prisma.$disconnect(), PRISMA_DISCONNECT_TIMEOUT_MS);
   } catch (error: unknown) {
     console.error('Graceful shutdown failed:', error);
     process.exitCode = 1;
@@ -51,7 +76,25 @@ const installSignalHandlers = () => {
   }
 };
 
+const installUnhandledRejectionLogger = () => {
+  // Keep this idempotent across repeated module loads (tests reset modules).
+  const marker = globalThis as typeof globalThis & {museUnhandledRejectionLoggerInstalled?: boolean};
+  if (marker.museUnhandledRejectionLoggerInstalled) {
+    return;
+  }
+
+  marker.museUnhandledRejectionLoggerInstalled = true;
+  // A stray rejection from an event listener should be visible, not crash every guild's playback.
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.error('Unhandled promise rejection:', reason);
+  });
+};
+
 const startBot = async () => {
+  installUnhandledRejectionLogger();
+  // Install before slow startup steps (yt-dlp preparation can take minutes) so SIGTERM still cleans up.
+  installSignalHandlers();
+
   // Create data directories if necessary
   const config = container.get<Config>(TYPES.Config);
 
@@ -66,7 +109,7 @@ const startBot = async () => {
     const client = container.get<Client>(TYPES.Client);
     const players = container.get<PlayerManager>(TYPES.Managers.Player);
     const playback = isPlaybackWorkerEnabled(config.WORKER_ID)
-      ? new BotOnePlaybackWorker(
+      ? new PlaybackWorker(
         client,
         players,
         container.get<AddQueryToQueue>(TYPES.Services.AddQueryToQueue),
@@ -77,7 +120,6 @@ const startBot = async () => {
     await workerControlServer.start();
   }
 
-  installSignalHandlers();
   await bot.register();
 };
 

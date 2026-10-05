@@ -1,4 +1,4 @@
-import {ChatInputCommandInteraction, GuildMember, type InteractionEditReplyOptions} from 'discord.js';
+import {ChatInputCommandInteraction, escapeMarkdown, GuildMember, type InteractionEditReplyOptions} from 'discord.js';
 import {inject, injectable} from 'inversify';
 import shuffle from 'array-shuffle';
 import {TYPES} from '../types.js';
@@ -173,9 +173,9 @@ export default class AddQueryToQueue {
     }
 
     if (newSongs.length === 1) {
-      await interaction.editReply(`u betcha, **${firstSong.title}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
+      await interaction.editReply(`u betcha, **${escapeMarkdown(firstSong.title)}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
     } else {
-      await interaction.editReply(`u betcha, **${firstSong.title}** and ${newSongs.length - 1} other songs were added to the queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
+      await interaction.editReply(`u betcha, **${escapeMarkdown(firstSong.title)}** and ${newSongs.length - 1} other songs were added to the queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
     }
   }
 

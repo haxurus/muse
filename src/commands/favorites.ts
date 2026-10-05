@@ -6,6 +6,7 @@ import AddQueryToQueue from '../services/add-query-to-queue.js';
 import {TYPES} from '../types.js';
 import {prisma} from '../utils/db.js';
 import {Pagination} from 'pagination.djs';
+import {toDiscordAutocompleteChoices, truncate} from '../utils/string.js';
 
 @injectable()
 export default class implements Command {
@@ -101,10 +102,10 @@ export default class implements Command {
 
     // Limit results to 25 maximum per Discord limits
     const trimmed = results.length > 25 ? results.slice(0, 25) : results;
-    await interaction.respond(trimmed.map(r => ({
+    await interaction.respond(toDiscordAutocompleteChoices(trimmed.map(r => ({
       name: r.name,
       value: r.name,
-    })));
+    }))));
   }
 
   private async use(interaction: ChatInputCommandInteraction) {
@@ -146,10 +147,12 @@ export default class implements Command {
     const fields = new Array<APIEmbedField>(favorites.length);
     for (let index = 0; index < favorites.length; index++) {
       const favorite = favorites[index];
+      const author = ` (<@${favorite.authorId}>)`;
       fields[index] = {
         inline: false,
-        name: favorite.name,
-        value: `${favorite.query} (<@${favorite.authorId}>)`,
+        // Discord embed field limits: 256 characters for names, 1024 for values.
+        name: truncate(favorite.name, 256),
+        value: `${truncate(favorite.query, 1024 - author.length)}${author}`,
       };
     }
 

@@ -145,7 +145,7 @@ export default class {
     return this.getMetadataFromVideo({video, shouldSplitChapters});
   }
 
-  async getPlaylist(listId: string, shouldSplitChapters: boolean): Promise<SongMetadata[]> {
+  async getPlaylist(listId: string, shouldSplitChapters: boolean, limit = Number.POSITIVE_INFINITY): Promise<SongMetadata[]> {
     const playlistParams = {
       searchParams: {
         part: 'id, snippet, contentDetails',
@@ -173,6 +173,7 @@ export default class {
 
     let nextToken: string | undefined;
 
+    // Stop paging (and spending API quota) once `limit` items were collected.
     do {
       if (nextToken) {
         requestedPageTokens.add(nextToken);
@@ -211,7 +212,7 @@ export default class {
         void detailsPromise.catch(() => undefined);
         videoDetailsPromises.push(detailsPromise);
       }
-    } while (nextToken && !requestedPageTokens.has(nextToken));
+    } while (nextToken && !requestedPageTokens.has(nextToken) && playlistVideos.length < limit);
 
     await Promise.all(videoDetailsPromises);
 

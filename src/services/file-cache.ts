@@ -275,7 +275,15 @@ export default class FileCacheProvider {
           hash: oldest.hash,
         },
       });
-      await fs.unlink(path.join(this.config.CACHE_DIR, oldest.hash));
+      try {
+        await fs.unlink(path.join(this.config.CACHE_DIR, oldest.hash));
+      } catch (error: unknown) {
+        // A file already gone from disk only needs its index row removed (done above).
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+      }
+
       debug(`${oldest.hash} has been evicted`);
       numOfEvictedFiles++;
 

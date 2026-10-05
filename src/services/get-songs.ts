@@ -9,6 +9,10 @@ import SpotifyAPI, {SpotifyTrack} from './spotify-api.js';
 import {URL} from 'node:url';
 import {getSoundCloudMetadata, YtDlpMediaUnavailableError} from '../utils/yt-dlp.js';
 import pLimit from 'p-limit';
+import {getHttpStreamInputOptions, HTTP_STREAM_PROBE_TIMEOUT_MS, isValidAllowedStreamHost} from '../utils/http-stream.js';
+
+// Bounds parallel YouTube search API calls when converting Spotify collections.
+const SPOTIFY_TO_YOUTUBE_SEARCH_CONCURRENCY = 4;
 
 @injectable()
 export default class {
@@ -64,7 +68,7 @@ export default class {
       // YouTube source
       if (url.searchParams.get('list')) {
         // YouTube playlist
-        const songs = await this.youtubePlaylist(url.searchParams.get('list')!, shouldSplitChapters);
+        const songs = await this.youtubePlaylist(url.searchParams.get('list')!, shouldSplitChapters, playlistLimit);
         newSongs.push(...songs.slice(0, playlistLimit));
       } else {
         const songs = await this.youtubeVideo(url.href, shouldSplitChapters);
@@ -126,8 +130,8 @@ export default class {
     return this.youtubeAPI.getVideo(url, shouldSplitChapters);
   }
 
-  private async youtubePlaylist(listId: string, shouldSplitChapters: boolean): Promise<SongMetadata[]> {
-    return this.youtubeAPI.getPlaylist(listId, shouldSplitChapters);
+  private async youtubePlaylist(listId: string, shouldSplitChapters: boolean, playlistLimit: number): Promise<SongMetadata[]> {
+    return this.youtubeAPI.getPlaylist(listId, shouldSplitChapters, playlistLimit);
   }
 
   private async spotifySource(url: string, playlistLimit: number, shouldSplitChapters: boolean): Promise<[SongMetadata[], number, number]> {
@@ -170,14 +174,24 @@ export default class {
     }
 
     const host = url.hostname.toLowerCase();
-    return this.config.HTTP_STREAM_ALLOWED_HOSTS.some(allowedHost => (
-      host === allowedHost || host.endsWith(`.${allowedHost}`)
-    ));
+    return this.config.HTTP_STREAM_ALLOWED_HOSTS
+      .map(allowedHost => allowedHost.trim().toLowerCase())
+      .filter(allowedHost => isValidAllowedStreamHost(allowedHost))
+      .some(allowedHost => (
+        host === allowedHost || host.endsWith(`.${allowedHost}`)
+      ));
   }
 
   private async httpLiveStream(url: string): Promise<SongMetadata> {
     return new Promise((resolve, reject) => {
-      ffmpeg(url).ffprobe((err, _) => {
+      // The ffprobe process cannot be cancelled here; -rw_timeout bounds it, and this
+      // timer keeps a stalled probe from holding the command reply open.
+      const probeTimeout = setTimeout(() => {
+        reject(new Error('timed out while probing the stream'));
+      }, HTTP_STREAM_PROBE_TIMEOUT_MS);
+
+      ffmpeg(url).ffprobe(getHttpStreamInputOptions(url), (err, _) => {
+        clearTimeout(probeTimeout);
         if (err) {
           reject(err);
           return;
@@ -247,7 +261,8 @@ export default class {
   }
 
   private async spotifyToYouTube(tracks: SpotifyTrack[], shouldSplitChapters: boolean, playlist?: QueuedPlaylist | undefined): Promise<[SongMetadata[], number, number]> {
-    const promisedResults = tracks.map(async track => this.youtubeAPI.search(`"${track.name}" "${track.artist}"`, shouldSplitChapters));
+    const limit = pLimit(SPOTIFY_TO_YOUTUBE_SEARCH_CONCURRENCY);
+    const promisedResults = tracks.map(async track => limit(async () => this.youtubeAPI.search(`"${track.name}" "${track.artist}"`, shouldSplitChapters)));
     const searchResults = await Promise.allSettled(promisedResults);
 
     let nSongsNotFound = 0;

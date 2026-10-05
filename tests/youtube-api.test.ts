@@ -198,6 +198,24 @@ describe('YoutubeAPI playlist pagination', () => {
     expect(getPlaylistItemsCallCount()).toBe(1);
   });
 
+  it('stops paging once the requested limit of playlist items has been collected', async () => {
+    const firstVideo = makeVideo({id: 'video-first', title: 'First'});
+    const secondVideo = makeVideo({id: 'video-second', title: 'Second'});
+    const {api, getPlaylistItemsCallCount} = makeHarness({
+      itemCount: 99,
+      pages: [
+        {items: [makePlaylistItem(firstVideo.id)], nextPageToken: 'page-2'},
+        {items: [makePlaylistItem(secondVideo.id)], nextPageToken: 'page-3'},
+      ],
+      videos: [firstVideo, secondVideo],
+    });
+
+    const songs = await api.getPlaylist(PLAYLIST_ID, false, 1);
+
+    expect(songs.map(song => song.title)).toEqual(['First']);
+    expect(getPlaylistItemsCallCount()).toBe(1);
+  });
+
   it('returns an empty playlist after one empty page without repeating the request', async () => {
     const {api, getPlaylistItemsCallCount} = makeHarness({
       itemCount: 1,

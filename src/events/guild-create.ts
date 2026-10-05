@@ -39,6 +39,11 @@ export default async (guild: Guild): Promise<void> => {
     });
   }
 
-  const owner = await guild.fetchOwner();
-  await owner.send('👋 Hi! Someone (probably you) just invited me to a server you own. By default, I\'m usable by all guild member in all guild channels. To change this, check out the wiki page on permissions: https://github.com/museofficial/muse/wiki/Configuring-Bot-Permissions.');
+  // The welcome DM is best-effort: owners commonly have DMs closed.
+  try {
+    const owner = await guild.fetchOwner();
+    await owner.send('👋 Hi! Someone (probably you) just invited me to a server you own. By default, I\'m usable by all guild member in all guild channels. To change this, check out the wiki page on permissions: https://github.com/museofficial/muse/wiki/Configuring-Bot-Permissions.');
+  } catch (error: unknown) {
+    console.warn(`Could not send the welcome message to the owner of guild ${guild.id}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 };

@@ -13,7 +13,9 @@ const getMaxSongTitleLength = (title: string) => {
 
 const getSongTitle = ({title, url, offset, source}: QueuedSong, shouldTruncate = false) => {
   if (source === MediaSource.HLS) {
-    return `[${title}](${url})`;
+    // Direct stream titles are the (unbounded) URL itself; keep embeds within Discord limits.
+    const streamTitle = truncate(title, shouldTruncate ? getMaxSongTitleLength(title) : 256);
+    return url.length > 1024 ? streamTitle : `[${streamTitle}](${url})`;
   }
 
   const cleanSongTitle = title.replace(/\[.*\]/, '').trim();

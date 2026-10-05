@@ -3,13 +3,21 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const dependencyMocks = vi.hoisted(() => ({
   ffprobe: vi.fn(),
+  ffprobeOptions: vi.fn(),
   shuffle: vi.fn((tracks: unknown[]) => tracks),
   getSoundCloudMetadata: vi.fn(),
 }));
 
 vi.mock('fluent-ffmpeg', () => ({
   default: vi.fn((url: string) => ({
-    ffprobe: (callback: (error: Error | null, data?: unknown) => void) => dependencyMocks.ffprobe(url, callback),
+    ffprobe(...args: unknown[]) {
+      const callback = args.at(-1) as (error: Error | null, data?: unknown) => void;
+      if (args.length > 1) {
+        dependencyMocks.ffprobeOptions(url, args[0]);
+      }
+
+      return dependencyMocks.ffprobe(url, callback);
+    },
   })),
 }));
 
@@ -215,7 +223,60 @@ describe('GetSongs provider routing', () => {
     })]);
     expect(extraMessage).toBe('');
     expect(dependencyMocks.ffprobe).toHaveBeenCalledWith(url, expect.any(Function));
+    expect(dependencyMocks.ffprobeOptions).toHaveBeenCalledWith(url, [
+      '-protocol_whitelist',
+      'https,tls,tcp,crypto,httpproxy',
+      '-rw_timeout',
+      '15000000',
+    ]);
     expect(youtubeAPI.search).not.toHaveBeenCalled();
+  });
+
+  it('allows plain HTTP in the ffprobe protocol whitelist only for an http:// stream', async () => {
+    const {getSongs} = makeGetSongsHarness({
+      ALLOW_HTTP_STREAMS: true,
+      HTTP_STREAM_ALLOWED_HOSTS: ['radio.example'],
+    });
+    const url = 'http://radio.example/live.mp3';
+
+    await getSongs.getSongs(url, 20, false);
+
+    expect(dependencyMocks.ffprobeOptions).toHaveBeenCalledWith(url, expect.arrayContaining([
+      'https,tls,tcp,crypto,httpproxy,http',
+    ]));
+  });
+
+  it.each([
+    ['example', 'https://radio.example/live.m3u8'],
+    ['*.example.com', 'https://radio.example.com/live.m3u8'],
+    ['radio.example:8443', 'https://radio.example/live.m3u8'],
+    ['radio.example/path', 'https://radio.example/live.m3u8'],
+  ])('ignores the malformed allowlist entry %s', async (allowedHost, url) => {
+    const {getSongs} = makeGetSongsHarness({
+      ALLOW_HTTP_STREAMS: true,
+      HTTP_STREAM_ALLOWED_HOSTS: [allowedHost],
+    });
+
+    await expect(getSongs.getSongs(url, 20, false)).rejects.toThrow('not allowed');
+    expect(dependencyMocks.ffprobe).not.toHaveBeenCalled();
+  });
+
+  it('rejects a direct stream whose ffprobe never answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const {getSongs} = makeGetSongsHarness({
+        ALLOW_HTTP_STREAMS: true,
+        HTTP_STREAM_ALLOWED_HOSTS: ['radio.example'],
+      });
+      dependencyMocks.ffprobe.mockImplementation(() => undefined);
+
+      const result = getSongs.getSongs('https://radio.example/live.m3u8', 20, false);
+      const expectation = expect(result).rejects.toThrow('timed out while probing the stream');
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('propagates a YouTube provider rejection without searching the literal URL', async () => {
@@ -265,7 +326,30 @@ describe('GetSongs collection limits and conversion accounting', () => {
 
     await expect(getSongs.getSongs('https://www.youtube.com/playlist?list=PL123', 2, false))
       .resolves.toEqual([[playlist[0], playlist[1]], '']);
-    expect(youtubeAPI.getPlaylist).toHaveBeenCalledWith('PL123', false);
+    expect(youtubeAPI.getPlaylist).toHaveBeenCalledWith('PL123', false, 2);
+  });
+
+  it('bounds concurrent YouTube searches while converting a Spotify collection', async () => {
+    const {getSongs, spotifyAPI, youtubeAPI} = makeGetSongsHarness();
+    const tracks = Array.from({length: 12}, (_, index) => ({name: `Song ${index}`, artist: 'Artist'}));
+    spotifyAPI.getPlaylist.mockResolvedValue([tracks, {title: 'Playlist', source: 'spotify-playlist'}]);
+    let active = 0;
+    let maxActive = 0;
+    youtubeAPI.search.mockImplementation(async (query: string) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => {
+        setTimeout(resolve, 1);
+      });
+      active--;
+      return [makeSong(query)];
+    });
+
+    const [songs] = await getSongs.getSongs('spotify:playlist:playlist-id', 50, false);
+
+    expect(songs).toHaveLength(12);
+    expect(youtubeAPI.search).toHaveBeenCalledTimes(12);
+    expect(maxActive).toBeLessThanOrEqual(4);
   });
 
   it('counts a fulfilled empty Spotify conversion as one song not found', async () => {

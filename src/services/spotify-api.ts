@@ -81,7 +81,8 @@ export default class {
   private toSpotifyTrack(track: SpotifyApi.TrackObjectSimplified): SpotifyTrack {
     return {
       name: track.name,
-      artist: track.artists[0].name,
+      // Spotify can return tracks without artists (e.g. removed or local files).
+      artist: track.artists.length > 0 ? track.artists[0].name : '',
     };
   }
 

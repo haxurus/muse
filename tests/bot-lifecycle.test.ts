@@ -1,4 +1,8 @@
 import 'reflect-metadata';
+import {existsSync} from 'node:fs';
+import {mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 import {ActivityType, ChannelType, Collection} from 'discord.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -310,6 +314,66 @@ describe('Discord command registration and ready lifecycle', () => {
     }));
   });
 
+  it('still finishes startup when one guild command registration fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const {handlers, setPresence} = await registerBot(false, makeCommandSet(), ['guild-a', 'guild-b']);
+    mocks.restPut.mockImplementation(async (route: string) => {
+      if (route.includes('guild-a')) {
+        throw new Error('Missing Access');
+      }
+    });
+
+    await expect(invoke(handlers, 'ready')).resolves.toBeUndefined();
+
+    expect(mocks.restPut).toHaveBeenCalledTimes(3);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('Failed to update commands for guild guild-a'));
+    expect(setPresence).toHaveBeenCalledOnce();
+    expect(mocks.spinner.succeed).toHaveBeenCalledOnce();
+    consoleError.mockRestore();
+  });
+
+  it('logs instead of rejecting when the ready handler fails unexpectedly', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const {handlers, setPresence} = await registerBot(true);
+    setPresence.mockImplementation(() => {
+      throw new Error('presence failed');
+    });
+
+    await expect(invoke(handlers, 'ready')).resolves.toBeUndefined();
+
+    expect(consoleError).toHaveBeenCalledWith('Discord ready handler failed: Error: presence failed');
+    consoleError.mockRestore();
+  });
+
+  it('maintains the ready file across a non-resumable reconnect and tolerates write failures', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const directory = await mkdtemp(path.join(tmpdir(), 'muse-ready-'));
+    const readyFile = path.join(directory, 'ready');
+    try {
+      const {config, handlers} = await registerBot(true);
+      Object.assign(config, {READY_FILE: readyFile});
+
+      await invoke(handlers, 'shardReady', 0);
+      expect(existsSync(readyFile)).toBe(false);
+
+      await invoke(handlers, 'ready');
+      expect(existsSync(readyFile)).toBe(true);
+
+      await invoke(handlers, 'shardDisconnect');
+      expect(existsSync(readyFile)).toBe(false);
+
+      await invoke(handlers, 'shardReady', 0);
+      expect(existsSync(readyFile)).toBe(true);
+
+      Object.assign(config, {READY_FILE: path.join(directory, 'missing', 'ready')});
+      await expect(invoke(handlers, 'shardReady', 0)).resolves.toBeUndefined();
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('Failed to write ready file'));
+    } finally {
+      consoleError.mockRestore();
+      await rm(directory, {force: true, recursive: true});
+    }
+  });
+
   it('routes client errors to console and Discord debug events to the debug logger', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const {handlers} = await registerBot(true);
@@ -361,6 +425,32 @@ describe('guild onboarding', () => {
     expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({where: {guildId: 'guild-global'}}));
     expect(mocks.restPut).not.toHaveBeenCalled();
     expect(ownerSend).toHaveBeenCalledOnce();
+  });
+
+  it('treats the owner welcome DM as best-effort', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const {handlers} = await registerBot(true);
+    const guild = {
+      fetchOwner: vi.fn().mockResolvedValue({send: vi.fn().mockRejectedValue(new Error('Cannot send messages to this user'))}),
+      id: 'guild-closed-dms',
+    };
+
+    await expect(invoke(handlers, 'guildCreate', guild)).resolves.toBeUndefined();
+
+    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({where: {guildId: 'guild-closed-dms'}}));
+    expect(consoleWarn).toHaveBeenCalledWith(expect.stringContaining('guild-closed-dms'));
+    consoleWarn.mockRestore();
+  });
+
+  it('logs instead of rejecting when guild onboarding fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const {handlers} = await registerBot(true);
+    mocks.settingUpsert.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(invoke(handlers, 'guildCreate', {fetchOwner: vi.fn(), id: 'guild-db-down'})).resolves.toBeUndefined();
+
+    expect(consoleError).toHaveBeenCalledWith('Discord guildCreate handler failed: Error: database unavailable');
+    consoleError.mockRestore();
   });
 });
 
@@ -463,6 +553,38 @@ describe('interaction boundaries', () => {
       content: `🚫 ope: ${sanitized}`,
       ephemeral: true,
     });
+  });
+
+  it.each([
+    ['tool stderr', 'yt-dlp failed to extract media: ERROR: [youtube] abcdefghijk: Sign in to confirm you\'re not a bot'],
+    ['a file path', 'EACCES: permission denied, open \'/data/cache/tmp/abc\''],
+    ['an overly long message', `failure ${'x'.repeat(250)}`],
+  ])('replaces internal error detail (%s) with a generic message but logs it', async (_label, message) => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const command = makeCommand('play', {execute: vi.fn().mockRejectedValue(new Error(message))});
+    const {handlers} = await registerBot(true, [command]);
+    const interaction = makeInteraction('play');
+
+    await invoke(handlers, 'interactionCreate', interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: '🚫 ope: something went wrong, please try again later',
+      ephemeral: true,
+    });
+    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining(message.slice(0, 20)));
+    errorLog.mockRestore();
+  });
+
+  it('keeps intentional short user-facing errors', async () => {
+    const command = makeCommand('play', {execute: vi.fn().mockRejectedValue(new Error('no songs found'))});
+    const {handlers} = await registerBot(true, [command]);
+    const interaction = makeInteraction('play');
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await invoke(handlers, 'interactionCreate', interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith({content: '🚫 ope: no songs found', ephemeral: true});
+    errorLog.mockRestore();
   });
 
   it('edits deferred failures and swallows a failed error response', async () => {
