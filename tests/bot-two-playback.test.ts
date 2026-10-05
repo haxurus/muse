@@ -1,5 +1,6 @@
 import {ChannelType} from 'discord.js';
 import {Readable} from 'node:stream';
+import {readFile} from 'node:fs/promises';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import BotOnePlaybackWorker from '../src/playback/worker.js';
 import {handleBotOneProxy, sendPlayback} from '../src/playback/transport.js';
@@ -187,5 +188,21 @@ describe('bot-two worker and Discord controller', () => {
       content: 'ok',
       allowedMentions: {parse: []},
     });
+  });
+});
+
+
+describe('bot-two deployment overlay', () => {
+  it('activates only the orchestrator and muse-02', async () => {
+    const compose = await readFile(
+      new URL('../deploy/docker-compose.bot-two-playback.yml', import.meta.url),
+      'utf8',
+    );
+
+    expect(compose).toContain('MUSE_BOT_TWO_PLAYBACK: "true"');
+    expect(compose).toContain('muse-02:');
+    expect(compose).not.toContain('muse-03:');
+    expect(compose).not.toContain('muse-04:');
+    expect(compose).not.toContain('muse-05:');
   });
 });
