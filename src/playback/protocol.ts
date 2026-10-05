@@ -1,7 +1,7 @@
 import {HttpError} from '../control/http.js';
 
 export const PLAYBACK_ACTIONS = ['play', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'queue', 'volume'] as const;
-export const PLAYBACK_WORKER_IDS = ['muse-01', 'muse-02', 'muse-03'] as const;
+export const PLAYBACK_WORKER_IDS = ['muse-01', 'muse-02', 'muse-03', 'muse-04'] as const;
 export type PlaybackAction = typeof PLAYBACK_ACTIONS[number];
 export type PlaybackWorkerId = typeof PLAYBACK_WORKER_IDS[number];
 export type PlaybackRequest = {
@@ -34,6 +34,7 @@ const PLAYBACK_FLAG_BY_WORKER: Record<PlaybackWorkerId, string> = {
   'muse-01': 'MUSE_BOT_ONE_PLAYBACK',
   'muse-02': 'MUSE_BOT_TWO_PLAYBACK',
   'muse-03': 'MUSE_BOT_THREE_PLAYBACK',
+  'muse-04': 'MUSE_BOT_FOUR_PLAYBACK',
 };
 
 export const isPlaybackWorkerId = (workerId: string): workerId is PlaybackWorkerId =>
