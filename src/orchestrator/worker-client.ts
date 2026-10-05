@@ -32,7 +32,7 @@ const requestOptions = (token: string) => ({
 });
 
 const capResponseSize = (request: CancelableRequest<Response<string>>): CancelableRequest<Response<string>> => {
-  request.on('downloadProgress', progress => {
+  void request.on('downloadProgress', progress => {
     if (progress.transferred > MAX_WORKER_RESPONSE_BYTES || (progress.total ?? 0) > MAX_WORKER_RESPONSE_BYTES) {
       request.cancel('worker response too large');
     }
