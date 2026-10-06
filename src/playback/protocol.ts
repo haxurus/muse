@@ -1,5 +1,6 @@
 import {HttpError} from '../control/http.js';
 import {isSnowflake} from '../control/snowflake.js';
+import {EN_MESSAGES} from '../i18n/en.js';
 
 export const PLAYBACK_ACTIONS = ['play', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'queue', 'volume'] as const;
 export const PLAYBACK_WORKER_IDS = ['muse-01', 'muse-02', 'muse-03', 'muse-04', 'muse-05'] as const;
@@ -47,7 +48,8 @@ export const isPlaybackWorkerEnabled = (workerId: string): workerId is PlaybackW
 
 /** Shared by every hop so an unknown outcome is never mistaken for a retryable "not ready" error. */
 export const PLAYBACK_OUTCOME_UNKNOWN_STATUS = 504;
-export const PLAYBACK_OUTCOME_UNKNOWN_MESSAGE = 'Playback outcome could not be confirmed. No local fallback or automatic replay was attempted. Check /queue before retrying.';
+/** English on the wire; the command-receiving bot translates it for the guild. */
+export const PLAYBACK_OUTCOME_UNKNOWN_MESSAGE: string = EN_MESSAGES.playbackOutcomeUnknown;
 
 const DEFAULT_ORCHESTRATOR_URL = 'http://orchestrator:3100';
 

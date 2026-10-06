@@ -5,6 +5,7 @@ import {HttpError} from '../control/http.js';
 import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
 import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
+import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
 import OrchestratorClient, {BlockKind, GuildSettingsUpdate, SuperActor} from './orchestrator-client.js';
 import type {DashboardSession} from './session-store.js';
 
@@ -25,23 +26,44 @@ const staticAsset = (fileName: string, contentType: string, cacheControl = NO_ST
   cacheControl,
 });
 
-const HOME_HTML = staticAsset('home.html', 'text/html; charset=utf-8');
-const INDEX_HTML = staticAsset('index.html', 'text/html; charset=utf-8');
-const DEVELOPMENT_HTML = staticAsset('development.html', 'text/html; charset=utf-8');
+const HTML = 'text/html; charset=utf-8';
+const JSON_TYPE = 'application/json; charset=utf-8';
+
+/** HTML templates (rendered once per language at startup, see i18n.ts). */
+const TEMPLATES = {
+  home: readFileSync(path.join(STATIC_ROOT, 'home.html'), 'utf8'),
+  app: readFileSync(path.join(STATIC_ROOT, 'index.html'), 'utf8'),
+  development: readFileSync(path.join(STATIC_ROOT, 'development.html'), 'utf8'),
+};
+
+type PageName = keyof typeof TEMPLATES;
+
+/** Path of each page after the language prefix (used by the IT/EN switcher). */
+const PAGE_PATHS: Record<PageName, string> = {
+  home: '',
+  app: '/dashboard',
+  development: '/development',
+};
 
 /** Every file the dashboard serves is loaded once at startup from this fixed allowlist. */
 const STATIC_ASSETS = new Map<string, StaticAsset>([
   ['/assets/dashboard.css', staticAsset('dashboard.css', 'text/css; charset=utf-8')],
   ['/assets/dashboard.js', staticAsset('dashboard.js', 'text/javascript; charset=utf-8')],
   ['/assets/home.js', staticAsset('home.js', 'text/javascript; charset=utf-8')],
+  ['/assets/i18n/it.json', staticAsset('i18n/it.json', JSON_TYPE)],
+  ['/assets/i18n/en.json', staticAsset('i18n/en.json', JSON_TYPE)],
   ['/assets/fonts/Geist-Variable.woff2', staticAsset('fonts/Geist-Variable.woff2', 'font/woff2', FONT_CACHE)],
   ['/assets/fonts/GeistMono-Variable.woff2', staticAsset('fonts/GeistMono-Variable.woff2', 'font/woff2', FONT_CACHE)],
   ['/assets/fonts/OFL.txt', staticAsset('fonts/OFL.txt', 'text/plain; charset=utf-8', FONT_CACHE)],
 ]);
 
 const NOINDEX = {'x-robots-tag': 'noindex, nofollow'};
+const VARY_LANGUAGE = {vary: 'accept-language'};
 
-/** Path of the signed-in app (server list). The public home page lives at "/". */
+/**
+ * Path of the signed-in app (server list) below the language prefix:
+ * /it/dashboard and /en/dashboard. The public home pages are /it and /en.
+ */
 export const DASHBOARD_PATH = '/dashboard';
 
 /** Anchor of the super-admin "Nuovo server" invite card inside the dashboard. */
@@ -71,6 +93,20 @@ const guildIconUrl = (guildId: string, icon?: string | null): string | null =>
 
 const routeSegments = (request: IncomingMessage, publicUrl: URL): string[] =>
   new URL(request.url ?? '/', publicUrl).pathname.split('/').filter(Boolean);
+
+/** App views below a language prefix: dashboard, super, server/:snowflake (exact segments). */
+const isAppRoute = (segments: string[]): boolean =>
+  (segments.length === 1 && (segments[0] === 'dashboard' || segments[0] === 'super'))
+  || (segments.length === 2 && segments[0] === 'server' && SNOWFLAKE.test(segments[1]));
+
+const isDevelopmentRoute = (segments: string[]): boolean =>
+  segments.length === 1 && segments[0] === 'development';
+
+/** `?lang=it|en` when valid, otherwise the Accept-Language preference. */
+export const requestLocale = (request: IncomingMessage, url: URL): Locale => {
+  const lang = url.searchParams.get('lang');
+  return isLocale(lang) ? lang : preferredLocale(request.headers['accept-language']);
+};
 
 type MutationResult = {
   statusCode: number;
@@ -140,12 +176,29 @@ export default class DashboardServer {
   private server?: Server;
   private readonly auth: DashboardAuth;
   private readonly orchestrator: OrchestratorClient;
+  private readonly pages: Record<PageName, Record<Locale, Buffer>>;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
     this.orchestrator = dependencies.orchestrator ?? new OrchestratorClient(config);
     this.auth = dependencies.auth ?? new DashboardAuth(config, {
       isUserBlocked: async userId => this.orchestrator.isUserBlocked(userId),
     });
+
+    const {origin} = config.publicUrl;
+    const render = (page: PageName): Record<Locale, Buffer> => {
+      const rendered: Partial<Record<Locale, Buffer>> = {};
+      for (const locale of LOCALES) {
+        rendered[locale] = Buffer.from(renderPage(TEMPLATES[page], locale, PAGE_PATHS[page], {origin}), 'utf8');
+      }
+
+      return rendered as Record<Locale, Buffer>;
+    };
+
+    this.pages = {
+      home: render('home'),
+      app: render('app'),
+      development: render('development'),
+    };
   }
 
   get port(): number | undefined {
@@ -188,7 +241,8 @@ export default class DashboardServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const {pathname} = new URL(request.url ?? '/', this.config.publicUrl);
+    const url = new URL(request.url ?? '/', this.config.publicUrl);
+    const {pathname} = url;
 
     try {
       if (request.method === 'GET' && pathname === '/health') {
@@ -196,12 +250,12 @@ export default class DashboardServer {
         return;
       }
 
-      if (request.method === 'GET' && await this.handlePage(request, response, pathname)) {
+      if (request.method === 'GET' && await this.handlePage(request, response, url)) {
         return;
       }
 
       if (request.method === 'GET' && pathname === '/auth/discord') {
-        this.auth.begin(response);
+        this.auth.begin(response, requestLocale(request, url));
         return;
       }
 
@@ -211,7 +265,7 @@ export default class DashboardServer {
       }
 
       if (request.method === 'POST' && pathname === '/auth/logout') {
-        await this.auth.logout(request, response);
+        await this.auth.logout(request, response, requestLocale(request, url));
         return;
       }
 
@@ -320,8 +374,25 @@ export default class DashboardServer {
     });
   }
 
-  /** Serves the HTML views and the allowlisted static assets. Returns false when the path is not a page. */
-  private async handlePage(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<boolean> {
+  private sendPage(response: ServerResponse, page: PageName, locale: Locale): void {
+    send(response, 200, HTML, this.pages[page][locale], {
+      'cache-control': NO_STORE,
+      'content-language': locale,
+      ...(page === 'home' ? {} : NOINDEX),
+    });
+  }
+
+  /** Redirect chosen from Accept-Language (or ?lang=), so caches must vary on it. */
+  private redirectLocalized(response: ServerResponse, target: string): void {
+    redirect(response, new URL(target, this.config.publicUrl).toString(), [], VARY_LANGUAGE);
+  }
+
+  /**
+   * Serves the HTML views and the allowlisted static assets. Returns false when the path is not a page.
+   * Views live under /it and /en; "/" and the old unprefixed paths redirect by language.
+   */
+  private async handlePage(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
+    const {pathname} = url;
     const asset = STATIC_ASSETS.get(pathname);
     if (asset) {
       sendAsset(response, asset);
@@ -329,32 +400,50 @@ export default class DashboardServer {
     }
 
     if (pathname === '/') {
-      // The public home page is the only indexable HTML view.
-      sendAsset(response, HOME_HTML);
+      this.redirectLocalized(response, localizedPath(preferredLocale(request.headers['accept-language'])));
       return true;
     }
 
-    const segments = pathname.split('/').filter(Boolean);
-    const isAppView = pathname === DASHBOARD_PATH
-      || pathname === '/super'
-      || (segments.length === 2 && segments[0] === 'server' && SNOWFLAKE.test(segments[1]));
-    if (isAppView) {
-      sendAsset(response, INDEX_HTML, NOINDEX);
-      return true;
+    // Exact segments: "/it/" or "/it/dashboard/" are not views.
+    const segments = pathname.slice(1).split('/');
+    const [first, ...rest] = segments;
+    if (isLocale(first)) {
+      return this.handleLocalizedPage(response, first, rest);
     }
 
-    if (pathname === '/development') {
-      sendAsset(response, DEVELOPMENT_HTML, NOINDEX);
+    if (isAppRoute(segments) || isDevelopmentRoute(segments)) {
+      // Pre-i18n bookmarks and links: keep the query (?login=...) and add the language prefix.
+      this.redirectLocalized(response, `${localizedPath(requestLocale(request, url), pathname)}${url.search}`);
       return true;
     }
 
     if (pathname === '/add') {
-      this.add(request, response);
+      this.add(request, response, requestLocale(request, url));
       return true;
     }
 
     if (segments.length === 2 && segments[0] === 'invite') {
-      await this.invite(request, response, segments[1]);
+      await this.invite(request, response, segments[1], requestLocale(request, url));
+      return true;
+    }
+
+    return false;
+  }
+
+  private handleLocalizedPage(response: ServerResponse, locale: Locale, rest: string[]): boolean {
+    if (rest.length === 0) {
+      // The public home pages are the only indexable HTML views.
+      this.sendPage(response, 'home', locale);
+      return true;
+    }
+
+    if (isAppRoute(rest)) {
+      this.sendPage(response, 'app', locale);
+      return true;
+    }
+
+    if (isDevelopmentRoute(rest)) {
+      this.sendPage(response, 'development', locale);
       return true;
     }
 
@@ -362,14 +451,16 @@ export default class DashboardServer {
   }
 
   /**
-   * "Aggiungi a Discord" from the public home page. Only the super admin can add the
+   * "Add to Discord" from the public home page. Only the super admin can add the
    * bots to new servers, so they land on the dashboard invite card; everybody else
    * (anonymous or signed in) sees the development notice.
    */
-  private add(request: IncomingMessage, response: ServerResponse): void {
+  private add(request: IncomingMessage, response: ServerResponse, locale: Locale): void {
     const session = this.auth.currentSession(request);
     const superAdmin = session !== undefined && this.auth.isSuperAdmin(session);
-    const target = superAdmin ? `${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}` : '/development';
+    const target = superAdmin
+      ? `${localizedPath(locale, DASHBOARD_PATH)}#${NEW_SERVER_ANCHOR}`
+      : localizedPath(locale, '/development');
     redirect(response, new URL(target, this.config.publicUrl).toString());
   }
 
@@ -378,15 +469,15 @@ export default class DashboardServer {
    * are not the super admin see the development notice, and the super admin is sent
    * to Discord's bot authorization page for the requested worker's application.
    */
-  private async invite(request: IncomingMessage, response: ServerResponse, workerId: string): Promise<void> {
+  private async invite(request: IncomingMessage, response: ServerResponse, workerId: string, locale: Locale): Promise<void> {
     const session = this.auth.currentSession(request);
     if (!session) {
-      redirect(response, new URL('/auth/discord', this.config.publicUrl).toString());
+      redirect(response, new URL(`/auth/discord?lang=${locale}`, this.config.publicUrl).toString());
       return;
     }
 
     if (!this.auth.isSuperAdmin(session)) {
-      redirect(response, new URL('/development', this.config.publicUrl).toString());
+      redirect(response, new URL(localizedPath(locale, '/development'), this.config.publicUrl).toString());
       return;
     }
 

@@ -57,7 +57,7 @@ At most 5000 blocks per kind (`409 BLOCKLIST_FULL`). The audit log keeps the las
 ### Enforcement semantics
 
 - **GUILD block**: every bot leaves that server as soon as it receives the blocklist, and any bot that is added to it again leaves immediately on `guildCreate` (before creating settings, registering commands or sending the welcome DM).
-- **USER block**: every bot refuses that user's interactions. Slash commands, buttons and other repliable interactions get the ephemeral reply "Non puoi usare questo bot."; autocomplete gets an empty suggestion list. The dashboard checks `GET /v1/blocks/users/:userId` at login and denies blocked users (the configured super admin is never denied).
+- **USER block**: every bot refuses that user's interactions. Slash commands, buttons and other repliable interactions get an ephemeral refusal in the guild's bot language ("You can't use this bot." in English, "Non puoi usare questo bot." in Italian; see `I18N.md`); autocomplete gets an empty suggestion list. The dashboard checks `GET /v1/blocks/users/:userId` at login and denies blocked users (the configured super admin is never denied).
 - Workers keep the blocklist **in memory only**; it starts empty when a worker starts. The orchestrator pushes the full list (`PUT /v1/blocklist` on every worker) when it starts, after every block change, and every **60 seconds** (reconcile loop: no overlapping passes, timer unref'd, stopped on shutdown). A restarted worker is therefore enforcing again within 60 seconds. Pushes are serialized so an older list never overwrites a newer one. Reconcile failures are logged once per change of the failing set, not every minute.
 - Removing a block does not make bots rejoin a server; they have to be invited again.
 
@@ -139,7 +139,7 @@ Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/bloc
 
 ## Dashboard
 
-The super console UI lives at `/super` in the dashboard and is only usable by the user configured in `MUSE_SUPER_ADMIN_USER_ID` (empty disables it, fail closed). The dashboard gate, the browser API (`/api/super/*`), the bot invite links (`/invite/:workerId`) and the blocked-user login check are documented in [DASHBOARD.md](DASHBOARD.md#super-admin).
+The super console UI lives at `/it/super` and `/en/super` in the dashboard (`/super` redirects by language) and is only usable by the user configured in `MUSE_SUPER_ADMIN_USER_ID` (empty disables it, fail closed). The dashboard gate, the browser API (`/api/super/*`), the bot invite links (`/invite/:workerId`) and the blocked-user login check are documented in [DASHBOARD.md](DASHBOARD.md#super-admin).
 
 Layout (Sentinel super console style):
 

@@ -203,7 +203,7 @@ describe('bot invite links', () => {
     const result = await call(dashboard.port, 'GET', '/invite/muse-01');
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/auth/discord`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=en`);
     expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
   });
 
@@ -213,7 +213,7 @@ describe('bot invite links', () => {
     const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.userHeaders().cookie});
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
     expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
   });
 
@@ -222,7 +222,7 @@ describe('bot invite links', () => {
 
     const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.superHeaders().cookie});
 
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
   });
 
   it('redirects the super admin to the Discord bot authorization for that worker', async () => {
@@ -455,7 +455,7 @@ describe('"Aggiungi a Discord" from the home page', () => {
     const result = await call(dashboard.port, 'GET', '/add');
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
     expect(result.headers['content-security-policy']).toBeDefined();
   });
 
@@ -465,7 +465,7 @@ describe('"Aggiungi a Discord" from the home page', () => {
     const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.userHeaders().cookie});
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
   });
 
   it('sends the super admin to the dashboard invite card', async () => {
@@ -474,7 +474,7 @@ describe('"Aggiungi a Discord" from the home page', () => {
     const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.superHeaders().cookie});
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}`);
     expect(NEW_SERVER_ANCHOR).toBe('nuovo-server');
   });
 
@@ -483,7 +483,7 @@ describe('"Aggiungi a Discord" from the home page', () => {
 
     const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.superHeaders().cookie});
 
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
   });
 
   it('only answers GET', async () => {
@@ -500,7 +500,7 @@ describe('dashboard logout', () => {
     const result = await call(dashboard.port, 'POST', '/auth/logout', dashboard.userHeaders());
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}${DASHBOARD_PATH}`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en${DASHBOARD_PATH}`);
     expect((result.headers['set-cookie'] ?? []).some(value => value.startsWith(`${dashboard.names.session}=;`))).toBe(true);
     expect(dashboard.store.get(dashboard.userSession.id)).toBeUndefined();
   });
@@ -518,7 +518,7 @@ describe('blocked users at login', () => {
     const callback = await login(dashboard.port);
 
     expect(callback.status).toBe(302);
-    expect(callback.headers.location).toBe(`${PUBLIC_URL}/dashboard?login=blocked`);
+    expect(callback.headers.location).toBe(`${PUBLIC_URL}/en/dashboard?login=blocked`);
     expect((callback.headers['set-cookie'] ?? []).some(value => value.startsWith('__Host-muse_session='))).toBe(false);
     expect(dashboard.store.size).toBe(sessionsBefore);
     expect(dashboard.isUserBlocked).toHaveBeenCalledWith(BLOCKED_USER_ID);
@@ -536,17 +536,17 @@ describe('blocked users at login', () => {
 
     const callback = await login(dashboard.port);
 
-    expect(callback.headers.location).toBe(`${PUBLIC_URL}/dashboard?login=failed`);
+    expect(callback.headers.location).toBe(`${PUBLIC_URL}/en/dashboard?login=failed`);
     expect(dashboard.discord.revoke).toHaveBeenCalledTimes(1);
   });
 
   it('lets allowed users in and never checks the block list for the super admin', async () => {
     const allowed = await startDashboard();
-    expect((await login(allowed.port)).headers.location).toBe(`${PUBLIC_URL}/dashboard`);
+    expect((await login(allowed.port)).headers.location).toBe(`${PUBLIC_URL}/en/dashboard`);
     expect(allowed.isUserBlocked).toHaveBeenCalledWith(regularUser.id);
 
     const superAdmin = await startDashboard({loginUser: superUser, isUserBlocked: async () => true});
-    expect((await login(superAdmin.port)).headers.location).toBe(`${PUBLIC_URL}/dashboard`);
+    expect((await login(superAdmin.port)).headers.location).toBe(`${PUBLIC_URL}/en/dashboard`);
     expect(superAdmin.isUserBlocked).not.toHaveBeenCalled();
   });
 });
@@ -571,7 +571,7 @@ describe('dashboard static pages and fonts', () => {
   it('keeps a strict CSP that allows only self-hosted fonts and scripts', async () => {
     const dashboard = await startDashboard();
 
-    for (const path of ['/', DASHBOARD_PATH]) {
+    for (const path of ['/it', '/en', `/en${DASHBOARD_PATH}`, '/it/development']) {
       const page = await call(dashboard.port, 'GET', path);
       const csp = String(page.headers['content-security-policy']);
 
@@ -585,10 +585,10 @@ describe('dashboard static pages and fonts', () => {
     }
   });
 
-  it('serves the public home page at / without noindex', async () => {
+  it('serves the public home page at /it without noindex', async () => {
     const dashboard = await startDashboard();
 
-    const home = await call(dashboard.port, 'GET', '/');
+    const home = await call(dashboard.port, 'GET', '/it');
 
     expect(home.status).toBe(200);
     expect(home.headers['content-type']).toBe('text/html; charset=utf-8');
@@ -596,8 +596,8 @@ describe('dashboard static pages and fonts', () => {
     expect(home.headers['content-security-policy']).toContain('default-src \'self\'');
     expect(home.text).not.toMatch(/<meta name="robots"/u);
     expect(home.text).toContain('<script src="/assets/home.js" defer></script>');
-    expect(home.text).toContain('href="/add"');
-    expect(home.text).toContain(`href="${DASHBOARD_PATH}"`);
+    expect(home.text).toContain('href="/add?lang=it"');
+    expect(home.text).toContain(`href="/it${DASHBOARD_PATH}"`);
     expect(home.text).toContain('https://github.com/haxurus/muse');
     // The home page is static: it never loads the dashboard client.
     expect(home.text).not.toContain('/assets/dashboard.js');
@@ -623,25 +623,27 @@ describe('dashboard static pages and fonts', () => {
   it('serves the SPA views and the development notice with noindex', async () => {
     const dashboard = await startDashboard();
 
-    for (const path of [DASHBOARD_PATH, '/super', `/server/${GUILD_ID}`]) {
+    for (const path of [`/it${DASHBOARD_PATH}`, '/en/super', `/it/server/${GUILD_ID}`]) {
       const result = await call(dashboard.port, 'GET', path);
       expect(result.status, path).toBe(200);
       expect(result.headers['content-type']).toBe('text/html; charset=utf-8');
       expect(result.headers['x-robots-tag']).toBe('noindex, nofollow');
     }
 
-    const development = await call(dashboard.port, 'GET', '/development');
+    const development = await call(dashboard.port, 'GET', '/it/development');
     expect(development.status).toBe(200);
     expect(development.headers['x-robots-tag']).toBe('noindex, nofollow');
     expect(development.text).toContain('Muse è ancora in sviluppo.');
     expect(development.text).toContain('https://github.com/haxurus/muse');
     expect(development.text).not.toMatch(/\sstyle="|<script/u);
 
-    const app = await call(dashboard.port, 'GET', DASHBOARD_PATH);
+    const app = await call(dashboard.port, 'GET', `/en${DASHBOARD_PATH}`);
     expect(app.text).toContain('<script src="/assets/dashboard.js" defer></script>');
     expect(app.text).toContain(`id="${NEW_SERVER_ANCHOR}"`);
 
     expect((await call(dashboard.port, 'GET', '/server/not-a-guild')).status).toBe(404);
+    expect((await call(dashboard.port, 'GET', '/en/server/not-a-guild')).status).toBe(404);
+    expect((await call(dashboard.port, 'GET', '/en/dashboard/extra')).status).toBe(404);
     expect((await call(dashboard.port, 'GET', '/dashboard/extra')).status).toBe(404);
     expect((await call(dashboard.port, 'GET', '/assets/../package.json')).status).toBe(404);
   });

@@ -7,53 +7,68 @@ import {TYPES} from '../types.js';
 import {prisma} from '../utils/db.js';
 import {Pagination} from 'pagination.djs';
 import {toDiscordAutocompleteChoices, truncate} from '../utils/string.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 
 @injectable()
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('favorites')
     .setDescription('add a song to your favorites')
+    .setDescriptionLocalizations({it: 'aggiungi un brano ai tuoi preferiti'})
     .addSubcommand(subcommand => subcommand
       .setName('use')
       .setDescription('use a favorite')
+      .setDescriptionLocalizations({it: 'usa un preferito'})
       .addStringOption(option => option
         .setName('name')
         .setDescription('name of favorite')
+        .setDescriptionLocalizations({it: 'nome del preferito'})
         .setRequired(true)
         .setAutocomplete(true))
       .addBooleanOption(option => option
         .setName('immediate')
-        .setDescription('add track to the front of the queue'))
+        .setDescription('add track to the front of the queue')
+        .setDescriptionLocalizations({it: 'aggiungi il brano in cima alla coda'}))
       .addBooleanOption(option => option
         .setName('shuffle')
-        .setDescription('shuffle the input if you\'re adding multiple tracks'))
+        .setDescription('shuffle the input if you\'re adding multiple tracks')
+        .setDescriptionLocalizations({it: 'mescola i brani se ne aggiungi più di uno'}))
       .addBooleanOption(option => option
         .setName('split')
-        .setDescription('if a track has chapters, split it'))
+        .setDescription('if a track has chapters, split it')
+        .setDescriptionLocalizations({it: 'se un brano ha capitoli, dividilo'}))
       .addBooleanOption(option => option
         .setName('skip')
-        .setDescription('skip the currently playing track')))
+        .setDescription('skip the currently playing track')
+        .setDescriptionLocalizations({it: 'salta il brano in riproduzione'})))
     .addSubcommand(subcommand => subcommand
       .setName('list')
-      .setDescription('list all favorites'))
+      .setDescription('list all favorites')
+      .setDescriptionLocalizations({it: 'elenca tutti i preferiti'}))
     .addSubcommand(subcommand => subcommand
       .setName('create')
       .setDescription('create a new favorite')
+      .setDescriptionLocalizations({it: 'crea un nuovo preferito'})
       .addStringOption(option => option
         .setName('name')
         .setDescription('you\'ll type this when using this favorite')
+        .setDescriptionLocalizations({it: 'lo scriverai per usare questo preferito'})
         .setRequired(true))
       .addStringOption(option => option
         .setName('query')
         .setDescription('any input you\'d normally give to the play command')
+        .setDescriptionLocalizations({it: 'qualsiasi input che daresti al comando play'})
         .setRequired(true),
       ))
     .addSubcommand(subcommand => subcommand
       .setName('remove')
       .setDescription('remove a favorite')
+      .setDescriptionLocalizations({it: 'rimuovi un preferito'})
       .addStringOption(option => option
         .setName('name')
         .setDescription('name of favorite')
+        .setDescriptionLocalizations({it: 'nome del preferito'})
         .setAutocomplete(true)
         .setRequired(true),
       ),
@@ -79,7 +94,7 @@ export default class implements Command {
         await this.remove(interaction);
         break;
       default:
-        throw new Error('unknown subcommand');
+        throw new UserError('unknownSubcommand');
     }
   }
 
@@ -119,7 +134,7 @@ export default class implements Command {
     });
 
     if (!favorite) {
-      throw new Error('no favorite with that name exists');
+      throw new UserError('favoriteNotFound');
     }
 
     await this.addQueryToQueue.addToQueue({
@@ -140,7 +155,7 @@ export default class implements Command {
     });
 
     if (favorites.length === 0) {
-      await interaction.reply('there aren\'t any favorites yet');
+      await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'favoritesEmpty'));
       return;
     }
 
@@ -174,7 +189,7 @@ export default class implements Command {
     }});
 
     if (existingFavorite) {
-      throw new Error('a favorite with that name already exists');
+      throw new UserError('favoriteAlreadyExists');
     }
 
     await prisma.favoriteQuery.create({
@@ -186,7 +201,7 @@ export default class implements Command {
       },
     });
 
-    await interaction.reply('👍 favorite created');
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'favoriteCreated'));
   }
 
   private async remove(interaction: ChatInputCommandInteraction) {
@@ -198,17 +213,17 @@ export default class implements Command {
     }});
 
     if (!favorite) {
-      throw new Error('no favorite with that name exists');
+      throw new UserError('favoriteNotFound');
     }
 
     const isUserGuildOwner = interaction.member!.user.id === interaction.guild!.ownerId;
 
     if (favorite.authorId !== interaction.member!.user.id && !isUserGuildOwner) {
-      throw new Error('you can only remove your own favorites');
+      throw new UserError('favoriteRemoveOwnOnly');
     }
 
     await prisma.favoriteQuery.delete({where: {id: favorite.id}});
 
-    await interaction.reply('👍 favorite removed');
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'favoriteRemoved'));
   }
 }

@@ -1,5 +1,6 @@
 import {Setting} from '@prisma/client';
 import {HttpError} from './http.js';
+import {SUPPORTED_LOCALES, isLocale} from '../i18n/index.js';
 
 export type GuildSettingsPatch = Partial<Pick<Setting,
 'playlistLimit'
@@ -10,7 +11,8 @@ export type GuildSettingsPatch = Partial<Pick<Setting,
 | 'defaultVolume'
 | 'defaultQueuePageSize'
 | 'turnDownVolumeWhenPeopleSpeak'
-| 'turnDownVolumeWhenPeopleSpeakTarget'>>;
+| 'turnDownVolumeWhenPeopleSpeakTarget'
+| 'locale'>>;
 
 const BOOLEAN_KEYS = new Set<keyof GuildSettingsPatch>([
   'leaveIfNoListeners',
@@ -34,6 +36,16 @@ export const sanitizeGuildSettingsPatch = (input: unknown): GuildSettingsPatch =
 
   const patch: GuildSettingsPatch = {};
   for (const [key, value] of Object.entries(input)) {
+    if (key === 'locale') {
+      // Exact, case-sensitive match: the bot only ships these dictionaries.
+      if (!isLocale(value)) {
+        throw new HttpError(400, `locale must be one of: ${SUPPORTED_LOCALES.join(', ')}`);
+      }
+
+      patch.locale = value;
+      continue;
+    }
+
     if (!Object.prototype.hasOwnProperty.call(NUMBER_RANGES, key) && !BOOLEAN_KEYS.has(key as keyof GuildSettingsPatch)) {
       throw new HttpError(400, `unsupported setting: ${key}`);
     }

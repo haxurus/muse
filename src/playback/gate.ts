@@ -1,4 +1,5 @@
 import {HttpError} from '../control/http.js';
+import {EN_MESSAGES} from '../i18n/en.js';
 import {PLAYBACK_OUTCOME_UNKNOWN_MESSAGE, PLAYBACK_OUTCOME_UNKNOWN_STATUS, type PlaybackRequest, type PlaybackResult} from './protocol.js';
 
 type Entry = {fingerprint: string; promise: Promise<PlaybackResult>; expiresAt: number; inFlight: boolean};
@@ -44,20 +45,20 @@ export default class PlaybackGate {
     const existing = this.entries.get(key);
     if (existing) {
       if (existing.fingerprint !== fingerprint) {
-        throw new HttpError(409, 'Request identifier already used with a different payload.');
+        throw new HttpError(409, EN_MESSAGES.playbackRequestIdReused);
       }
 
       return existing.promise;
     }
 
     if (this.busy.has(request.guildId)) {
-      throw new HttpError(409, 'Another playback command is still running in this server.');
+      throw new HttpError(409, EN_MESSAGES.playbackAnotherCommandRunning);
     }
 
     this.evictCompleted();
     const inFlight = [...this.entries.values()].filter(entry => entry.inFlight).length;
     if (inFlight >= this.maxEntries || this.busy.size >= MAX_BUSY_GUILDS) {
-      throw new HttpError(429, 'Playback capacity reached. Try again later.');
+      throw new HttpError(429, EN_MESSAGES.playbackCapacityReached);
     }
 
     this.busy.add(request.guildId);

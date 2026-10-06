@@ -9,26 +9,30 @@ import DiscordOAuthClient, {
   hasRequiredScopes,
 } from './discord-oauth.js';
 import {DashboardHttpError, describeUpstreamError, parseCookies, redirect, safeEqual} from './http.js';
+import {Locale, isLocale, localizedPath, preferredLocale} from './i18n.js';
 import OrchestratorClient from './orchestrator-client.js';
 import SessionStore, {DashboardSession} from './session-store.js';
 
 const STATE_COOKIE_PATH = '/auth/discord/callback';
+const OAUTH_COOKIE_MAX_AGE_SECONDS = 600;
 const GUILD_CACHE_MS = 60 * 1000;
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
 export type DashboardCookieNames = {
   session: string;
   state: string;
+  /** UI language carried through the Discord login (`/auth/discord?lang=`). */
+  lang: string;
 };
 
 /**
  * In https mode the session cookie uses the `__Host-` prefix (Secure, Path=/, no Domain)
- * and the state cookie the `__Secure-` prefix (it is scoped to the callback path).
- * Plain names are kept for local http development.
+ * and the state and language cookies the `__Secure-` prefix (they are scoped to the
+ * callback path). Plain names are kept for local http development.
  */
 export const dashboardCookieNames = (secure: boolean): DashboardCookieNames => secure
-  ? {session: '__Host-muse_session', state: '__Secure-muse_oauth_state'}
-  : {session: 'muse_session', state: 'muse_oauth_state'};
+  ? {session: '__Host-muse_session', state: '__Secure-muse_oauth_state', lang: '__Secure-muse_oauth_lang'}
+  : {session: 'muse_session', state: 'muse_oauth_state', lang: 'muse_oauth_lang'};
 
 const cookie = (
   name: string,
@@ -84,9 +88,6 @@ export default class DashboardAuth {
   private readonly discord: DiscordOAuthClient;
   private readonly secureCookies: boolean;
   private readonly cookieNames: DashboardCookieNames;
-  private readonly dashboardUrl: string;
-  private readonly loginFailedUrl: string;
-  private readonly loginBlockedUrl: string;
   private readonly isUserBlocked: (userId: string) => Promise<boolean>;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardAuthDependencies = {}) {
@@ -94,10 +95,6 @@ export default class DashboardAuth {
     this.discord = dependencies.discord ?? new DiscordOAuthClient(config);
     this.secureCookies = config.publicUrl.protocol === 'https:';
     this.cookieNames = dashboardCookieNames(this.secureCookies);
-    // The signed-in app lives at /dashboard; "/" is the public home page.
-    this.dashboardUrl = new URL('/dashboard', config.publicUrl).toString();
-    this.loginFailedUrl = new URL('/dashboard?login=failed', config.publicUrl).toString();
-    this.loginBlockedUrl = new URL('/dashboard?login=blocked', config.publicUrl).toString();
     if (dependencies.isUserBlocked) {
       this.isUserBlocked = dependencies.isUserBlocked;
     } else {
@@ -110,21 +107,31 @@ export default class DashboardAuth {
     this.store.close();
   }
 
-  begin(response: ServerResponse): void {
+  /**
+   * Starts the Discord login. The UI language travels to the callback in a
+   * short-lived cookie with the same flags and path as the state cookie.
+   */
+  begin(response: ServerResponse, locale: Locale): void {
     const state = this.store.issueOAuthState();
     redirect(response, this.discord.authorizationUrl(state), [
-      cookie(this.cookieNames.state, state, 600, this.secureCookies, STATE_COOKIE_PATH),
+      cookie(this.cookieNames.state, state, OAUTH_COOKIE_MAX_AGE_SECONDS, this.secureCookies, STATE_COOKIE_PATH),
+      cookie(this.cookieNames.lang, locale, OAUTH_COOKIE_MAX_AGE_SECONDS, this.secureCookies, STATE_COOKIE_PATH),
     ]);
   }
 
   async callback(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', this.config.publicUrl);
     const cookies = parseCookies(request);
-    const clearState = clearCookie(this.cookieNames.state, this.secureCookies, STATE_COOKIE_PATH);
+    const storedLocale = cookies[this.cookieNames.lang];
+    const locale = isLocale(storedLocale) ? storedLocale : preferredLocale(request.headers['accept-language']);
+    const clearState = [
+      clearCookie(this.cookieNames.state, this.secureCookies, STATE_COOKIE_PATH),
+      clearCookie(this.cookieNames.lang, this.secureCookies, STATE_COOKIE_PATH),
+    ];
 
     const fail = (reason: string): void => {
       console.warn(`Dashboard login failed: ${reason}`);
-      redirect(response, this.loginFailedUrl, [clearState]);
+      redirect(response, this.dashboardUrl(locale, 'failed'), clearState);
     };
 
     if (url.searchParams.has('error')) {
@@ -154,7 +161,7 @@ export default class DashboardAuth {
       await this.revokeQuietly(login.token.access_token);
       if (access === 'blocked') {
         console.warn('Dashboard login denied: user is on the block list');
-        redirect(response, this.loginBlockedUrl, [clearState]);
+        redirect(response, this.dashboardUrl(locale, 'blocked'), clearState);
         return;
       }
 
@@ -169,8 +176,8 @@ export default class DashboardAuth {
 
     const session = this.store.createSession(login.user, login.token.access_token, login.token.expires_in);
 
-    redirect(response, this.dashboardUrl, [
-      clearState,
+    redirect(response, this.dashboardUrl(locale), [
+      ...clearState,
       cookie(
         this.cookieNames.session,
         session.id,
@@ -237,7 +244,7 @@ export default class DashboardAuth {
     }
   }
 
-  async logout(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  async logout(request: IncomingMessage, response: ServerResponse, locale: Locale): Promise<void> {
     const cookies = parseCookies(request);
     const session = this.store.get(cookies[this.cookieNames.session]);
 
@@ -247,9 +254,19 @@ export default class DashboardAuth {
       await this.revokeQuietly(session.accessToken);
     }
 
-    redirect(response, this.dashboardUrl, [
+    redirect(response, this.dashboardUrl(locale), [
       clearCookie(this.cookieNames.session, this.secureCookies, '/'),
     ]);
+  }
+
+  /** /<lang>/dashboard (the signed-in app), optionally with ?login=failed|blocked. */
+  private dashboardUrl(locale: Locale, login?: 'failed' | 'blocked'): string {
+    const url = new URL(localizedPath(locale, '/dashboard'), this.config.publicUrl);
+    if (login !== undefined) {
+      url.searchParams.set('login', login);
+    }
+
+    return url.toString();
   }
 
   /**

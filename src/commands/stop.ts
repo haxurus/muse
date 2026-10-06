@@ -4,12 +4,15 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 
 @injectable()
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('stop')
-    .setDescription('stop playback, disconnect, and clear all songs in the queue');
+    .setDescription('stop playback, disconnect, and clear all songs in the queue')
+    .setDescriptionLocalizations({it: 'ferma la riproduzione, disconnetti il bot e svuota la coda'});
 
   public requiresVC = true;
 
@@ -23,10 +26,10 @@ export default class implements Command {
     const player = this.playerManager.get(interaction.guild!.id);
 
     if (!player.voiceConnection) {
-      throw new Error('not connected');
+      throw new UserError('notConnected');
     }
 
     player.stop();
-    await interaction.reply('u betcha, stopped');
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'stopDone'));
   }
 }

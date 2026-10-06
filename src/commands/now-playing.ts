@@ -3,6 +3,8 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 import {SlashCommandBuilder} from '@discordjs/builders';
 import {buildPlayingMessageEmbed} from '../utils/build-embed.js';
 
@@ -10,7 +12,8 @@ import {buildPlayingMessageEmbed} from '../utils/build-embed.js';
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('now-playing')
-    .setDescription('shows the currently played song');
+    .setDescription('shows the currently played song')
+    .setDescriptionLocalizations({it: 'mostra il brano in riproduzione'});
 
   private readonly playerManager: PlayerManager;
 
@@ -22,11 +25,11 @@ export default class implements Command {
     const player = this.playerManager.get(interaction.guild!.id);
 
     if (!player.getCurrent()) {
-      throw new Error('nothing is currently playing');
+      throw new UserError('nothingCurrentlyPlaying');
     }
 
     await interaction.reply({
-      embeds: [buildPlayingMessageEmbed(player)],
+      embeds: [buildPlayingMessageEmbed(player, await getGuildLocale(interaction.guild!.id))],
     });
   }
 }

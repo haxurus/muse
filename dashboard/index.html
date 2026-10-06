@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="it">
+<html lang="{{lang}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#0a0b0d">
+  <meta name="theme-color" content="#0b0913">
   <meta name="robots" content="noindex, nofollow">
   <title>Muse Control</title>
   <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
@@ -12,13 +12,13 @@
   <script src="/assets/dashboard.js" defer></script>
 </head>
 <body>
-  <noscript><p class="noscript">Muse Control richiede JavaScript.</p></noscript>
+  <noscript><p class="noscript">{{meta.appNoscript}}</p></noscript>
 
   <!-- Public chrome: landing, server list, super console -->
   <div id="site-view" class="public-site">
     <header class="site-header">
       <div class="site-container site-nav">
-        <a class="brand" href="/" aria-label="Muse - Home">
+        <a class="brand" href="{{prefix}}" aria-label="{{nav.homeLabel}}">
           <svg class="brand-mark" width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
             <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
             <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -28,24 +28,26 @@
           <span>Muse</span>
         </a>
         <nav class="site-nav-links" data-i18n-aria-label="nav.label">
-          <a href="/dashboard" data-nav data-route-link="home" data-i18n="nav.servers"></a>
-          <a href="/super" data-nav data-route-link="super" data-super-only hidden data-i18n="nav.super"></a>
+          <a href="{{prefix}}/dashboard" data-nav data-route-link="home" data-i18n="nav.servers"></a>
+          <a href="{{prefix}}/super" data-nav data-route-link="super" data-super-only hidden data-i18n="nav.super"></a>
         </nav>
         <div class="site-nav-end">
+          {{{languageSwitcher}}}
           <div class="site-nav-actions">
-            <a class="button button-primary" href="/auth/discord" data-auth="anonymous" data-i18n="nav.login"></a>
+            <a class="button button-primary" href="/auth/discord?lang={{lang}}" data-auth="anonymous" data-i18n="nav.login"></a>
             <button class="button button-ghost" type="button" data-auth="user" data-logout hidden data-i18n="nav.logout"></button>
           </div>
         </div>
         <details class="site-mobile-menu">
           <summary data-i18n-aria-label="nav.menu"><span></span><span></span></summary>
           <div>
-            <a href="/dashboard" data-nav data-i18n="nav.servers"></a>
-            <a href="/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
+            <a href="{{prefix}}/dashboard" data-nav data-i18n="nav.servers"></a>
+            <a href="{{prefix}}/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
             <div class="site-mobile-actions">
-              <a class="button button-primary" href="/auth/discord" data-auth="anonymous" data-i18n="nav.login"></a>
+              <a class="button button-primary" href="/auth/discord?lang={{lang}}" data-auth="anonymous" data-i18n="nav.login"></a>
               <button class="button button-secondary" type="button" data-auth="user" data-logout hidden data-i18n="nav.logout"></button>
             </div>
+            {{{languageSwitcherMobile}}}
           </div>
         </details>
       </div>
@@ -79,7 +81,7 @@
               <span class="kicker" data-i18n="login.kicker"></span>
               <h2 data-i18n="login.title"></h2>
               <p data-i18n="login.text"></p>
-              <a class="button button-primary button-lg" href="/auth/discord">
+              <a class="button button-primary button-lg" href="/auth/discord?lang={{lang}}">
                 <span data-i18n="login.button"></span>
                 <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
               </a>
@@ -88,7 +90,7 @@
               <span class="kicker" data-i18n="login.newServerKicker"></span>
               <h2 data-i18n="login.newServerTitle"></h2>
               <p data-i18n="login.newServerText"></p>
-              <a class="button button-secondary button-lg" href="/development" data-i18n="login.newServerButton"></a>
+              <a class="button button-secondary button-lg" href="{{prefix}}/development" data-i18n="login.newServerButton"></a>
             </div>
           </div>
         </div>
@@ -232,7 +234,7 @@
   <!-- Guild app shell -->
   <div id="guild-view" class="app-shell" hidden>
     <aside class="sidebar">
-      <a class="brand sidebar-brand" href="/" aria-label="Muse - Home">
+      <a class="brand sidebar-brand" href="{{prefix}}" aria-label="{{nav.homeLabel}}">
         <svg class="brand-mark" width="24" height="24" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
           <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
           <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -241,7 +243,7 @@
         </svg>
         <span>Muse</span>
       </a>
-      <a class="sidebar-back" href="/dashboard" data-nav>
+      <a class="sidebar-back" href="{{prefix}}/dashboard" data-nav>
         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>
         <span data-i18n="guild.back"></span>
       </a>
@@ -263,8 +265,9 @@
       <div class="sidebar-foot">
         <div class="sidebar-access"><span data-i18n="guild.access"></span><strong class="mono" id="sidebar-access"></strong></div>
         <div class="sidebar-user" id="sidebar-user"></div>
+        {{{languageSwitcher}}}
         <div class="sidebar-links">
-          <a class="button button-secondary button-sm" href="/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
+          <a class="button button-secondary button-sm" href="{{prefix}}/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
           <button class="button button-ghost button-sm" type="button" data-logout data-i18n="nav.logout"></button>
         </div>
       </div>

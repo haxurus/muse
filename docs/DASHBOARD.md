@@ -19,14 +19,14 @@ The dashboard authorizes a guild only when the authenticated Discord user is:
 
 Permissions are rechecked against Discord before every configuration mutation. The guild list is paginated (`after` cursor, 200 per page, at most 10 pages).
 
-The callback verifies that the granted token includes both `identify` and `guilds`. A cancelled or failed login (Discord `error` parameter, invalid/expired/replayed state, missing scopes, Discord errors) redirects to `MUSE_DASHBOARD_PUBLIC_URL/dashboard?login=failed`, where the page shows a short message. A successful login redirects to `MUSE_DASHBOARD_PUBLIC_URL/dashboard`; `POST /auth/logout` also returns to `/dashboard` (login view). Every redirect target is built with `new URL(path, MUSE_DASHBOARD_PUBLIC_URL)`, which must stay a bare origin.
+The callback verifies that the granted token includes both `identify` and `guilds`. A cancelled or failed login (Discord `error` parameter, invalid/expired/replayed state, missing scopes, Discord errors) redirects to `MUSE_DASHBOARD_PUBLIC_URL/<lang>/dashboard?login=failed`, where the page shows a short message. A successful login redirects to `MUSE_DASHBOARD_PUBLIC_URL/<lang>/dashboard`; `POST /auth/logout?lang=<lang>` also returns to `/<lang>/dashboard` (login view). `<lang>` is the UI language carried through the login (see [Languages](#languages)). Every redirect target is built with `new URL(path, MUSE_DASHBOARD_PUBLIC_URL)`, which must stay a bare origin.
 
 ### Blocked users
 
 After loading the Discord user, the callback asks the orchestrator `GET /v1/blocks/users/:userId` (see [SUPER_CONSOLE.md](SUPER_CONSOLE.md)):
 
-- `{blocked: true}`: the OAuth token is revoked, no session is created and the browser goes to `/dashboard?login=blocked` ("Accesso non consentito.").
-- orchestrator error, timeout or malformed answer: **fail closed**. The token is revoked, no session is created and the browser goes to `/dashboard?login=failed`. Signing in therefore needs the orchestrator to be reachable; existing sessions keep working.
+- `{blocked: true}`: the OAuth token is revoked, no session is created and the browser goes to `/<lang>/dashboard?login=blocked` ("Accesso non consentito." / "Access denied.").
+- orchestrator error, timeout or malformed answer: **fail closed**. The token is revoked, no session is created and the browser goes to `/<lang>/dashboard?login=failed`. Signing in therefore needs the orchestrator to be reachable; existing sessions keep working.
 - the configured super admin is never checked (no self-lockout, and the super console stays reachable while the orchestrator is degraded).
 
 ## Discord application setup
@@ -59,25 +59,27 @@ In production it comes from `deploy/.env` (`MUSE_SUPER_ADMIN_USER_ID: ${MUSE_SUP
 ### Bot invite links
 
 ```text
-GET /invite/:workerId        workerId = muse-NN
+GET /invite/:workerId[?lang=it|en]        workerId = muse-NN
 ```
 
-- no session: `302 /auth/discord` (the login starts; afterwards the user lands on `/dashboard`);
-- signed in but not the super admin (or no super admin configured): `302 /development`, a static "Muse è ancora in sviluppo." notice with links to the GitHub repository;
+The language is `?lang=` when valid, otherwise the `Accept-Language` preference (the dashboard links always pass it).
+
+- no session: `302 /auth/discord?lang=<lang>` (the login starts; afterwards the user lands on `/<lang>/dashboard`);
+- signed in but not the super admin (or no super admin configured): `302 /<lang>/development`, a static "Muse è ancora in sviluppo." / "Muse is still in development." notice with links to the GitHub repository;
 - super admin: the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
   `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=3230720`
   (View Channels, Send Messages, Read Message History, Connect, Speak).
 
-### "Aggiungi a Discord" (`/add`)
+### "Aggiungi a Discord" / "Add to Discord" (`/add`)
 
 ```text
-GET /add
+GET /add[?lang=it|en]
 ```
 
-Target of the "Aggiungi a Discord" buttons on the public home page:
+Target of the "Add to Discord" buttons on the public home pages (they pass `?lang=`; without it the `Accept-Language` preference is used):
 
-- super admin: `302 /dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" card with one invite per bot);
-- anybody else (no session, signed-in non-admin, or no super admin configured): `302 /development`.
+- super admin: `302 /<lang>/dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" / "New server · Add the bots" card with one invite per bot);
+- anybody else (no session, signed-in non-admin, or no super admin configured): `302 /<lang>/development`.
 
 ### Super console API
 
@@ -100,7 +102,7 @@ Muse Control uses:
 - stateless OAuth `state`: HMAC-SHA256 signed (random per-process key) with a 10 minute expiry, matched against the state cookie and accepted once (a bounded used-nonce set evicts the oldest entries, so unauthenticated `/auth/discord` traffic cannot exhaust a server-side pool);
 - server-side sessions, capped at 5000 in total and 5 per Discord user (oldest evicted), cleaned up every minute; signing in again deletes the session carried by the request;
 - `HttpOnly` cookies;
-- `Secure` cookies in production, named `__Host-muse_session` and `__Secure-muse_oauth_state` (plain `muse_session` / `muse_oauth_state` over local http);
+- `Secure` cookies in production, named `__Host-muse_session`, `__Secure-muse_oauth_state` and `__Secure-muse_oauth_lang` (plain `muse_session` / `muse_oauth_state` / `muse_oauth_lang` over local http); the state and language cookies live 10 minutes, are scoped to `/auth/discord/callback` and are cleared by the callback;
 - `SameSite=Lax`;
 - per-session CSRF tokens;
 - strict Origin validation on mutations;
@@ -167,18 +169,23 @@ Only `dashboard-edge` joins `muse-edge`, an internal network that Nginx Proxy Ma
 Browser-facing endpoints:
 
 ```text
-GET  /                                public home page (indexable)
-GET  /dashboard                       app: login view or server list
-GET  /server/:guildId                 app: guild view
-GET  /super                           app: super console
-GET  /development                     static "Accesso limitato" notice
-GET  /add                             (see "Aggiungi a Discord")
+GET  /                                302 to /it or /en (Accept-Language, Vary: accept-language)
+GET  /it, /en                         public home page (indexable)
+GET  /:lang/dashboard                 app: login view or server list
+GET  /:lang/server/:guildId           app: guild view
+GET  /:lang/super                     app: super console
+GET  /:lang/development               static "Accesso limitato" / "Limited access" notice
+GET  /dashboard, /super, /server/:guildId, /development
+                                      302 to the same path under /<lang> (query kept)
+GET  /add                             (see "Add to Discord")
 
-GET  /auth/discord
+GET  /auth/discord[?lang=it|en]
 GET  /auth/discord/callback
-POST /auth/logout
+POST /auth/logout[?lang=it|en]
 
 GET  /invite/:workerId                 (see "Bot invite links")
+
+GET  /assets/i18n/it.json, /assets/i18n/en.json   app dictionaries
 
 GET   /api/session
 GET   /api/guilds/:guildId
@@ -200,11 +207,14 @@ Example:
 {
   "workerIds": ["muse-01", "muse-02", "muse-03"],
   "settings": {
+    "locale": "it",
     "defaultVolume": 65,
     "leaveIfNoListeners": true
   }
 }
 ```
+
+`locale` is the bot language (`"en"` or `"it"`, English by default); it is the first field of the settings form ("Lingua del bot" / "Bot language") and is patched like every other field.
 
 The orchestrator and each worker validate the request again before persistence.
 
@@ -212,17 +222,32 @@ Super-admin endpoints are listed under "Super console API" above.
 
 ## User interface
 
-The UI is a static public home page (`dashboard/home.html` + a tiny `home.js` that only closes the mobile menu) and a small vanilla JavaScript single page app (`dashboard/index.html`, `dashboard.js`), both styled by `dashboard.css`. They share the visual language of Sentinel: dark-only palette (background `#0a0b0d`, violet accent `#9b7bff` with `#120a2b` ink on accent buttons; warnings keep a separate amber `--warn` token), Geist and Geist Mono, sticky blurred header, uppercase mono "kicker" labels, hairline metric rows, pills and switches. Copy is Italian; all strings live in the `STRINGS` object at the top of `dashboard.js` so another locale can be added without touching the markup (elements carry `data-i18n` keys).
+The UI is a public home page (`dashboard/home.html` + a tiny `home.js` that only closes the mobile menu) and a small vanilla JavaScript single page app (`dashboard/index.html`, `dashboard.js`), both styled by `dashboard.css`. They share the visual language of Sentinel: Geist and Geist Mono, sticky blurred header, uppercase mono "kicker" labels, hairline metric rows, pills and switches, an "IT | EN" language switcher.
+
+The palette is violet throughout (dark only): violet-tinted darks (`--bg #0b0913`, surfaces `#151120` / `#1b1629` / `#231c34`, lines `#2a2240` / `#382e52`), text `#f1ecfb` / `#c3b8dc`, muted `#9387ad` (5.6:1 on surfaces, WCAG AA), accent `#a78bfa` with `#170b36` ink (6.8:1), violet/indigo glows and a sparing fuchsia `#d946ef` in the hero headline gradient and the call-to-action glow. `--ok`, `--info`, `--danger` and the amber `--warn` keep their own hues. `--faint` is decorative only.
+
+### Languages
+
+The web UI is bilingual (Italian and English), following Sentinel:
+
+- every HTML view lives under `/it` or `/en`; `<html lang>`, the `Content-Language` header and all copy follow the prefix;
+- `/` and the old unprefixed paths (`/dashboard`, `/super`, `/server/:guildId`, `/development`) answer `302` to the prefixed path. The language is Italian when `Accept-Language` prefers `it` over `en` (highest quality wins), English otherwise; redirects carry `Vary: accept-language`;
+- the HTML files in `dashboard/` are templates rendered once per language at startup by `src/dashboard/i18n.ts`: `{{key}}` is replaced with the HTML-escaped string from the typed Italian/English dictionaries (English must have exactly the Italian keys, enforced by TypeScript and tests), `{{{key}}}` with server-generated markup (only the language switcher). Unknown keys fail at startup, so no JavaScript is needed to read the home page;
+- the home pages declare `rel="canonical"` and `hreflang` alternates (`it`, `en`, `x-default` = `/`);
+- the language switcher links to the same page in the other language (`aria-current="page"` on the active one); inside the app `dashboard.js` keeps its links pointed at the current view;
+- the app reads its language from `<html lang>` and loads its strings from `/assets/i18n/<lang>.json` (`dashboard/i18n/it.json`, `en.json`, same keys); elements carry `data-i18n` keys and every internal link is built with the language prefix;
+- the login keeps the language: `/auth/discord?lang=it|en` stores it in a short-lived cookie (see "Session security") and the callback returns to `/<lang>/dashboard` (also on failure and block). Without a valid cookie the callback uses `Accept-Language`;
+- `/api/*` responses are not localized (orchestrator messages are shown as-is).
 
 | Path | View |
 | --- | --- |
-| `/` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "Come funziona", self-hosting steps, security, call to action. "Accedi" links to `/dashboard`, "Aggiungi a Discord" to `/add` |
-| `/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
-| `/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, logout) and three sections: **Panoramica** (bots in the server with ready/voice state), **Impostazioni** (bot selection, one switch per field, mixed values shown as "Valori diversi", only enabled fields are patched) and **Gruppi** (create, edit, select, delete, keep or drop unavailable members) |
-| `/super` | Super console (super admin only): KPI row, worker status with invite buttons, linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
-| `/development` | Static "Accesso limitato" notice used by the invite links |
+| `/it`, `/en` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "How it works", self-hosting steps, security, call to action. "Sign in" links to `/<lang>/dashboard`, "Add to Discord" to `/add?lang=<lang>` |
+| `/<lang>/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
+| `/<lang>/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, language, logout) and three sections: **Overview** (bots in the server with ready/voice state), **Settings** (bot selection, one switch per field including the bot language, mixed values shown as "Mixed values", only enabled fields are patched) and **Groups** (create, edit, select, delete, keep or drop unavailable members) |
+| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
+| `/<lang>/development` | Static "Limited access" notice used by `/add` and the invite links |
 
-The app views (`/dashboard`, `/server/:guildId`, `/super`) and `/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home page `/` is indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
+The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) and `/<lang>/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
 
 The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers. Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
 

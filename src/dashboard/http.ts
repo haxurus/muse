@@ -102,9 +102,11 @@ export const redirect = (
   response: ServerResponse,
   location: string,
   cookies: string[] = [],
+  extraHeaders: Record<string, string> = {},
 ): void => {
   const body = 'Redirecting';
   send(response, 302, 'text/plain; charset=utf-8', body, {
+    ...extraHeaders,
     location,
     ...(cookies.length > 0 ? {'set-cookie': cookies} : {}),
   });

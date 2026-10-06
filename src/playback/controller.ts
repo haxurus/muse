@@ -3,15 +3,25 @@ import type Config from '../services/config.js';
 import {HttpError} from '../control/http.js';
 import {PLAYBACK_ACTIONS, isPlaybackWorkerEnabled, parsePlaybackRequest, resolveOrchestratorPlaybackUrl} from './protocol.js';
 import {sendPlayback} from './transport.js';
+import {DEFAULT_LOCALE, localizeEnglishMessage, t, type Locale} from '../i18n/index.js';
+
+export type PlaybackLocaleResolver = (guildId: string | null) => Promise<Locale>;
+
+const englishOnly: PlaybackLocaleResolver = async () => DEFAULT_LOCALE;
 
 /** Keep the real Discord interaction and its token inside the command-receiving worker. */
-export const handlePlaybackInteraction = async (interaction: Interaction, config: Config): Promise<boolean> => {
+export const handlePlaybackInteraction = async (
+  interaction: Interaction,
+  config: Config,
+  resolveLocale: PlaybackLocaleResolver = englishOnly,
+): Promise<boolean> => {
   if (!isPlaybackWorkerEnabled(config.WORKER_ID)) {
     return false;
   }
 
   if (interaction.isButton()) {
-    await interaction.reply({content: 'Use slash commands while orchestrated playback pilot mode is enabled.', ephemeral: true});
+    const locale = await resolveLocale(interaction.guildId);
+    await interaction.reply({content: t(locale, 'playbackUseSlashCommands'), ephemeral: true});
     return true;
   }
 
@@ -21,14 +31,17 @@ export const handlePlaybackInteraction = async (interaction: Interaction, config
 
   const action = interaction.commandName === 'next' ? 'skip' : interaction.commandName;
   if (!PLAYBACK_ACTIONS.some(candidate => candidate === action)) {
-    await interaction.reply({content: 'This command is not yet part of the orchestrated playback pilot.', ephemeral: true});
+    const locale = await resolveLocale(interaction.guildId);
+    await interaction.reply({content: t(locale, 'playbackNotInPilot'), ephemeral: true});
     return true;
   }
 
   await interaction.deferReply({ephemeral: true});
+  // The worker answers in the guild's locale; fixed English relay messages are translated here.
+  const locale = await resolveLocale(interaction.guildId);
   const voiceChannelId = interaction.guild?.voiceStates.cache.get(interaction.user.id)?.channelId;
   if (!interaction.guildId || !voiceChannelId || !interaction.channelId) {
-    await interaction.editReply('Join a voice channel in this server first.');
+    await interaction.editReply(t(locale, 'playbackJoinVoiceFirst'));
     return true;
   }
 
@@ -52,7 +65,7 @@ export const handlePlaybackInteraction = async (interaction: Interaction, config
   });
   try {
     const result = await sendPlayback(resolveOrchestratorPlaybackUrl(), config.CONTROL_TOKEN, request, config.WORKER_ID);
-    await interaction.editReply({content: result.message, allowedMentions: {parse: []}});
+    await interaction.editReply({content: localizeEnglishMessage(locale, result.message), allowedMentions: {parse: []}});
   } catch (error: unknown) {
     if (!(error instanceof HttpError)) {
       throw error;
@@ -60,7 +73,7 @@ export const handlePlaybackInteraction = async (interaction: Interaction, config
 
     console.warn('Orchestrated playback request failed', {statusCode: error.statusCode, guildId: request.guildId, requestId: request.requestId});
     // HttpError messages are produced by the playback hops and are safe to show verbatim.
-    await interaction.editReply({content: error.message, allowedMentions: {parse: []}});
+    await interaction.editReply({content: localizeEnglishMessage(locale, error.message), allowedMentions: {parse: []}});
   }
 
   return true;

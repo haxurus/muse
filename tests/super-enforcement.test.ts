@@ -140,7 +140,7 @@ describe('blocked users', () => {
     await handlers.get('interactionCreate')!(interaction as never);
 
     expect(interaction.reply).toHaveBeenCalledWith({content: BLOCKED_USER_MESSAGE, ephemeral: true});
-    expect(BLOCKED_USER_MESSAGE).toBe('Non puoi usare questo bot.');
+    expect(BLOCKED_USER_MESSAGE).toBe('You can\'t use this bot.');
     expect(command.execute).not.toHaveBeenCalled();
     expect(command.handleButtonInteraction).not.toHaveBeenCalled();
   });
