@@ -206,8 +206,8 @@ describe('super console status channel API', () => {
       ['PUT', '/v1/super/status-channel'],
       ['POST', '/v1/super/status-channel/test'],
     ]) {
-      expect((await call(method, url, {token: null, headers: actor(), body: {channelId}})).status).toBe(401);
-      expect((await call(method, url, {token: one.token, headers: actor(), body: {channelId}})).status).toBe(401);
+      expect((await call(method, url, {token: null, headers: actor(), ...(method === 'GET' ? {} : {body: {channelId}})})).status).toBe(401);
+      expect((await call(method, url, {token: one.token, headers: actor(), ...(method === 'GET' ? {} : {body: {channelId}})})).status).toBe(401);
     }
 
     expect(announces(one)).toEqual([]);
