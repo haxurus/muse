@@ -11,6 +11,7 @@ import {getSoundCloudMetadata, YtDlpMediaUnavailableError} from '../utils/yt-dlp
 import pLimit from 'p-limit';
 import {getHttpStreamInputOptions, HTTP_STREAM_PROBE_TIMEOUT_MS, isValidAllowedStreamHost} from '../utils/http-stream.js';
 import {DEFAULT_LOCALE, UserError, t, type Locale} from '../i18n/index.js';
+import {normalizeSpotifyUrl} from '../utils/spotify-url.js';
 
 // Bounds parallel YouTube search API calls when converting Spotify collections.
 const SPOTIFY_TO_YOUTUBE_SEARCH_CONCURRENCY = 4;
@@ -87,7 +88,7 @@ export default class {
         throw new UserError('spotifyNotEnabled');
       }
 
-      const [convertedSongs, nSongsNotFound, totalSongs] = await this.spotifySource(query, playlistLimit, shouldSplitChapters);
+      const [convertedSongs, nSongsNotFound, totalSongs] = await this.spotifySource(normalizeSpotifyUrl(query), playlistLimit, shouldSplitChapters);
 
       if (totalSongs > playlistLimit) {
         extraMsg = t(locale, 'songsRandomSample', {count: playlistLimit});
