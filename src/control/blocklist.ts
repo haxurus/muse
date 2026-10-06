@@ -1,5 +1,6 @@
 import {HttpError} from './http.js';
 import {isSnowflake} from './snowflake.js';
+import {t, type Locale} from '../i18n/index.js';
 
 /** Upper bound per list; mirrored by the orchestrator block store. */
 export const MAX_BLOCKLIST_ENTRIES = 5000;
@@ -66,4 +67,7 @@ export const blocklist = {
   },
 };
 
-export const BLOCKED_USER_MESSAGE = 'Non puoi usare questo bot.';
+/** English refusal; use `blockedUserMessage(locale)` to answer in the guild's language. */
+export const BLOCKED_USER_MESSAGE = t('en', 'blockedUser');
+
+export const blockedUserMessage = (locale: Locale): string => t(locale, 'blockedUser');

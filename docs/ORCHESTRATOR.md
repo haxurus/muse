@@ -77,6 +77,9 @@ The settings endpoint only accepts the existing Muse guild settings:
 - defaultQueuePageSize
 - turnDownVolumeWhenPeopleSpeak
 - turnDownVolumeWhenPeopleSpeakTarget
+- locale: language of the bot's messages in that guild, exactly `"en"` (default) or `"it"` (case-sensitive; any other value, including `"IT"`, is rejected with 400). `GET` always returns it. See `I18N.md`.
+
+Example: `PATCH /v1/guilds/:guildId/settings` with `{"locale": "it"}`, or `"settings": {"locale": "it"}` in a multi-worker update.
 
 Discord tokens and provider credentials are never exposed through the control API.
 

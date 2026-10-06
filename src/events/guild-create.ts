@@ -8,6 +8,7 @@ import {REST} from '@discordjs/rest';
 import {Setting} from '@prisma/client';
 import registerCommandsOnGuild from '../utils/register-commands-on-guild.js';
 import {blocklist} from '../control/blocklist.js';
+import {localeFromDiscord, t} from '../i18n/index.js';
 
 export async function createGuildSettings(guildId: string): Promise<Setting> {
   return prisma.setting.upsert({
@@ -50,7 +51,8 @@ export default async (guild: Guild): Promise<void> => {
   // The welcome DM is best-effort: owners commonly have DMs closed.
   try {
     const owner = await guild.fetchOwner();
-    await owner.send('👋 Hi! Someone (probably you) just invited me to a server you own. By default, I\'m usable by all guild member in all guild channels. To change this, check out the wiki page on permissions: https://github.com/museofficial/muse/wiki/Configuring-Bot-Permissions.');
+    // No locale setting exists yet for a new guild: follow the server's Discord language.
+    await owner.send(t(localeFromDiscord(guild.preferredLocale), 'welcomeOwner'));
   } catch (error: unknown) {
     console.warn(`Could not send the welcome message to the owner of guild ${guild.id}: ${error instanceof Error ? error.message : String(error)}`);
   }

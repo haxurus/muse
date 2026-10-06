@@ -4,12 +4,15 @@ import {SlashCommandBuilder} from '@discordjs/builders';
 import {TYPES} from '../types.js';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 
 @injectable()
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('clear')
-    .setDescription('clears all songs in queue except currently playing song');
+    .setDescription('clears all songs in queue except currently playing song')
+    .setDescriptionLocalizations({it: 'svuota la coda tranne il brano in riproduzione'});
 
   public requiresVC = true;
 
@@ -22,6 +25,6 @@ export default class implements Command {
   public async execute(interaction: ChatInputCommandInteraction) {
     this.playerManager.get(interaction.guild!.id).clear();
 
-    await interaction.reply('clearer than a field after a fresh harvest');
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'clearDone'));
   }
 }

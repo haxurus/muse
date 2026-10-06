@@ -10,6 +10,7 @@ import {URL} from 'node:url';
 import {getSoundCloudMetadata, YtDlpMediaUnavailableError} from '../utils/yt-dlp.js';
 import pLimit from 'p-limit';
 import {getHttpStreamInputOptions, HTTP_STREAM_PROBE_TIMEOUT_MS, isValidAllowedStreamHost} from '../utils/http-stream.js';
+import {DEFAULT_LOCALE, UserError, t, type Locale} from '../i18n/index.js';
 
 // Bounds parallel YouTube search API calls when converting Spotify collections.
 const SPOTIFY_TO_YOUTUBE_SEARCH_CONCURRENCY = 4;
@@ -29,7 +30,7 @@ export default class {
     this.config = config ?? {ALLOW_HTTP_STREAMS: false, HTTP_STREAM_ALLOWED_HOSTS: []};
   }
 
-  async getSongs(query: string, playlistLimit: number, shouldSplitChapters: boolean): Promise<[SongMetadata[], string]> {
+  async getSongs(query: string, playlistLimit: number, shouldSplitChapters: boolean, locale: Locale = DEFAULT_LOCALE): Promise<[SongMetadata[], string]> {
     const newSongs: SongMetadata[] = [];
     let extraMsg = '';
     let url: URL | undefined;
@@ -50,7 +51,7 @@ export default class {
       if (songs) {
         newSongs.push(...songs);
       } else {
-        throw new Error('that doesn\'t exist');
+        throw new UserError('songDoesNotExist');
       }
 
       return [newSongs, extraMsg];
@@ -76,38 +77,38 @@ export default class {
         if (songs) {
           newSongs.push(...songs);
         } else {
-          throw new Error('that doesn\'t exist');
+          throw new UserError('songDoesNotExist');
         }
       }
     } else if (['soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com', 'snd.sc'].includes(url.host)) {
       newSongs.push(...await this.soundCloudSource(url.href, playlistLimit));
     } else if (url.protocol === 'spotify:' || url.host === 'open.spotify.com') {
       if (this.spotifyAPI === undefined) {
-        throw new Error('Spotify is not enabled!');
+        throw new UserError('spotifyNotEnabled');
       }
 
       const [convertedSongs, nSongsNotFound, totalSongs] = await this.spotifySource(query, playlistLimit, shouldSplitChapters);
 
       if (totalSongs > playlistLimit) {
-        extraMsg = `a random sample of ${playlistLimit} songs was taken`;
+        extraMsg = t(locale, 'songsRandomSample', {count: playlistLimit});
       }
 
       if (totalSongs > playlistLimit && nSongsNotFound !== 0) {
-        extraMsg += ' and ';
+        extraMsg += t(locale, 'songsJoiner');
       }
 
       if (nSongsNotFound !== 0) {
         if (nSongsNotFound === 1) {
-          extraMsg += '1 song was not found';
+          extraMsg += t(locale, 'songsOneNotFound');
         } else {
-          extraMsg += `${nSongsNotFound.toString()} songs were not found`;
+          extraMsg += t(locale, 'songsManyNotFound', {count: nSongsNotFound});
         }
       }
 
       newSongs.push(...convertedSongs);
     } else {
       if (!this.isAllowedHttpStream(url)) {
-        throw new Error('that URL provider is not allowed');
+        throw new UserError('urlProviderNotAllowed');
       }
 
       const song = await this.httpLiveStream(url.href);
@@ -115,7 +116,7 @@ export default class {
       if (song) {
         newSongs.push(song);
       } else {
-        throw new Error('that doesn\'t exist');
+        throw new UserError('songDoesNotExist');
       }
     }
 

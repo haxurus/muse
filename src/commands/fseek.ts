@@ -4,6 +4,8 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 import {prettyTime} from '../utils/time.js';
 import durationStringToSeconds from '../utils/duration-string-to-seconds.js';
 
@@ -12,9 +14,11 @@ export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('fseek')
     .setDescription('seek forward in the current song')
+    .setDescriptionLocalizations({it: 'vai avanti nel brano corrente'})
     .addStringOption(option => option
       .setName('time')
       .setDescription('an interval expression or number of seconds (1m, 30s, 100)')
+      .setDescriptionLocalizations({it: 'un intervallo o un numero di secondi (1m, 30s, 100)'})
       .setRequired(true));
 
   public requiresVC = true;
@@ -31,27 +35,27 @@ export default class implements Command {
     const currentSong = player.getCurrent();
 
     if (!currentSong) {
-      throw new Error('nothing is playing');
+      throw new UserError('nothingIsPlaying');
     }
 
     if (currentSong.isLive) {
-      throw new Error('can\'t seek in a livestream');
+      throw new UserError('seekLivestream');
     }
 
     const seekValue = interaction.options.getString('time');
 
     if (!seekValue) {
-      throw new Error('missing seek value');
+      throw new UserError('seekMissingValue');
     }
 
     const seekTime = durationStringToSeconds(seekValue);
 
     if (!Number.isFinite(seekTime) || seekTime <= 0) {
-      throw new Error('invalid seek value');
+      throw new UserError('seekInvalidValue');
     }
 
     if (seekTime + player.getPosition() > currentSong.length) {
-      throw new Error('can\'t seek past the end of the song');
+      throw new UserError('seekPastEnd');
     }
 
     await Promise.all([
@@ -59,6 +63,6 @@ export default class implements Command {
       interaction.deferReply(),
     ]);
 
-    await interaction.editReply(`👍 seeked to ${prettyTime(player.getPosition())}`);
+    await interaction.editReply(t(await getGuildLocale(interaction.guild!.id), 'seekDone', {time: prettyTime(player.getPosition())}));
   }
 }

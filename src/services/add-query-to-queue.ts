@@ -12,6 +12,7 @@ import {SponsorBlock} from 'sponsorblock-api';
 import Config from './config.js';
 import KeyValueCacheProvider from './key-value-cache.js';
 import {ONE_HOUR_IN_SECONDS} from '../utils/constants.js';
+import {UserError, localeOf, t} from '../i18n/index.js';
 
 // Only the local queue context and reply sink are required, never an interaction token.
 export type QueueRequestContext = Pick<ChatInputCommandInteraction, 'guild' | 'member' | 'channel'> & {
@@ -25,7 +26,7 @@ const isSameQueueEntry = (capturedId: number | null, currentId: number | null) =
 
 const normalizeSkipError = (error: unknown) => (
   error instanceof Error && error.message === 'No songs in queue to forward to.'
-    ? new Error('no song to skip to')
+    ? new UserError('noSongToSkipTo')
     : error
 );
 
@@ -74,13 +75,14 @@ export default class AddQueryToQueue {
     const settings = await getGuildSettings(guildId);
 
     const {playlistLimit, queueAddResponseEphemeral} = settings;
+    const locale = localeOf(settings);
 
     await interaction.deferReply({ephemeral: queueAddResponseEphemeral});
 
-    let [newSongs, extraMsg] = await this.getSongs.getSongs(query, playlistLimit, shouldSplitChapters);
+    let [newSongs, extraMsg] = await this.getSongs.getSongs(query, playlistLimit, shouldSplitChapters, locale);
 
     if (newSongs.length === 0) {
-      throw new Error('no songs found');
+      throw new UserError('noSongsFound');
     }
 
     if (shuffleAdditions) {
@@ -130,7 +132,7 @@ export default class AddQueryToQueue {
       await player.play();
 
       if (wasPlayingSong) {
-        statusMsg = 'resuming playback';
+        statusMsg = t(locale, 'queueResumingPlayback');
       }
 
       shouldShowPlayingEmbed = true;
@@ -140,12 +142,12 @@ export default class AddQueryToQueue {
     }
 
     if (!player.getCurrent()) {
-      throw new Error('no playable songs found');
+      throw new UserError('noPlayableSongsFound');
     }
 
     if (shouldShowPlayingEmbed) {
       await interaction.editReply({
-        embeds: [buildPlayingMessageEmbed(player)],
+        embeds: [buildPlayingMessageEmbed(player, locale)],
       });
     }
 
@@ -172,11 +174,11 @@ export default class AddQueryToQueue {
       extraMsg = ` (${extraMsg})`;
     }
 
-    if (newSongs.length === 1) {
-      await interaction.editReply(`u betcha, **${escapeMarkdown(firstSong.title)}** added to the${addToFrontOfQueue ? ' front of the' : ''} queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
-    } else {
-      await interaction.editReply(`u betcha, **${escapeMarkdown(firstSong.title)}** and ${newSongs.length - 1} other songs were added to the queue${didSkipCurrentTrack ? ' and current track skipped' : ''}${extraMsg}`);
-    }
+    const title = escapeMarkdown(firstSong.title);
+    const added = newSongs.length === 1
+      ? t(locale, addToFrontOfQueue ? 'queueAddedOneFront' : 'queueAddedOne', {title})
+      : t(locale, 'queueAddedMany', {title, count: newSongs.length - 1});
+    await interaction.editReply(`${added}${didSkipCurrentTrack ? t(locale, 'queueAndSkipped') : ''}${extraMsg}`);
   }
 
   private async skipNonMusicSegments(song: SongMetadata) {

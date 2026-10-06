@@ -3,6 +3,8 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 import {SlashCommandBuilder} from '@discordjs/builders';
 import {STATUS} from '../services/player.js';
 
@@ -10,7 +12,8 @@ import {STATUS} from '../services/player.js';
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('loop')
-    .setDescription('toggle looping the current song');
+    .setDescription('toggle looping the current song')
+    .setDescriptionLocalizations({it: 'attiva o disattiva la ripetizione del brano corrente'});
 
   public requiresVC = true;
 
@@ -24,7 +27,7 @@ export default class implements Command {
     const player = this.playerManager.get(interaction.guild!.id);
 
     if (player.status === STATUS.IDLE) {
-      throw new Error('no song to loop!');
+      throw new UserError('loopNoSong');
     }
 
     if (player.loopCurrentQueue) {
@@ -33,6 +36,6 @@ export default class implements Command {
 
     player.loopCurrentSong = !player.loopCurrentSong;
 
-    await interaction.reply((player.loopCurrentSong ? 'looped :)' : 'stopped looping :('));
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), player.loopCurrentSong ? 'loopOn' : 'loopOff'));
   }
 }

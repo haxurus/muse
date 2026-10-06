@@ -10,16 +10,18 @@ import {
   type PlaybackResult,
   type PlaybackWorkerId,
 } from './protocol.js';
+import {EN_MESSAGES} from '../i18n/en.js';
 
+// Relay messages stay English on the wire: the controller translates them with the guild's locale.
 const SAFE_STATUS_MESSAGES: Record<number, string> = {
-  400: 'Invalid playback request.',
-  401: 'Playback service authentication failed.',
-  403: 'You must still be in the requested voice channel and have access to it.',
-  404: 'The requested playback service or channel is unavailable.',
-  409: 'The bot is busy or belongs to another voice channel in this server.',
-  429: 'Too many playback requests. Try again later.',
-  502: 'Playback failed. Check the worker status before retrying.',
-  503: 'The bot is not ready. Try again later.',
+  400: EN_MESSAGES.playbackInvalidRequest,
+  401: EN_MESSAGES.playbackAuthFailed,
+  403: EN_MESSAGES.playbackMustStayInChannel,
+  404: EN_MESSAGES.playbackServiceUnavailable,
+  409: EN_MESSAGES.playbackBusy,
+  429: EN_MESSAGES.playbackTooManyRequests,
+  502: EN_MESSAGES.playbackFailed,
+  503: EN_MESSAGES.playbackNotReady,
   [PLAYBACK_OUTCOME_UNKNOWN_STATUS]: PLAYBACK_OUTCOME_UNKNOWN_MESSAGE,
 };
 
@@ -42,7 +44,7 @@ const errorMessageFor = (status: number, text: string): string => {
     } catch {}
   }
 
-  return SAFE_STATUS_MESSAGES[status] ?? 'Playback request failed.';
+  return SAFE_STATUS_MESSAGES[status] ?? EN_MESSAGES.playbackRequestFailed;
 };
 
 /** Fixed internal destinations only. Never retry a timed-out audio mutation locally. */

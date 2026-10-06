@@ -3,13 +3,16 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 import {SlashCommandBuilder} from '@discordjs/builders';
 
 @injectable()
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('shuffle')
-    .setDescription('shuffle the current queue');
+    .setDescription('shuffle the current queue')
+    .setDescriptionLocalizations({it: 'mescola la coda corrente'});
 
   public requiresVC = true;
 
@@ -23,11 +26,11 @@ export default class implements Command {
     const player = this.playerManager.get(interaction.guild!.id);
 
     if (player.isQueueEmpty()) {
-      throw new Error('not enough songs to shuffle');
+      throw new UserError('shuffleNotEnough');
     }
 
     player.shuffle();
 
-    await interaction.reply('shuffled');
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'shuffleDone'));
   }
 }

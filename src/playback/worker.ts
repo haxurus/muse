@@ -7,23 +7,25 @@ import {STATUS} from '../services/player-types.js';
 import {HttpError} from '../control/http.js';
 import PlaybackGate from './gate.js';
 import {parsePlaybackRequest, type PlaybackRequest, type PlaybackResult, type PlaybackWorkerId} from './protocol.js';
+import {DEFAULT_LOCALE, t, type Locale, type MessageKey} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 
-/** Known player/enqueue failures mapped to client errors with fixed, user-safe messages. */
-const KNOWN_PLAYER_ERRORS = new Map<string, readonly [number, string]>([
-  ['no songs found', [404, 'No songs were found for that query.']],
-  ['that doesn\'t exist', [404, 'No songs were found for that query.']],
-  ['video could not be found.', [404, 'That video could not be found.']],
-  ['playlist could not be found.', [404, 'That playlist could not be found.']],
-  ['spotify is not enabled!', [400, 'Spotify links are not enabled on this bot.']],
-  ['that url provider is not allowed', [400, 'That URL provider is not allowed.']],
-  ['no playable songs found', [422, 'No playable songs were found for that query.']],
-  ['no song to skip to', [409, 'There is no song to skip to.']],
-  ['no songs in queue to forward to.', [409, 'There is no song to skip to.']],
-  ['not currently playing.', [409, 'Nothing is playing.']],
-  ['no song currently playing', [409, 'Nothing is playing.']],
-  ['no song currently playing.', [409, 'Nothing is playing.']],
-  ['queue empty.', [409, 'The queue is empty.']],
-  ['not connected to a voice channel.', [409, 'The bot is not connected to this voice channel.']],
+/** Known player/enqueue failures (matched on their English message) mapped to client errors with fixed, user-safe messages. */
+const KNOWN_PLAYER_ERRORS = new Map<string, readonly [number, MessageKey]>([
+  ['no songs found', [404, 'playbackNoSongsForQuery']],
+  ['that doesn\'t exist', [404, 'playbackNoSongsForQuery']],
+  ['video could not be found.', [404, 'playbackVideoNotFound']],
+  ['playlist could not be found.', [404, 'playbackPlaylistNotFound']],
+  ['spotify is not enabled!', [400, 'playbackSpotifyDisabled']],
+  ['that url provider is not allowed', [400, 'playbackProviderNotAllowed']],
+  ['no playable songs found', [422, 'playbackNoPlayableSongs']],
+  ['no song to skip to', [409, 'playbackNoSongToSkip']],
+  ['no songs in queue to forward to.', [409, 'playbackNoSongToSkip']],
+  ['not currently playing.', [409, 'playbackNothingPlaying']],
+  ['no song currently playing', [409, 'playbackNothingPlaying']],
+  ['no song currently playing.', [409, 'playbackNothingPlaying']],
+  ['queue empty.', [409, 'playbackQueueEmpty']],
+  ['not connected to a voice channel.', [409, 'playbackBotNotConnected']],
 ]);
 
 /** Error name plus a redacted, bounded message: native media errors may contain provider URLs or credentials. */
@@ -56,8 +58,11 @@ export default class PlaybackWorker {
   async execute(input: unknown): Promise<PlaybackResult> {
     const request = parsePlaybackRequest(input);
     return this.gate.run(request, async () => {
+      // Same bot and database as the command-receiving controller, so the guild's own locale applies.
+      let locale: Locale = DEFAULT_LOCALE;
       try {
-        return await this.apply(request);
+        locale = await getGuildLocale(request.guildId);
+        return await this.apply(request, locale);
       } catch (error: unknown) {
         if (error instanceof HttpError) {
           throw error;
@@ -72,82 +77,83 @@ export default class PlaybackWorker {
         });
         const known = error instanceof Error ? KNOWN_PLAYER_ERRORS.get(error.message.trim().toLowerCase()) : undefined;
         if (known) {
-          throw new HttpError(known[0], known[1]);
+          throw new HttpError(known[0], t(locale, known[1]));
         }
 
-        throw new HttpError(502, 'Playback failed. Check the worker status before retrying.');
+        throw new HttpError(502, t(locale, 'playbackFailed'));
       }
     });
   }
 
   // eslint-disable-next-line complexity
-  private async authorize(request: PlaybackRequest) {
+  private async authorize(request: PlaybackRequest, locale: Locale) {
     if (!this.client.isReady()) {
-      throw new HttpError(503, 'Discord is not ready.');
+      throw new HttpError(503, t(locale, 'playbackDiscordNotReady'));
     }
 
     const guild = this.client.guilds.cache.get(request.guildId);
     if (!guild) {
-      throw new HttpError(404, 'Guild not available.');
+      throw new HttpError(404, t(locale, 'playbackGuildUnavailable'));
     }
 
     const member = await guild.members.fetch({user: request.userId, force: true});
     const voice = await guild.channels.fetch(request.voiceChannelId);
     const text = await guild.channels.fetch(request.textChannelId);
     if (!voice || voice.type !== ChannelType.GuildVoice) {
-      throw new HttpError(400, 'Orchestrated playback supports standard voice channels only; stage channels are not supported.');
+      throw new HttpError(400, t(locale, 'playbackStageUnsupported'));
     }
 
     if (!text || text.type !== ChannelType.GuildText) {
-      throw new HttpError(400, 'Run playback commands from a standard text channel, not a thread, forum or voice channel chat.');
+      throw new HttpError(400, t(locale, 'playbackTextChannelOnly'));
     }
 
     // Defense in depth: the guild channel manager should only return channels of this guild.
     if (voice.guildId !== guild.id || text.guildId !== guild.id) {
-      throw new HttpError(403, 'Channels must belong to the requested guild.');
+      throw new HttpError(403, t(locale, 'playbackChannelsWrongGuild'));
     }
 
     const bot = guild.members.me;
     if (!bot) {
-      throw new HttpError(503, 'Discord is not ready.');
+      throw new HttpError(503, t(locale, 'playbackDiscordNotReady'));
     }
 
     if (member.user.bot || member.voice.channelId !== voice.id
       || !voice.permissionsFor(member).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect])
       || !text.permissionsFor(member).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.UseApplicationCommands])) {
-      throw new HttpError(403, 'Voice membership or channel permissions changed.');
+      throw new HttpError(403, t(locale, 'playbackPermissionsChanged'));
     }
 
     if (!voice.permissionsFor(bot).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
-      throw new HttpError(403, 'The bot needs View Channel, Connect and Speak permissions in your voice channel.');
+      throw new HttpError(403, t(locale, 'playbackBotNeedsVoicePermissions'));
     }
 
     if (!text.permissionsFor(bot).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
-      throw new HttpError(403, 'The bot needs View Channel and Send Messages permissions in this text channel.');
+      throw new HttpError(403, t(locale, 'playbackBotNeedsTextPermissions'));
     }
 
     // Song announcements are sent as embeds.
     if (request.action === 'play' && !text.permissionsFor(bot).has(PermissionFlagsBits.EmbedLinks)) {
-      throw new HttpError(403, 'The bot needs the Embed Links permission in this text channel to announce songs.');
+      throw new HttpError(403, t(locale, 'playbackBotNeedsEmbedLinks'));
     }
 
     const connection = this.players.get(guild.id).voiceConnection;
     if (connection && connection.joinConfig.channelId !== voice.id) {
-      throw new HttpError(409, 'This bot is already assigned to another voice channel.');
+      throw new HttpError(409, t(locale, 'playbackAssignedElsewhere'));
     }
 
     if (!connection && request.action === 'play' && voice.userLimit > 0 && voice.members.size >= voice.userLimit
       && !voice.permissionsFor(bot).has(PermissionFlagsBits.MoveMembers)) {
-      throw new HttpError(403, 'Your voice channel is full, so the bot cannot join it.');
+      throw new HttpError(403, t(locale, 'playbackChannelFull'));
     }
 
     return {guild, member, text};
   }
 
-  private async apply(request: PlaybackRequest): Promise<PlaybackResult> {
-    const context = await this.authorize(request);
+  // eslint-disable-next-line complexity
+  private async apply(request: PlaybackRequest, locale: Locale): Promise<PlaybackResult> {
+    const context = await this.authorize(request, locale);
     const player = this.players.get(request.guildId);
-    let message = 'Command completed.';
+    let message = t(locale, 'playbackCommandCompleted');
     if (request.action === 'play') {
       const wasDisconnected = player.voiceConnection === null;
       const queueBefore = queueSignature(player);
@@ -159,7 +165,7 @@ export default class PlaybackWorker {
           shouldSplitChapters: request.split ?? false,
           skipCurrentTrack: request.skip ?? false,
           beforeEnqueue: async () => {
-            await this.authorize(request);
+            await this.authorize(request, locale);
           },
           interaction: {
             guild: context.guild,
@@ -189,64 +195,64 @@ export default class PlaybackWorker {
           requestId: request.requestId,
           error: describePlaybackError(error),
         });
-        message = 'Songs were added to the queue, but playback could not be confirmed. Check /queue before retrying.';
+        message = t(locale, 'playbackPartiallyApplied');
       }
     } else if (request.action === 'queue') {
       const pageSize = request.pageSize ?? (await getGuildSettings(request.guildId)).defaultQueuePageSize;
       const start = ((request.page ?? 1) - 1) * pageSize;
       const queue = player.getQueue();
       message = [
-        `Current: ${player.getCurrent()?.title.slice(0, 120) ?? 'none'}`,
-        `Queue: ${queue.length} tracks; page ${request.page ?? 1}`,
+        t(locale, 'playbackQueueCurrent', {title: player.getCurrent()?.title.slice(0, 120) ?? t(locale, 'playbackQueueNone')}),
+        t(locale, 'playbackQueueSummary', {count: queue.length, page: request.page ?? 1}),
         ...queue.slice(start, start + pageSize).map((song, index) => `${start + index + 1}. ${song.title.slice(0, 45)}`),
       ].join('\n');
     } else {
       if (player.voiceConnection === null) {
-        throw new HttpError(409, 'The bot is not connected to this voice channel.');
+        throw new HttpError(409, t(locale, 'playbackBotNotConnected'));
       }
 
       switch (request.action) {
         case 'pause':
           if (player.status === STATUS.IDLE) {
-            throw new HttpError(409, 'Nothing is playing.');
+            throw new HttpError(409, t(locale, 'playbackNothingPlaying'));
           }
 
           if (player.status === STATUS.PLAYING) {
             player.pause();
           }
 
-          message = 'Playback paused.';
+          message = t(locale, 'playbackPaused');
           break;
         case 'resume':
           await player.ensureVoiceConnectionReady();
-          await this.authorize(request);
+          await this.authorize(request, locale);
           if (player.status !== STATUS.PLAYING) {
             await player.play();
           }
 
-          message = 'Playback resumed.';
+          message = t(locale, 'playbackResumed');
           break;
         case 'skip':
           await player.forward(request.amount ?? 1);
-          message = 'Track skipped.';
+          message = t(locale, 'playbackSkipped');
           break;
         case 'stop':
           player.stop();
-          message = 'Playback stopped and queue cleared.';
+          message = t(locale, 'playbackStopped');
           break;
         case 'disconnect':
           player.disconnect();
-          message = 'Disconnected. Queue retained.';
+          message = t(locale, 'playbackDisconnected');
           break;
         case 'volume':
           if (request.volume !== undefined) {
             player.setVolume(request.volume);
           }
 
-          message = `Volume: ${player.getVolume()}%.`;
+          message = t(locale, 'playbackVolume', {volume: player.getVolume()});
           break;
         default:
-          throw new HttpError(400, 'Unsupported playback action.');
+          throw new HttpError(400, t(locale, 'playbackUnsupportedAction'));
       }
     }
 

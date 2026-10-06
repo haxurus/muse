@@ -3,250 +3,31 @@
 /*
  * Muse Control — vanilla, CSP-friendly client (no inline code, no external requests).
  * Every user- or Discord-provided value is rendered with textContent.
- * All copy lives in STRINGS so another locale can be added later.
+ * The page language comes from <html lang> (the server renders /it/... and /en/...);
+ * the copy is loaded from /assets/i18n/<lang>.json.
  */
 
-const STRINGS = {
-  it: {
-    title: {
-      home: 'Muse Control',
-      super: 'Super console · Muse Control',
-      guild: '{name} · Muse Control',
-    },
-    nav: {
-      label: 'Navigazione principale',
-      menu: 'Apri menu',
-      servers: 'Server',
-      super: 'Super console',
-      login: 'Accedi',
-      logout: 'Esci',
-    },
-    footer: {
-      credits: 'Muse © 2026 · Fatto da Haxurus',
-      tagline: 'self-hosted discord music',
-    },
-    loading: {
-      kicker: 'SESSIONE',
-      title: 'Verifica accesso in corso…',
-      text: 'Controllo la sessione Discord e i server associati al tuo account.',
-    },
-    home: {
-      kicker: 'DASHBOARD',
-      title: 'Gestisci Muse.',
-      intro: 'Accedi con Discord per configurare i music bot di Muse nei server che amministri: volume, playlist, auto-disconnect e gruppi di bot.',
-      connected: 'Connesso come',
-    },
-    login: {
-      kicker: 'ACCESSO',
-      title: 'Entra con il tuo account Discord.',
-      text: 'Vedrai soltanto i server che puoi amministrare e nei quali è presente almeno un bot Muse.',
-      button: 'Accedi con Discord',
-      newServerKicker: 'NUOVO SERVER',
-      newServerTitle: 'Muse non è ancora nel server?',
-      newServerText: 'Per ora i bot di Muse possono essere aggiunti a nuovi server solo dal proprietario del progetto.',
-      newServerButton: 'Scopri di più',
-      failed: 'Accesso con Discord non riuscito o annullato. Riprova.',
-      blocked: 'Accesso non consentito.',
-    },
-    invite: {
-      kicker: 'NUOVO SERVER · AGGIUNGI I BOT',
-      title: 'Aggiungi i bot a un server.',
-      text: 'Ogni bot ha il proprio invito Discord. Aggiungi solo quelli che servono al server.',
-      add: 'Aggiungi a un server',
-      empty: 'Nessun bot disponibile per l’invito.',
-      failed: 'Impossibile caricare l’elenco dei bot.',
-    },
-    servers: {
-      kicker: 'SERVER',
-      title: 'Scegli cosa amministrare',
-      text: 'Server in cui sei proprietario, amministratore o hai il permesso Gestisci server.',
-      empty: 'Nessun server amministrabile con Muse presente. Verifica i tuoi permessi Discord.',
-      bots: '{count} bot',
-      bot: '1 bot',
-      owner: 'Proprietario',
-      admin: 'Amministratore',
-    },
-    guild: {
-      back: 'Tutti i server',
-      sections: 'Sezioni',
-      access: 'Il tuo accesso',
-      accessOwner: 'OWNER',
-      accessAdmin: 'ADMIN',
-      subtitle: 'Configura uno, più o tutti i music bot presenti in questo server.',
-      loading: 'Caricamento…',
-      online: '{count} online',
-      error: 'Errore',
-      tabs: {
-        overview: 'Panoramica',
-        settings: 'Impostazioni',
-        groups: 'Gruppi',
-      },
-    },
-    overview: {
-      statBots: 'Bot nel server',
-      statOnline: 'Online',
-      statVoice: 'In vocale',
-      statGroups: 'Gruppi',
-      eyebrow: 'BOT',
-      title: 'Music bot nel server',
-      text: 'Stato di ogni worker Muse presente in questo server.',
-      empty: 'Nessun bot Muse raggiungibile in questo server.',
-      ready: 'Pronto',
-      notReady: 'Non pronto',
-      offline: 'Offline',
-      inVoice: 'In vocale',
-      idle: 'Inattivo',
-      volume: 'Volume {value}%',
-      playlist: 'Playlist {value}',
-      unavailable: 'Non raggiungibile · {error}',
-    },
-    selection: {
-      eyebrow: 'WORKER',
-      title: 'Selezione bot',
-      text: 'Le impostazioni e i gruppi agiscono sui bot selezionati.',
-      all: 'Seleziona tutti',
-      none: 'Nessuno',
-      empty: 'Nessun bot online da selezionare.',
-      summaryOne: '1 bot selezionato',
-      summaryMany: '{count} bot selezionati',
-    },
-    settings: {
-      eyebrow: 'CONFIGURAZIONE',
-      title: 'Impostazioni dei bot selezionati',
-      text: 'Attiva solo i campi che vuoi modificare: le altre impostazioni restano invariate.',
-      apply: 'Applica configurazione',
-      toggle: 'Modifica {label}',
-      mixed: 'Valori diversi',
-      choose: 'Seleziona…',
-      yes: 'Sì',
-      no: 'No',
-      chooseValue: 'Scegli un valore per {label}.',
-      enterValue: 'Inserisci un valore per {label}.',
-      outOfRange: '{label}: valore tra {min} e {max}.',
-      nothing: 'Attiva almeno un’impostazione da modificare.',
-      applied: 'Configurazione applicata.',
-      partial: 'Configurazione applicata con {count} bot non aggiornati.',
-      fields: {
-        defaultVolume: ['Volume predefinito', '0–100'],
-        playlistLimit: ['Limite playlist', '1–500 tracce'],
-        secondsToWaitAfterQueueEmpties: ['Auto-disconnect', 'Secondi dopo la coda vuota · 0 = mai'],
-        defaultQueuePageSize: ['Pagina coda', '1–30 elementi'],
-        leaveIfNoListeners: ['Esci senza ascoltatori', 'Lascia la vocale quando resta da solo'],
-        queueAddResponseEphemeral: ['Risposta privata', 'Conferma di accodamento visibile solo a chi la richiede'],
-        autoAnnounceNextSong: ['Annuncia il prossimo brano', 'Messaggio automatico alla traccia successiva'],
-        turnDownVolumeWhenPeopleSpeak: ['Abbassa al parlato', 'Riduce la musica quando qualcuno parla'],
-        turnDownVolumeWhenPeopleSpeakTarget: ['Volume durante il parlato', '0–100'],
-      },
-    },
-    groups: {
-      eyebrow: 'GRUPPI',
-      title: 'Gruppi del server',
-      text: 'Combinazioni riutilizzabili come 3+2 o 4+1, anche sovrapposte. Valgono solo per questo server.',
-      empty: 'Nessun gruppo creato per questo server.',
-      editorEyebrow: 'EDITOR',
-      newTitle: 'Nuovo gruppo',
-      newHint: 'Seleziona i bot qui sopra, assegna un nome e salva.',
-      editTitle: 'Modifica «{name}»',
-      editHint: 'La selezione qui sopra rappresenta i membri disponibili del gruppo.',
-      name: 'Nome del gruppo',
-      namePlaceholder: 'Es. Principali',
-      create: 'Crea gruppo',
-      save: 'Salva modifiche',
-      cancel: 'Annulla',
-      select: 'Seleziona',
-      edit: 'Modifica',
-      remove: 'Elimina',
-      dropOffline: 'Rimuovi non disponibili',
-      members: '{count} bot · {names}',
-      unavailable: '{count} non disponibili',
-      preserved: '{count} membri non disponibili verranno mantenuti nel gruppo.',
-      selected: 'Gruppo «{name}» selezionato.',
-      selectedPartial: 'Gruppo «{name}» selezionato: {count} membri non disponibili non sono stati selezionati.',
-      nameRequired: 'Inserisci un nome per il gruppo.',
-      membersRequired: 'Seleziona almeno un bot.',
-      created: 'Gruppo creato.',
-      updated: 'Gruppo aggiornato.',
-      deleted: 'Gruppo eliminato.',
-      confirmDelete: 'Eliminare il gruppo «{name}»? I bot e le loro configurazioni non verranno modificati.',
-    },
-    super: {
-      kicker: 'SUPER CONSOLE',
-      title: 'Controllo globale di Muse.',
-      intro: 'Stato dei worker, server collegati, blacklist e registro delle azioni super-admin.',
-      refresh: 'Aggiorna',
-      loading: 'Caricamento della super console…',
-      denied: 'Accesso negato. Quest’area è riservata al super-admin configurato.',
-      metricBots: 'Bot online',
-      metricGuilds: 'Server collegati',
-      metricPlayers: 'Player attivi',
-      metricBlocks: 'Blacklist',
-      botsKicker: 'BOT',
-      botsTitle: 'Stato dei worker',
-      botsText: 'Un worker per bot Discord. Gli inviti usano l’application ID di ciascun bot.',
-      noBots: 'Nessun worker configurato.',
-      ready: 'Pronto',
-      notReady: 'Non pronto',
-      offline: 'Offline',
-      botMeta: '{guilds} server · {players} player',
-      uptime: 'Uptime {value}',
-      guildsKicker: 'DISCORD',
-      guildsTitle: 'Server collegati',
-      guildsText: 'Tutti i server in cui è presente almeno un bot Muse.',
-      noGuilds: 'Nessun server collegato.',
-      owner: 'Owner {id}',
-      members: '{count} membri',
-      blocked: 'Bloccato',
-      leave: 'Fai uscire',
-      blockLeave: 'Blocca ed espelli',
-      confirmLeave: 'Far uscire tutti i bot Muse da «{name}»?',
-      confirmBlock: 'Bloccare «{name}» e far uscire tutti i bot Muse?',
-      blockReasonDefault: 'Bloccato dalla super console',
-      left: 'Uscita completata da {count} bot.',
-      leftPartial: 'Uscita completata da {left} bot · {failed} non riusciti.',
-      blocksKicker: 'POLICY',
-      blocksTitle: 'Blacklist',
-      blocksText: 'Gli utenti bloccati non possono accedere alla dashboard né usare i bot; i server bloccati vengono abbandonati.',
-      userId: 'User ID Discord',
-      guildId: 'Server ID Discord',
-      reason: 'Motivo (facoltativo)',
-      blockUser: 'Blocca utente',
-      blockGuild: 'Blocca server',
-      invalidId: 'Inserisci un ID Discord valido (17–20 cifre).',
-      reasonTooLong: 'Il motivo può contenere al massimo 500 caratteri.',
-      noBlocks: 'Nessun elemento in blacklist.',
-      user: 'Utente',
-      guild: 'Server',
-      unblock: 'Sblocca',
-      confirmUnblock: 'Rimuovere {kind} {id} dalla blacklist?',
-      blockedDone: '{kind} {id} bloccato.',
-      blockedPartial: '{kind} {id} bloccato · {failed} bot non aggiornati.',
-      unblocked: '{kind} {id} sbloccato.',
-      by: 'da {name}',
-      auditKicker: 'AUDIT',
-      auditTitle: 'Azioni super-admin',
-      auditText: 'Ultime azioni eseguite dalla super console.',
-      noAudit: 'Nessuna azione registrata.',
-      outcome: {
-        ok: 'OK',
-        partial: 'Parziale',
-        failed: 'Fallita',
-      },
-    },
-    errors: {
-      generic: 'Richiesta non riuscita.',
-      forbidden: 'Operazione non consentita. Ricarica la pagina e riprova.',
-      rateLimited: 'Troppe modifiche ravvicinate: riprova tra poco.',
-      unavailable: 'Servizio momentaneamente non disponibile. Riprova tra poco.',
-      notFound: 'Elemento non trovato.',
-    },
-  },
-};
-
-const LOCALE = 'it';
+const LOCALES = ['it', 'en'];
+const LOCALE = document.documentElement.lang === 'it' ? 'it' : 'en';
+const INTL_LOCALE = LOCALE === 'it' ? 'it-IT' : 'en-GB';
 const SNOWFLAKE = /^\d{17,20}$/;
 const DISCORD_CDN = 'https://cdn.discordapp.com/';
 
-const lookup = key => key.split('.').reduce((node, part) => (node && typeof node === 'object' ? node[part] : undefined), STRINGS[LOCALE]);
+let STRINGS = {};
+
+const loadStrings = async () => {
+  try {
+    const response = await fetch(`/assets/i18n/${LOCALE}.json`, {credentials: 'same-origin'});
+    if (response.ok) {
+      const body = await response.json();
+      if (body && typeof body === 'object') STRINGS = body;
+    }
+  } catch {
+    STRINGS = {};
+  }
+};
+
+const lookup = key => key.split('.').reduce((node, part) => (node && typeof node === 'object' ? node[part] : undefined), STRINGS);
 
 const t = (key, params = {}) => {
   const value = lookup(key);
@@ -257,7 +38,9 @@ const t = (key, params = {}) => {
   return value.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
 };
 
+/** Same fields and limits as the worker whitelist; `locale` is the bot language. */
 const SETTINGS = [
+  {key: 'locale', type: 'select', options: ['en', 'it']},
   {key: 'defaultVolume', type: 'number', min: 0, max: 100},
   {key: 'playlistLimit', type: 'number', min: 1, max: 500},
   {key: 'secondsToWaitAfterQueueEmpties', type: 'number', min: 0, max: 86400},
@@ -269,8 +52,8 @@ const SETTINGS = [
   {key: 'turnDownVolumeWhenPeopleSpeakTarget', type: 'number', min: 0, max: 100},
 ];
 
-const settingLabel = definition => STRINGS[LOCALE].settings.fields[definition.key][0];
-const settingHint = definition => STRINGS[LOCALE].settings.fields[definition.key][1];
+const settingLabel = definition => t(`settings.fields.${definition.key}.label`);
+const settingHint = definition => t(`settings.fields.${definition.key}.hint`);
 
 /* ---------- DOM helpers ---------- */
 
@@ -378,12 +161,12 @@ const setMessage = (node, message, kind) => {
   node.className = `form-message ${kind || 'muted'}`;
 };
 
-const formatNumber = value => new Intl.NumberFormat('it-IT').format(Number(value) || 0);
+const formatNumber = value => new Intl.NumberFormat(INTL_LOCALE).format(Number(value) || 0);
 
 const formatDate = value => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return new Intl.DateTimeFormat('it-IT', {dateStyle: 'short', timeStyle: 'medium'}).format(date);
+  return new Intl.DateTimeFormat(INTL_LOCALE, {dateStyle: 'short', timeStyle: 'medium'}).format(date);
 };
 
 const formatUptime = seconds => {
@@ -391,9 +174,9 @@ const formatUptime = seconds => {
   const days = Math.floor(total / 86400);
   const hours = Math.floor((total % 86400) / 3600);
   const minutes = Math.floor((total % 3600) / 60);
-  if (days > 0) return `${days} g ${hours} h`;
-  if (hours > 0) return `${hours} h ${minutes} m`;
-  return `${minutes} m`;
+  if (days > 0) return t('super.uptimeDays', {days, hours});
+  if (hours > 0) return t('super.uptimeHours', {hours, minutes});
+  return t('super.uptimeMinutes', {minutes});
 };
 
 /* ---------- API ---------- */
@@ -454,17 +237,29 @@ const handleFailure = (error, report) => {
 
 /* ---------- Routing ---------- */
 
-/** The signed-in app (server list) lives at /dashboard; "/" is the public home page. */
-const DASHBOARD_PATH = '/dashboard';
+/** Every view lives under the language prefix: /it/dashboard, /en/server/:id, ... */
+const BASE = `/${LOCALE}`;
+const DASHBOARD_PATH = `${BASE}/dashboard`;
+const SUPER_PATH = `${BASE}/super`;
 const NEW_SERVER_ANCHOR = 'nuovo-server';
+const LANGUAGE_PREFIX = /^\/(?:it|en)(?=\/|$)/;
 
 const currentRoute = () => {
   const path = window.location.pathname;
   if (path === DASHBOARD_PATH) return {view: 'home'};
-  if (path === '/super') return {view: 'super'};
-  const match = /^\/server\/(\d{17,20})$/.exec(path);
+  if (path === SUPER_PATH) return {view: 'super'};
+  const match = /^\/(?:it|en)\/server\/(\d{17,20})$/.exec(path);
   if (match) return {view: 'guild', guildId: match[1]};
   return {view: 'home'};
+};
+
+/** Points the IT/EN switcher links at the current view in the other language. */
+const updateLanguageLinks = () => {
+  const rest = window.location.pathname.replace(LANGUAGE_PREFIX, '');
+  for (const link of document.querySelectorAll('a[data-lang-link]')) {
+    const target = link.dataset.langLink;
+    if (LOCALES.includes(target)) link.setAttribute('href', `/${target}${rest}`);
+  }
 };
 
 const navigate = path => {
@@ -499,6 +294,7 @@ const updateChrome = route => {
 const render = () => {
   const route = currentRoute();
   updateChrome(route);
+  updateLanguageLinks();
 
   if (!session) {
     document.title = t('title.home');
@@ -542,7 +338,7 @@ const renderUserCard = () => {
 
 const guildCard = guild => {
   const link = el('a', 'guild-card');
-  link.href = `/server/${encodeURIComponent(guild.id)}`;
+  link.href = `${BASE}/server/${encodeURIComponent(guild.id)}`;
   link.dataset.nav = '';
 
   const copy = el('div', 'guild-card-copy');
@@ -585,7 +381,7 @@ const loadInvites = async () => {
 
     const tiles = (Array.isArray(bots) ? bots : []).map(bot => {
       const tile = el('a', 'invite-tile');
-      tile.href = `/invite/${encodeURIComponent(bot.workerId)}`;
+      tile.href = `/invite/${encodeURIComponent(bot.workerId)}?lang=${LOCALE}`;
       const copy = el('div');
       copy.append(
         el('strong', '', bot.bot ? bot.bot.username : bot.workerId),
@@ -699,7 +495,7 @@ const renderOverview = () => {
       );
     } else {
       row.append(identity(null, worker.workerId, worker.workerId, {round: true}));
-      meta.append(el('span', 'mono', t('overview.unavailable', {error: worker.error || 'Error'})));
+      meta.append(el('span', 'mono', t('overview.unavailable', {error: worker.error || t('guild.error')})));
       tags.append(state(t('overview.offline'), 'danger'));
     }
 
@@ -802,7 +598,17 @@ const settingControl = definition => {
   mixed.hidden = true;
 
   let input;
-  if (definition.type === 'boolean') {
+  if (definition.type === 'select') {
+    input = document.createElement('select');
+    const empty = el('option', '', t('settings.choose'));
+    empty.value = '';
+    input.append(empty);
+    for (const value of definition.options) {
+      const option = el('option', '', t(`settings.localeOptions.${value}`));
+      option.value = value;
+      input.append(option);
+    }
+  } else if (definition.type === 'boolean') {
     input = document.createElement('select');
     const empty = el('option', '', t('settings.choose'));
     empty.value = '';
@@ -866,6 +672,12 @@ const collectSettings = () => {
     if (!enabledSettings.has(definition.key)) continue;
     const input = settingRow(definition.key).querySelector('.setting-input');
     const label = settingLabel(definition);
+
+    if (definition.type === 'select') {
+      if (!definition.options.includes(input.value)) throw new Error(t('settings.chooseValue', {label}));
+      settings[definition.key] = input.value;
+      continue;
+    }
 
     if (definition.type === 'boolean') {
       if (input.value === '') throw new Error(t('settings.chooseValue', {label}));
@@ -1173,7 +985,7 @@ const renderSuperWorker = worker => {
   const actions = el('div', 'row-actions');
   if (worker.bot) {
     const invite = el('a', 'button button-secondary button-sm', t('invite.add'));
-    invite.href = `/invite/${encodeURIComponent(worker.id)}`;
+    invite.href = `/invite/${encodeURIComponent(worker.id)}?lang=${LOCALE}`;
     actions.append(invite);
   } else {
     const unavailable = el('button', 'button button-secondary button-sm', t('invite.add'));
@@ -1381,7 +1193,7 @@ const submitBlockForm = async form => {
 
 const logout = async () => {
   try {
-    await fetch('/auth/logout', {
+    await fetch(`/auth/logout?lang=${LOCALE}`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {'x-csrf-token': session ? session.csrfToken : ''},
@@ -1466,18 +1278,15 @@ const showLoginMessage = () => {
 };
 
 const boot = async () => {
+  const sessionRequest = api('/api/session').catch(() => null);
+  await loadStrings();
   applyTranslations();
   renderSettingsForm();
   resetGroupEditor();
   wire();
   showLoginMessage();
 
-  try {
-    session = await api('/api/session');
-  } catch {
-    session = null;
-  }
-
+  session = await sessionRequest;
   render();
 };
 

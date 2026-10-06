@@ -4,12 +4,15 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 
 @injectable()
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('disconnect')
-    .setDescription('pause and disconnect Muse');
+    .setDescription('pause and disconnect Muse')
+    .setDescriptionLocalizations({it: 'metti in pausa e disconnetti Muse'});
 
   public requiresVC = true;
 
@@ -23,11 +26,11 @@ export default class implements Command {
     const player = this.playerManager.get(interaction.guild!.id);
 
     if (!player.voiceConnection) {
-      throw new Error('not connected');
+      throw new UserError('notConnected');
     }
 
     player.disconnect();
 
-    await interaction.reply('u betcha, disconnected');
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'disconnectDone'));
   }
 }

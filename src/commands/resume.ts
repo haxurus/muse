@@ -1,6 +1,8 @@
 import {SlashCommandBuilder} from '@discordjs/builders';
 import {inject, injectable} from 'inversify';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 import {TYPES} from '../types.js';
 import PlayerManager from '../managers/player.js';
 import {STATUS} from '../services/player.js';
@@ -12,7 +14,8 @@ import {ChatInputCommandInteraction, GuildMember} from 'discord.js';
 export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('resume')
-    .setDescription('resume playback');
+    .setDescription('resume playback')
+    .setDescriptionLocalizations({it: 'riprendi la riproduzione'});
 
   public requiresVC = true;
 
@@ -26,24 +29,25 @@ export default class implements Command {
     const player = this.playerManager.get(interaction.guild!.id);
     const [targetVoiceChannel] = getMemberVoiceChannel(interaction.member as GuildMember) ?? getMostPopularVoiceChannel(interaction.guild!);
     if (player.status === STATUS.PLAYING) {
-      throw new Error('already playing, give me a song name');
+      throw new UserError('resumeAlreadyPlaying');
     }
 
     // Must be resuming play
     if (!player.getCurrent()) {
-      throw new Error('nothing to play');
+      throw new UserError('resumeNothingToPlay');
     }
 
     await interaction.deferReply({ephemeral: true});
     await player.connect(targetVoiceChannel);
     await player.play();
     if (!player.getCurrent()) {
-      throw new Error('no playable songs found');
+      throw new UserError('noPlayableSongsFound');
     }
 
+    const locale = await getGuildLocale(interaction.guild!.id);
     await interaction.followUp({
-      content: 'the stop-and-go light is now green',
-      embeds: [buildPlayingMessageEmbed(player)],
+      content: t(locale, 'resumeDone'),
+      embeds: [buildPlayingMessageEmbed(player, locale)],
     });
     await interaction.deleteReply().catch(() => undefined);
   }

@@ -34,6 +34,7 @@ import {destroyVoiceConnection, recoverVoiceConnection} from './voice-connection
 import debug from '../utils/debug.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {buildPlayingMessageEmbed} from '../utils/build-embed.js';
+import {localeOf} from '../i18n/index.js';
 import {getHttpStreamInputOptions} from '../utils/http-stream.js';
 import {getSoundCloudMediaSource, getYouTubeMediaSource, YtDlpMediaUnavailableError} from '../utils/yt-dlp.js';
 import {Setting} from '@prisma/client';
@@ -1066,7 +1067,7 @@ export default class {
       const {autoAnnounceNextSong} = settings;
       if (autoAnnounceNextSong && this.currentChannel) {
         await this.currentChannel.send({
-          embeds: [buildPlayingMessageEmbed(this)],
+          embeds: [buildPlayingMessageEmbed(this, localeOf(settings))],
         });
       }
     }

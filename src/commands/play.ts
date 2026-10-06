@@ -30,27 +30,36 @@ export default class implements Command {
     const queryDescription = thirdParty === undefined
       ? 'YouTube URL or search query'
       : 'YouTube URL, Spotify URL, or search query';
+    const queryDescriptionIt = thirdParty === undefined
+      ? 'URL di YouTube o testo da cercare'
+      : 'URL di YouTube o Spotify, o testo da cercare';
 
     this.slashCommand = new SlashCommandBuilder()
       .setName('play')
       .setDescription('play a song')
+      .setDescriptionLocalizations({it: 'riproduci un brano'})
       .addStringOption(option => option
         .setName('query')
         .setDescription(queryDescription)
+        .setDescriptionLocalizations({it: queryDescriptionIt})
         .setAutocomplete(true)
         .setRequired(true))
       .addBooleanOption(option => option
         .setName('immediate')
-        .setDescription('add track to the front of the queue'))
+        .setDescription('add track to the front of the queue')
+        .setDescriptionLocalizations({it: 'aggiungi il brano in cima alla coda'}))
       .addBooleanOption(option => option
         .setName('shuffle')
-        .setDescription('shuffle the input if you\'re adding multiple tracks'))
+        .setDescription('shuffle the input if you\'re adding multiple tracks')
+        .setDescriptionLocalizations({it: 'mescola i brani se ne aggiungi più di uno'}))
       .addBooleanOption(option => option
         .setName('split')
-        .setDescription('if a track has chapters, split it'))
+        .setDescription('if a track has chapters, split it')
+        .setDescriptionLocalizations({it: 'se un brano ha capitoli, dividilo'}))
       .addBooleanOption(option => option
         .setName('skip')
-        .setDescription('skip the currently playing track'));
+        .setDescription('skip the currently playing track')
+        .setDescriptionLocalizations({it: 'salta il brano in riproduzione'}));
   }
 
   public async execute(interaction: ChatInputCommandInteraction): Promise<void> {

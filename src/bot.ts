@@ -16,7 +16,9 @@ import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
 import {handlePlaybackInteraction} from './playback/controller.js';
-import {BLOCKED_USER_MESSAGE, blocklist} from './control/blocklist.js';
+import {blockedUserMessage, blocklist} from './control/blocklist.js';
+import {DEFAULT_LOCALE, UserError, localeFromDiscord, localizeEnglishMessage, t, type Locale} from './i18n/index.js';
+import {getGuildLocale} from './i18n/guild-locale.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -36,7 +38,6 @@ const sanitizeErrorForLog = (error: unknown) => {
   return `${name}: ${detail || 'unknown error'}`;
 };
 
-const GENERIC_USER_ERROR = 'something went wrong, please try again later';
 const MAX_USER_ERROR_LENGTH = 200;
 
 // Intentional command errors are short, plain sentences. Long or diagnostic-looking
@@ -51,10 +52,15 @@ const looksInternal = (error: unknown, detail: string) => (
   || /\bE[A-Z]{3,}\b/.test(detail)
 );
 
-const getUserSafeErrorMessage = (error: unknown) => {
+const getUserSafeErrorMessage = (error: unknown, locale: Locale = DEFAULT_LOCALE) => {
+  // Intentional errors carry a message key and are rendered in the guild's language.
+  if (error instanceof UserError) {
+    return error.localize(locale);
+  }
+
   const detail = sanitizeErrorDetail(error);
 
-  return !detail || looksInternal(error, detail) ? GENERIC_USER_ERROR : detail;
+  return !detail || looksInternal(error, detail) ? t(locale, 'genericError') : localizeEnglishMessage(locale, detail);
 };
 
 const logListenerFailures = <Args extends unknown[]>(
@@ -116,19 +122,24 @@ export default class {
     // Register event handlers
     // eslint-disable-next-line complexity
     this.client.on('interactionCreate', async interaction => {
+      // Read lazily: most successful interactions never need the guild's locale here.
+      const resolveLocale = async (): Promise<Locale> => (
+        interaction.guildId ? getGuildLocale(interaction.guildId) : localeFromDiscord(interaction.locale)
+      );
+
       try {
         // Users blocked from the super console cannot use any command, button or autocomplete.
         if (blocklist.isUserBlocked(interaction.user.id)) {
           if (interaction.isAutocomplete()) {
             await interaction.respond([]);
           } else if (interaction.isRepliable()) {
-            await interaction.reply({content: BLOCKED_USER_MESSAGE, ephemeral: true});
+            await interaction.reply({content: blockedUserMessage(await resolveLocale()), ephemeral: true});
           }
 
           return;
         }
 
-        if (await handlePlaybackInteraction(interaction, this.config)) {
+        if (await handlePlaybackInteraction(interaction, this.config, getGuildLocale)) {
           return;
         }
 
@@ -140,13 +151,15 @@ export default class {
           }
 
           if (!interaction.guild) {
-            await interaction.reply(errorMsg('you can\'t use this bot in a DM'));
+            const locale = localeFromDiscord(interaction.locale);
+            await interaction.reply(errorMsg(t(locale, 'dmNotAllowed'), locale));
             return;
           }
 
           const requiresVC = command.requiresVC instanceof Function ? command.requiresVC(interaction) : command.requiresVC;
           if (requiresVC && interaction.member && !isUserInVoice(interaction.guild, interaction.member.user as User)) {
-            await interaction.reply({content: errorMsg('gotta be in a voice channel'), ephemeral: true});
+            const locale = await getGuildLocale(interaction.guild.id);
+            await interaction.reply({content: errorMsg(t(locale, 'notInVoiceChannel'), locale), ephemeral: true});
             return;
           }
 
@@ -183,14 +196,16 @@ export default class {
             ? `button:${interaction.customId}`
             : interaction.type.toString();
         console.error(`Discord interaction failed (${interactionName}, guild=${interaction.guildId ?? 'dm'}, channel=${interaction.channelId ?? 'unknown'}, user=${interaction.user.id}): ${sanitizedError}`);
-        const userSafeError = new Error(getUserSafeErrorMessage(error));
-
         // This can fail if the message was deleted, and we don't want to crash the whole bot
         try {
-          if ((interaction.isCommand() || interaction.isButton()) && (interaction.replied || interaction.deferred)) {
-            await interaction.editReply(errorMsg(userSafeError));
-          } else if (interaction.isCommand() || interaction.isButton()) {
-            await interaction.reply({content: errorMsg(userSafeError), ephemeral: true});
+          if (interaction.isCommand() || interaction.isButton()) {
+            const locale = await resolveLocale();
+            const content = errorMsg(getUserSafeErrorMessage(error, locale), locale);
+            if (interaction.replied || interaction.deferred) {
+              await interaction.editReply(content);
+            } else {
+              await interaction.reply({content, ephemeral: true});
+            }
           }
         } catch {}
       }

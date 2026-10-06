@@ -3,6 +3,8 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
+import {UserError, t} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 import {SlashCommandBuilder} from '@discordjs/builders';
 
 @injectable()
@@ -10,9 +12,11 @@ export default class implements Command {
   public readonly slashCommand = new SlashCommandBuilder()
     .setName('volume')
     .setDescription('set current player volume level')
+    .setDescriptionLocalizations({it: 'imposta il volume del player'})
     .addIntegerOption(option =>
       option.setName('level')
         .setDescription('volume percentage (0 is muted, 100 is max & default)')
+        .setDescriptionLocalizations({it: 'percentuale del volume (0 è muto, 100 è il massimo e il predefinito)'})
         .setMinValue(0)
         .setMaxValue(100)
         .setRequired(true),
@@ -32,11 +36,11 @@ export default class implements Command {
     const currentSong = player.getCurrent();
 
     if (!currentSong) {
-      throw new Error('nothing is playing');
+      throw new UserError('nothingIsPlaying');
     }
 
     const level = interaction.options.getInteger('level') ?? 100;
     player.setVolume(level);
-    await interaction.reply(`Set volume to ${level}%`);
+    await interaction.reply(t(await getGuildLocale(interaction.guild!.id), 'volumeDone', {level}));
   }
 }

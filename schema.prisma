@@ -34,6 +34,7 @@ model Setting {
   defaultQueuePageSize                Int      @default(10)
   turnDownVolumeWhenPeopleSpeak       Boolean  @default(false)
   turnDownVolumeWhenPeopleSpeakTarget Int      @default(20)
+  locale                              String   @default("en")
   createdAt                           DateTime @default(now())
   updatedAt                           DateTime @updatedAt
 }
