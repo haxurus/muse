@@ -260,7 +260,7 @@ stop_fleet() {
 }
 
 wait_healthy() {
-  local deadline=$((SECONDS + 240)) service cid info state health all_healthy
+  local deadline=$((SECONDS + 240)) service cid info state health restarts all_healthy
   while (( SECONDS < deadline )); do
     all_healthy=1
     for service in "${SERVICES[@]}"; do
@@ -271,11 +271,16 @@ wait_healthy() {
         continue
       fi
 
-      info="$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || true)"
-      state="${info%% *}"
-      health="${info#* }"
+      info="$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}' "$cid" 2>/dev/null || true)"
+      read -r state health restarts <<<"$info" || true
       if [[ "$state" == "exited" || "$state" == "dead" ]]; then
         echo "$service entered $state state." >&2
+        return 1
+      fi
+      # A service that exits during startup (e.g. an invalid Discord token) is
+      # restarted by Docker and may never be seen as "exited"; any restart fails.
+      if [[ "$state" == "restarting" || "${restarts:-0}" != "0" ]]; then
+        echo "$service is restarting (it crashed during startup)." >&2
         return 1
       fi
 
@@ -364,6 +369,70 @@ prune_backups() {
   done < <(find "$BACKUPS" -maxdepth 1 -type f -name 'muse-*.tar.gz' -mtime +14 -print0)
 }
 
+# --- Image pruning and disk guard -------------------------------------------
+
+IMAGE_REPO=ghcr.io/haxurus/muse
+DISK_PRUNE_BELOW_KB=$((5 * 1024 * 1024))
+DISK_REFUSE_BELOW_KB=$((3 * 1024 * 1024))
+
+# Image references a rollback can still need: the current and previous release,
+# plus any reference passed by the caller (e.g. the digest being deployed).
+keep_refs() {
+  local ref
+  current_image
+  if [[ -s "$PREVIOUS" ]]; then
+    cat "$PREVIOUS"
+  fi
+  for ref in "$@"; do
+    [[ -n "$ref" ]] && printf '%s\n' "$ref"
+  done
+  return 0
+}
+
+# Every release pulls a multi-arch image of several hundred MB that was never
+# removed. Delete Muse images that belong to neither kept release. Only the
+# ghcr.io/haxurus/muse repository is touched; images used by a container are
+# refused by Docker and skipped.
+prune_images() {
+  local keep ref
+  keep="$(keep_refs "$@")"
+  while IFS= read -r ref; do
+    [[ "$ref" == "$IMAGE_REPO"@sha256:* ]] || continue
+    grep -Fxq -- "$ref" <<<"$keep" && continue
+    if docker image rm "$ref" >/dev/null 2>&1; then
+      echo "Removed old image $ref"
+    fi
+  done < <(docker image ls --no-trunc --format '{{.Repository}}@{{.Digest}}' "$IMAGE_REPO" 2>/dev/null || true)
+}
+
+# Free space (KiB) of the fullest filesystem among Docker's data root and the
+# Muse data/backup directory; empty if it cannot be determined.
+free_kb() {
+  local path value min=""
+  for path in /var/lib/docker "$BASE"; do
+    value="$(df -Pk "$path" 2>/dev/null | awk 'NR == 2 { print $4 }')"
+    [[ "$value" =~ ^[0-9]+$ ]] || continue
+    if [[ -z "$min" || "$value" -lt "$min" ]]; then
+      min="$value"
+    fi
+  done
+  printf '%s' "$min"
+}
+
+# Refuse to pull a release and take its pre-deploy backup on a nearly full
+# disk: below 5 GiB old images are pruned first, below 3 GiB nothing starts.
+ensure_disk_space() {
+  local available
+  available="$(free_kb)"
+  [[ -n "$available" ]] || return 0
+  [[ "$available" -ge "$DISK_PRUNE_BELOW_KB" ]] && return 0
+  echo "Low disk space ($((available / 1024)) MiB free): pruning old Muse images." >&2
+  prune_images "$@"
+  available="$(free_kb)"
+  [[ -z "$available" || "$available" -ge "$DISK_REFUSE_BELOW_KB" ]] \
+    || die 1 "Less than 3 GiB free ($((available / 1024)) MiB) on Docker or $BASE; free space before deploying."
+}
+
 # --- Commands --------------------------------------------------------------
 
 current_image() {
@@ -387,6 +456,7 @@ deploy_image() {
 
   validate_runtime_config
   require_edge_network
+  ensure_disk_space "$image" "$old"
   docker pull "$image"
 
   # 1. Stage and validate the release's own Compose bundle before touching anything.
@@ -421,6 +491,7 @@ deploy_image() {
     fi
     write_state "$CURRENT" "$image"
     prune_backups
+    prune_images "$image"
     echo "Muse dashboard, orchestrator and all five workers deployed successfully."
     return 0
   fi
@@ -460,6 +531,7 @@ rollback() {
   ensure_dirs
 
   validate_config_set "$PREVIOUS_CONFIG/docker-compose.yml" "$PREVIOUS_CONFIG/overlays" "$target"
+  ensure_disk_space "$target" "$current"
   docker pull "$target"
 
   make_tmp_dir config-snapshot
@@ -488,6 +560,8 @@ rollback() {
     mv -- "$PREVIOUS_CONFIG" "$retired/target-config"
     [[ -n "$current" ]] && printf '%s\n' "$current" > "$retired/rolled-back-image"
     printf '%s\n' "$safety" > "$retired/safety-backup"
+    # The release just rolled back from stays on disk as the other kept image.
+    prune_images "$current"
     echo "Muse fleet rollback completed. Safety backup of the replaced release: $safety"
     return 0
   fi

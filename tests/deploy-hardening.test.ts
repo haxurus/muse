@@ -77,6 +77,29 @@ describe('deploy tooling', () => {
     expect(muse).toContain('muse-rollback-safety');
   });
 
+  it('prunes old Muse images and guards disk space before pulling a release', async () => {
+    const muse = await read('ops/muse-deploy');
+    const deployBody = muse.slice(muse.indexOf('deploy_image() {'), muse.indexOf('rollback() {'));
+    const rollbackBody = muse.slice(muse.indexOf('rollback() {'), muse.indexOf('status() {'));
+
+    expect(muse).toContain('IMAGE_REPO=ghcr.io/haxurus/muse');
+    expect(muse).toContain('DISK_PRUNE_BELOW_KB=$((5 * 1024 * 1024))');
+    expect(muse).toContain('DISK_REFUSE_BELOW_KB=$((3 * 1024 * 1024))');
+    expect(deployBody.indexOf('ensure_disk_space "$image" "$old"'))
+      .toBeLessThan(deployBody.indexOf('docker pull "$image"'));
+    expect(deployBody.indexOf('prune_images "$image"'))
+      .toBeGreaterThan(deployBody.indexOf('write_state "$CURRENT" "$image"'));
+    expect(rollbackBody.indexOf('ensure_disk_space "$target" "$current"'))
+      .toBeLessThan(rollbackBody.indexOf('docker pull "$target"'));
+    expect(rollbackBody).toContain('prune_images "$current"');
+  });
+
+  it('fails fast when a service restarts during startup', async () => {
+    const muse = await read('ops/muse-deploy');
+    expect(muse).toContain('{{.RestartCount}}');
+    expect(muse).toContain('"$state" == "restarting"');
+  });
+
   it('limits the deploy account to the three forced-command operations', async () => {
     const install = await read('ops/install-vps.sh');
     const entrypoint = await read('ops/muse-deploy-entrypoint');
