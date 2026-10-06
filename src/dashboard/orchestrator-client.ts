@@ -87,6 +87,11 @@ export const actorName = (username: string): string => {
   return result === '' ? 'unknown' : result;
 };
 
+export type StatusChannelUpdate = {
+  channelId: string | null;
+  mentionRoleIds?: string[];
+};
+
 export type GuildSettingsUpdate = {
   workerIds?: string[];
   settings: Record<string, unknown>;
@@ -265,6 +270,35 @@ export default class OrchestratorClient {
       actorOptions(this.config.orchestratorToken, actor),
     ).text());
     return parseOptionalJson(body);
+  }
+
+  async superStatusChannel(actor: SuperActor): Promise<unknown> {
+    return call(async () => got.get(
+      `${this.config.orchestratorUrl}/v1/super/status-channel`,
+      actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
+  }
+
+  /** `channelId: null` disables the status channel; omitted `mentionRoleIds` keeps the current roles. */
+  async superSetStatusChannel(body: StatusChannelUpdate, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/super/status-channel`,
+      {
+        ...actorOptions(this.config.orchestratorToken, actor),
+        json: body,
+      },
+    ).json<unknown>());
+  }
+
+  async superTestStatusChannel(actor: SuperActor): Promise<unknown> {
+    return call(async () => got.post(
+      `${this.config.orchestratorUrl}/v1/super/status-channel/test`,
+      {
+        ...actorOptions(this.config.orchestratorToken, actor),
+        // Every bot fetches the channel and posts a message; the orchestrator waits up to 10 s per worker.
+        timeout: {request: 15_000},
+      },
+    ).json<unknown>());
   }
 
   async guildWorkers(guildId: string): Promise<OrchestratorGuildWorkers> {

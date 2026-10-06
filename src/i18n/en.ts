@@ -206,6 +206,14 @@ export const EN_MESSAGES = {
   playbackNoPlayableSongs: 'No playable songs were found for that query.',
   playbackNoSongToSkip: 'There is no song to skip to.',
   playbackQueueEmpty: 'The queue is empty.',
+
+  // Bot status channel (posted by each bot; see docs/SUPER_CONSOLE.md)
+  statusOnlineTitle: 'Bot started',
+  statusOnlineDescription: 'Bot connected as {tag}.',
+  statusTestTitle: 'Test message',
+  statusTestDescription: 'Status channel test sent by {tag}.',
+  statusFieldAuthor: 'Action author',
+  statusFieldDetails: 'Details',
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;

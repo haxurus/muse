@@ -9,6 +9,8 @@ import {handlePlaybackProxy} from '../playback/transport.js';
 import {assertGuildId} from '../control/snowflake.js';
 import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS} from './super-console.js';
 import {AuditStore, BlockStore} from './super-store.js';
+import {PlatformSettingsStore} from './platform-store.js';
+import type {WorkerPlatformConfig} from '../control/types.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -27,6 +29,7 @@ export default class OrchestratorServer {
   private readonly workers: WorkerClient[];
   private readonly groups: GuildGroupStore;
   private readonly superConsole: SuperConsole;
+  private readonly platform: PlatformSettingsStore;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
@@ -35,10 +38,12 @@ export default class OrchestratorServer {
       new Set(config.workers.map(worker => worker.id)),
     );
     const stateDirectory = path.dirname(config.groupsFile);
+    this.platform = new PlatformSettingsStore(config.platformFile ?? path.join(stateDirectory, 'platform-settings.json'));
     this.superConsole = new SuperConsole(
       this.workers,
       new BlockStore(config.blocksFile ?? path.join(stateDirectory, 'blocks.json')),
       new AuditStore(config.auditFile ?? path.join(stateDirectory, 'super-audit.json')),
+      this.platform,
     );
   }
 
@@ -91,12 +96,17 @@ export default class OrchestratorServer {
         return;
       }
 
+      const segments = getPathSegments(request);
+      if (segments.join('/') === 'v1/worker/config') {
+        sendJson(response, 200, this.workerConfig(request));
+        return;
+      }
+
       if (!hasBearerToken(request, this.config.apiToken)) {
         sendJson(response, 401, {error: 'unauthorized'});
         return;
       }
 
-      const segments = getPathSegments(request);
       const superResult = await this.superConsole.route(request, segments);
       if (superResult) {
         sendJson(response, superResult.statusCode, superResult.body);
@@ -181,6 +191,28 @@ export default class OrchestratorServer {
       console.error('Orchestrator API error:', error);
       sendJson(response, 500, {error: 'internal server error'});
     }
+  }
+
+  /**
+   * Read-only platform settings for the workers, authenticated with the calling worker's own
+   * control token (like the playback relay). The admin API token is refused.
+   */
+  private workerConfig(request: IncomingMessage): WorkerPlatformConfig {
+    if (hasBearerToken(request, this.config.apiToken)) {
+      throw new HttpError(403, 'this route requires a worker control token', 'WORKER_TOKEN_REQUIRED');
+    }
+
+    const callers = this.config.workers.filter(worker => hasBearerToken(request, worker.token));
+    if (callers.length !== 1) {
+      throw new HttpError(401, 'unauthorized');
+    }
+
+    if (request.method !== 'GET') {
+      throw new HttpError(405, 'method not allowed');
+    }
+
+    const {statusChannelId, mentionRoleIds} = this.platform.statusChannel();
+    return {statusChannelId, mentionRoleIds};
   }
 
   private async workerStatuses() {

@@ -425,3 +425,38 @@ describe('dashboard client', () => {
     expect(leaf(italian, 'settings.localeOptions.it')).toBe('Italiano');
   });
 });
+
+describe('status channel copy', () => {
+  it('has the status channel card in both languages, with every worker error code', async () => {
+    const italian = await readDictionary('it');
+    const english = await readDictionary('en');
+    const statusKeys = (dictionary: unknown) => keyPaths(leaf(dictionary, 'super.statusChannel')).sort();
+    expect(statusKeys(english)).toEqual(statusKeys(italian));
+
+    expect(leaf(italian, 'super.statusChannel.kicker')).toBe('STATO');
+    expect(leaf(english, 'super.statusChannel.kicker')).toBe('STATUS');
+    expect(leaf(italian, 'super.statusChannel.title')).toBe('Canale di log dei bot');
+    expect(leaf(english, 'super.statusChannel.title')).toBe('Bot status channel');
+    for (const dictionary of [italian, english]) {
+      for (const code of ['CHANNEL_NOT_FOUND', 'MISSING_PERMISSIONS', 'INVALID_CHANNEL', 'NOT_READY', 'UNREACHABLE', 'DISCORD_ERROR']) {
+        expect(typeof leaf(dictionary, `super.statusChannel.errors.${code}`), code).toBe('string');
+      }
+    }
+
+    expect(leaf(english, 'super.statusChannel.hint')).toContain('Copy Channel ID');
+    expect(leaf(english, 'super.statusChannel.hint')).toContain('Embed Links');
+    expect(leaf(italian, 'super.statusChannel.hint')).toContain('Modalità sviluppatore');
+    expect(leaf(english, 'super.statusChannel.rolesHint')).toContain('Copy Role ID');
+    expect(leaf(english, 'super.statusChannel.rolesHint')).toContain('Mention @everyone, @here and All Roles');
+    expect(leaf(italian, 'super.statusChannel.rolesHint')).toContain('Copia ID ruolo');
+
+    const markup = await readFile(new URL('../dashboard/index.html', import.meta.url), 'utf8');
+    for (const id of ['status-channel-form', 'status-channel-disable', 'status-channel-test', 'status-channel-current', 'status-channel-results', 'status-role-form', 'status-role-list']) {
+      expect(markup).toContain(`id="${id}"`);
+    }
+
+    const client = await readFile(new URL('../dashboard/dashboard.js', import.meta.url), 'utf8');
+    expect(client).toContain('\'/api/super/status-channel\'');
+    expect(client).toContain('\'/api/super/status-channel/test\'');
+  });
+});

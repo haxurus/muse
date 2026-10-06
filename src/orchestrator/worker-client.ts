@@ -1,6 +1,13 @@
 import got, {type CancelableRequest, type Response} from 'got';
 import type {GuildSettingsPatch} from '../control/settings-validation.js';
-import type {WorkerBlocklistResult, WorkerGuildSettings, WorkerLeaveGuildResult, WorkerStatus} from '../control/types.js';
+import type {
+  WorkerBlocklistResult,
+  WorkerGuildSettings,
+  WorkerLeaveGuildResult,
+  WorkerStatus,
+  StatusAnnounceRequest,
+  WorkerStatusAnnounceResult,
+} from '../control/types.js';
 import type {Blocklist} from '../control/blocklist.js';
 import type {WorkerDefinition} from './config.js';
 
@@ -90,5 +97,18 @@ export default class WorkerClient {
         json: blocklist,
       },
     )).json<WorkerBlocklistResult>();
+  }
+
+  /** Ask the worker to post a status message (online or test) in `channelId`, mentioning `mentionRoleIds`. */
+  async announceStatus(request: StatusAnnounceRequest): Promise<WorkerStatusAnnounceResult> {
+    return capResponseSize(got.post(
+      `${this.worker.baseUrl}/v1/status-channel/announce`,
+      {
+        ...requestOptions(this.worker.token),
+        // Fetching the channel and sending the message takes a few Discord round trips.
+        timeout: {request: 10_000},
+        json: request,
+      },
+    )).json<WorkerStatusAnnounceResult>();
   }
 }

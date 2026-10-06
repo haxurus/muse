@@ -19,6 +19,7 @@ import {handlePlaybackInteraction} from './playback/controller.js';
 import {blockedUserMessage, blocklist} from './control/blocklist.js';
 import {DEFAULT_LOCALE, UserError, localeFromDiscord, localizeEnglishMessage, t, type Locale} from './i18n/index.js';
 import {getGuildLocale} from './i18n/guild-locale.js';
+import StatusAnnouncer from './status/startup-announcer.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -82,6 +83,7 @@ export default class {
   private readonly commandsByName!: Collection<string, Command>;
   private readonly commandsByButtonId!: Collection<string, Command>;
   private hasCompletedStartup = false;
+  private readonly statusAnnouncer: StatusAnnouncer;
 
   constructor(@inject(TYPES.Client) client: Client, @inject(TYPES.Config) config: Config) {
     this.client = client;
@@ -89,6 +91,7 @@ export default class {
     this.shouldRegisterCommandsOnBot = config.REGISTER_COMMANDS_ON_BOT;
     this.commandsByName = new Collection();
     this.commandsByButtonId = new Collection();
+    this.statusAnnouncer = new StatusAnnouncer(client, config);
   }
 
   public shutdown(): void {
@@ -266,6 +269,8 @@ export default class {
       spinner.succeed(`Ready! Invite the bot with https://discordapp.com/oauth2/authorize?client_id=${this.client.user?.id ?? ''}&scope=bot%20applications.commands&permissions=36700160`);
       this.hasCompletedStartup = true;
       this.setReady(true);
+      // Fire and forget: the status channel message must never delay or fail readiness.
+      void this.statusAnnouncer.announceOnline();
     }));
 
     this.client.on('error', console.error);
@@ -280,6 +285,8 @@ export default class {
     this.client.on('shardReady', () => {
       if (this.hasCompletedStartup) {
         this.setReady(true);
+        // Rate-limited to one message per 5 minutes, so a flapping connection does not spam the channel.
+        void this.statusAnnouncer.announceOnline();
       }
     });
 

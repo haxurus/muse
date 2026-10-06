@@ -169,6 +169,35 @@
               <div class="table-list" id="super-workers"></div>
             </section>
 
+            <section class="card" id="status-channel-card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.statusChannel.kicker"></span>
+                  <h2 data-i18n="super.statusChannel.title"></h2>
+                  <p data-i18n="super.statusChannel.text"></p>
+                </div>
+              </div>
+              <form class="status-channel-form" id="status-channel-form" novalidate>
+                <label class="field"><span data-i18n="super.statusChannel.channelId"></span><input name="channelId" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="123456789012345678"></label>
+                <div class="status-channel-actions">
+                  <button class="button button-primary" type="submit" data-i18n="super.statusChannel.save"></button>
+                  <button class="button button-secondary" type="button" id="status-channel-disable" data-i18n="super.statusChannel.disable"></button>
+                  <button class="button button-secondary" type="button" id="status-channel-test" data-i18n="super.statusChannel.test"></button>
+                </div>
+              </form>
+              <p class="status-channel-hint" data-i18n="super.statusChannel.hint"></p>
+              <div class="status-roles">
+                <form class="status-role-form" id="status-role-form" novalidate>
+                  <label class="field"><span data-i18n="super.statusChannel.roleId"></span><input name="roleId" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="123456789012345678"></label>
+                  <button class="button button-secondary" type="submit" data-i18n="super.statusChannel.addRole"></button>
+                </form>
+                <div class="chip-list status-role-list" id="status-role-list"></div>
+                <p class="status-channel-hint" data-i18n="super.statusChannel.rolesHint"></p>
+              </div>
+              <div class="status-channel-current" id="status-channel-current"></div>
+              <div class="table-list" id="status-channel-results"></div>
+            </section>
+
             <section class="card">
               <div class="card-head">
                 <div>
