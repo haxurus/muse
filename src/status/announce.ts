@@ -31,7 +31,7 @@ export type StatusMessageInput = StatusAnnounceRequest & {workerId: string};
 export type StatusLocaleResolver = (guildId: string) => Promise<Locale>;
 
 /** Hostname of the public dashboard URL (workers get the whole .env), or "Muse". */
-export const statusFooter = (value: string | undefined = process.env.MUSE_DASHBOARD_PUBLIC_URL): string => {
+export const statusFooter = (value: string | undefined): string => {
   try {
     const {hostname} = new URL(value ?? '');
     return hostname || DEFAULT_STATUS_FOOTER;
@@ -128,7 +128,7 @@ export const postStatusMessage = async (
     test: input.test,
     locale: await resolveLocale(channel.guild.id),
     now: new Date(),
-    footer: statusFooter(),
+    footer: statusFooter(process.env.MUSE_DASHBOARD_PUBLIC_URL),
   });
 
   const roles = [...new Set(input.mentionRoleIds)];

@@ -4,6 +4,12 @@ import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+
+// The worker announce helpers pulled in by the config client read guild settings through
+// Prisma/Config; the orchestrator tests never post, so stub that path out.
+vi.mock('../src/utils/get-guild-settings.js', () => ({
+  getGuildSettings: vi.fn(async (guildId: string) => ({guildId, locale: 'en'})),
+}));
 import OrchestratorServer from '../src/orchestrator/server.js';
 import {PlatformSettingsStore} from '../src/orchestrator/platform-store.js';
 import {loadOrchestratorConfig} from '../src/orchestrator/config.js';
