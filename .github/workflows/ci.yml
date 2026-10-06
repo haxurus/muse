@@ -30,6 +30,7 @@ jobs:
       - run: yarn lint
       - run: yarn typecheck
       - run: node --check dashboard/dashboard.js
+      - run: node --check dashboard/home.js
       - run: yarn test
       - run: yarn build
       - name: Validate production compose

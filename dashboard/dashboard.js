@@ -454,8 +454,13 @@ const handleFailure = (error, report) => {
 
 /* ---------- Routing ---------- */
 
+/** The signed-in app (server list) lives at /dashboard; "/" is the public home page. */
+const DASHBOARD_PATH = '/dashboard';
+const NEW_SERVER_ANCHOR = 'nuovo-server';
+
 const currentRoute = () => {
   const path = window.location.pathname;
+  if (path === DASHBOARD_PATH) return {view: 'home'};
   if (path === '/super') return {view: 'super'};
   const match = /^\/server\/(\d{17,20})$/.exec(path);
   if (match) return {view: 'guild', guildId: match[1]};
@@ -557,9 +562,14 @@ const renderHome = () => {
   grid.replaceChildren(...session.guilds.map(guildCard));
   $('guild-empty').hidden = session.guilds.length > 0;
 
-  $('invite-card').hidden = !session.superAdmin;
+  const inviteCard = $(NEW_SERVER_ANCHOR);
+  inviteCard.hidden = !session.superAdmin;
   if (session.superAdmin) {
     void loadInvites();
+    // "/add" lands here with #nuovo-server: the card was hidden at load, so scroll once now.
+    if (window.location.hash === `#${NEW_SERVER_ANCHOR}`) {
+      inviteCard.scrollIntoView({block: 'start'});
+    }
   }
 };
 
@@ -1377,7 +1387,7 @@ const logout = async () => {
       headers: {'x-csrf-token': session ? session.csrfToken : ''},
     });
   } finally {
-    window.location.assign('/');
+    window.location.assign(DASHBOARD_PATH);
   }
 };
 
@@ -1452,7 +1462,7 @@ const showLoginMessage = () => {
   if (reason !== 'failed' && reason !== 'blocked') return;
 
   showNotice($('login-message'), reason === 'blocked' ? t('login.blocked') : t('login.failed'));
-  window.history.replaceState(null, '', window.location.pathname);
+  window.history.replaceState(null, '', window.location.pathname + window.location.hash);
 };
 
 const boot = async () => {

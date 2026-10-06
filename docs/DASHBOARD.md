@@ -19,14 +19,14 @@ The dashboard authorizes a guild only when the authenticated Discord user is:
 
 Permissions are rechecked against Discord before every configuration mutation. The guild list is paginated (`after` cursor, 200 per page, at most 10 pages).
 
-The callback verifies that the granted token includes both `identify` and `guilds`. A cancelled or failed login (Discord `error` parameter, invalid/expired/replayed state, missing scopes, Discord errors) redirects to `MUSE_DASHBOARD_PUBLIC_URL/?login=failed`, where the page shows a short message.
+The callback verifies that the granted token includes both `identify` and `guilds`. A cancelled or failed login (Discord `error` parameter, invalid/expired/replayed state, missing scopes, Discord errors) redirects to `MUSE_DASHBOARD_PUBLIC_URL/dashboard?login=failed`, where the page shows a short message. A successful login redirects to `MUSE_DASHBOARD_PUBLIC_URL/dashboard`; `POST /auth/logout` also returns to `/dashboard` (login view). Every redirect target is built with `new URL(path, MUSE_DASHBOARD_PUBLIC_URL)`, which must stay a bare origin.
 
 ### Blocked users
 
 After loading the Discord user, the callback asks the orchestrator `GET /v1/blocks/users/:userId` (see [SUPER_CONSOLE.md](SUPER_CONSOLE.md)):
 
-- `{blocked: true}`: the OAuth token is revoked, no session is created and the browser goes to `/?login=blocked` ("Accesso non consentito.").
-- orchestrator error, timeout or malformed answer: **fail closed**. The token is revoked, no session is created and the browser goes to `/?login=failed`. Signing in therefore needs the orchestrator to be reachable; existing sessions keep working.
+- `{blocked: true}`: the OAuth token is revoked, no session is created and the browser goes to `/dashboard?login=blocked` ("Accesso non consentito.").
+- orchestrator error, timeout or malformed answer: **fail closed**. The token is revoked, no session is created and the browser goes to `/dashboard?login=failed`. Signing in therefore needs the orchestrator to be reachable; existing sessions keep working.
 - the configured super admin is never checked (no self-lockout, and the super console stays reachable while the orchestrator is degraded).
 
 ## Discord application setup
@@ -62,11 +62,22 @@ In production it comes from `deploy/.env` (`MUSE_SUPER_ADMIN_USER_ID: ${MUSE_SUP
 GET /invite/:workerId        workerId = muse-NN
 ```
 
-- no session: `302 /auth/discord` (the login starts; afterwards the user lands on the home page);
+- no session: `302 /auth/discord` (the login starts; afterwards the user lands on `/dashboard`);
 - signed in but not the super admin (or no super admin configured): `302 /development`, a static "Muse è ancora in sviluppo." notice with links to the GitHub repository;
 - super admin: the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
-  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=3214336`
+  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=3230720`
   (View Channels, Send Messages, Read Message History, Connect, Speak).
+
+### "Aggiungi a Discord" (`/add`)
+
+```text
+GET /add
+```
+
+Target of the "Aggiungi a Discord" buttons on the public home page:
+
+- super admin: `302 /dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" card with one invite per bot);
+- anybody else (no session, signed-in non-admin, or no super admin configured): `302 /development`.
 
 ### Super console API
 
@@ -156,6 +167,13 @@ Only `dashboard-edge` joins `muse-edge`, an internal network that Nginx Proxy Ma
 Browser-facing endpoints:
 
 ```text
+GET  /                                public home page (indexable)
+GET  /dashboard                       app: login view or server list
+GET  /server/:guildId                 app: guild view
+GET  /super                           app: super console
+GET  /development                     static "Accesso limitato" notice
+GET  /add                             (see "Aggiungi a Discord")
+
 GET  /auth/discord
 GET  /auth/discord/callback
 POST /auth/logout
@@ -194,16 +212,17 @@ Super-admin endpoints are listed under "Super console API" above.
 
 ## User interface
 
-The UI is a small vanilla JavaScript single page app (`dashboard/index.html`, `dashboard.js`, `dashboard.css`) that shares the visual language of Sentinel: dark-only palette (background `#0a0b0d`, amber accent `#f5a524`), Geist and Geist Mono, sticky blurred header, uppercase mono "kicker" labels, hairline metric rows, pills and switches. Copy is Italian; all strings live in the `STRINGS` object at the top of `dashboard.js` so another locale can be added without touching the markup (elements carry `data-i18n` keys).
+The UI is a static public home page (`dashboard/home.html` + a tiny `home.js` that only closes the mobile menu) and a small vanilla JavaScript single page app (`dashboard/index.html`, `dashboard.js`), both styled by `dashboard.css`. They share the visual language of Sentinel: dark-only palette (background `#0a0b0d`, violet accent `#9b7bff` with `#120a2b` ink on accent buttons; warnings keep a separate amber `--warn` token), Geist and Geist Mono, sticky blurred header, uppercase mono "kicker" labels, hairline metric rows, pills and switches. Copy is Italian; all strings live in the `STRINGS` object at the top of `dashboard.js` so another locale can be added without touching the markup (elements carry `data-i18n` keys).
 
 | Path | View |
 | --- | --- |
-| `/` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card with one invite per bot |
+| `/` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "Come funziona", self-hosting steps, security, call to action. "Accedi" links to `/dashboard`, "Aggiungi a Discord" to `/add` |
+| `/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
 | `/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, logout) and three sections: **Panoramica** (bots in the server with ready/voice state), **Impostazioni** (bot selection, one switch per field, mixed values shown as "Valori diversi", only enabled fields are patched) and **Gruppi** (create, edit, select, delete, keep or drop unavailable members) |
 | `/super` | Super console (super admin only): KPI row, worker status with invite buttons, linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
 | `/development` | Static "Accesso limitato" notice used by the invite links |
 
-The HTML views are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
+The app views (`/dashboard`, `/server/:guildId`, `/super`) and `/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home page `/` is indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
 
 The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers. Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
 

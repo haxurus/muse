@@ -84,6 +84,7 @@ export default class DashboardAuth {
   private readonly discord: DiscordOAuthClient;
   private readonly secureCookies: boolean;
   private readonly cookieNames: DashboardCookieNames;
+  private readonly dashboardUrl: string;
   private readonly loginFailedUrl: string;
   private readonly loginBlockedUrl: string;
   private readonly isUserBlocked: (userId: string) => Promise<boolean>;
@@ -93,8 +94,10 @@ export default class DashboardAuth {
     this.discord = dependencies.discord ?? new DiscordOAuthClient(config);
     this.secureCookies = config.publicUrl.protocol === 'https:';
     this.cookieNames = dashboardCookieNames(this.secureCookies);
-    this.loginFailedUrl = new URL('/?login=failed', config.publicUrl).toString();
-    this.loginBlockedUrl = new URL('/?login=blocked', config.publicUrl).toString();
+    // The signed-in app lives at /dashboard; "/" is the public home page.
+    this.dashboardUrl = new URL('/dashboard', config.publicUrl).toString();
+    this.loginFailedUrl = new URL('/dashboard?login=failed', config.publicUrl).toString();
+    this.loginBlockedUrl = new URL('/dashboard?login=blocked', config.publicUrl).toString();
     if (dependencies.isUserBlocked) {
       this.isUserBlocked = dependencies.isUserBlocked;
     } else {
@@ -166,7 +169,7 @@ export default class DashboardAuth {
 
     const session = this.store.createSession(login.user, login.token.access_token, login.token.expires_in);
 
-    redirect(response, this.config.publicUrl.toString(), [
+    redirect(response, this.dashboardUrl, [
       clearState,
       cookie(
         this.cookieNames.session,
@@ -244,7 +247,7 @@ export default class DashboardAuth {
       await this.revokeQuietly(session.accessToken);
     }
 
-    redirect(response, this.config.publicUrl.toString(), [
+    redirect(response, this.dashboardUrl, [
       clearCookie(this.cookieNames.session, this.secureCookies, '/'),
     ]);
   }
