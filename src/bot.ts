@@ -16,6 +16,7 @@ import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
 import {handlePlaybackInteraction} from './playback/controller.js';
+import {BLOCKED_USER_MESSAGE, blocklist} from './control/blocklist.js';
 
 const sanitizeErrorDetail = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -116,6 +117,17 @@ export default class {
     // eslint-disable-next-line complexity
     this.client.on('interactionCreate', async interaction => {
       try {
+        // Users blocked from the super console cannot use any command, button or autocomplete.
+        if (blocklist.isUserBlocked(interaction.user.id)) {
+          if (interaction.isAutocomplete()) {
+            await interaction.respond([]);
+          } else if (interaction.isRepliable()) {
+            await interaction.reply({content: BLOCKED_USER_MESSAGE, ephemeral: true});
+          }
+
+          return;
+        }
+
         if (await handlePlaybackInteraction(interaction, this.config)) {
           return;
         }

@@ -4,128 +4,384 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0b0d">
+  <meta name="robots" content="noindex, nofollow">
   <title>Muse Control</title>
+  <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/dashboard.css">
+  <script src="/assets/dashboard.js" defer></script>
 </head>
 <body>
-  <div id="login-view" class="center-shell" hidden>
-    <section class="login-card">
-      <div class="brand-mark">M</div>
-      <p class="eyebrow">MUSE CONTROL</p>
-      <h1>Gestisci i tuoi music bot</h1>
-      <p class="muted">Accedi con Discord. Vedrai soltanto i server che puoi amministrare e nei quali Muse è disponibile.</p>
-      <p id="login-message" class="error" role="alert" hidden></p>
-      <a class="button primary" href="/auth/discord">Accedi con Discord</a>
-    </section>
-  </div>
+  <noscript><p class="noscript">Muse Control richiede JavaScript.</p></noscript>
 
-  <div id="app-view" class="app-shell" hidden>
-    <aside class="sidebar">
-      <div class="brand-row">
-        <div class="brand-mark small">M</div>
-        <div>
-          <strong>Muse Control</strong>
-          <span>Orchestrator</span>
-        </div>
-      </div>
-
-      <div class="section-label">SERVER</div>
-      <nav id="guild-list" class="guild-list" aria-label="Server Discord"></nav>
-
-      <div class="sidebar-footer">
-        <div class="user-row">
-          <img id="user-avatar" class="avatar" alt="">
-          <div class="user-copy">
-            <strong id="user-name"></strong>
-            <span id="user-username"></span>
+  <!-- Public chrome: landing, server list, super console -->
+  <div id="site-view" class="public-site">
+    <header class="site-header">
+      <div class="site-container site-nav">
+        <a class="brand" href="/" data-nav aria-label="Muse - Home">
+          <svg class="brand-mark" width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="10.9" cy="21" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <circle class="brand-dot" cx="19.4" cy="18.8" r="2.4"/>
+          </svg>
+          <span>Muse</span>
+        </a>
+        <nav class="site-nav-links" data-i18n-aria-label="nav.label">
+          <a href="/" data-nav data-route-link="home" data-i18n="nav.servers"></a>
+          <a href="/super" data-nav data-route-link="super" data-super-only hidden data-i18n="nav.super"></a>
+        </nav>
+        <div class="site-nav-end">
+          <div class="site-nav-actions">
+            <a class="button button-primary" href="/auth/discord" data-auth="anonymous" data-i18n="nav.login"></a>
+            <button class="button button-ghost" type="button" data-auth="user" data-logout hidden data-i18n="nav.logout"></button>
           </div>
         </div>
-        <button id="logout-button" class="button ghost full">Esci</button>
+        <details class="site-mobile-menu">
+          <summary data-i18n-aria-label="nav.menu"><span></span><span></span></summary>
+          <div>
+            <a href="/" data-nav data-i18n="nav.servers"></a>
+            <a href="/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
+            <div class="site-mobile-actions">
+              <a class="button button-primary" href="/auth/discord" data-auth="anonymous" data-i18n="nav.login"></a>
+              <button class="button button-secondary" type="button" data-auth="user" data-logout hidden data-i18n="nav.logout"></button>
+            </div>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main id="site-main">
+      <!-- Session check -->
+      <section class="page" id="view-loading">
+        <div class="site-container">
+          <div class="card skeleton-card">
+            <span class="kicker" data-i18n="loading.kicker"></span>
+            <h2 data-i18n="loading.title"></h2>
+            <p data-i18n="loading.text"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Login -->
+      <section class="page" id="view-login" hidden>
+        <div class="site-container">
+          <div class="page-head">
+            <div>
+              <span class="kicker" data-i18n="home.kicker"></span>
+              <h1 data-i18n="home.title"></h1>
+              <p data-i18n="home.intro"></p>
+            </div>
+          </div>
+          <div class="notice notice-error" id="login-message" role="alert" hidden></div>
+          <div class="auth-grid">
+            <div class="card card-feature">
+              <span class="kicker" data-i18n="login.kicker"></span>
+              <h2 data-i18n="login.title"></h2>
+              <p data-i18n="login.text"></p>
+              <a class="button button-primary button-lg" href="/auth/discord">
+                <span data-i18n="login.button"></span>
+                <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+              </a>
+            </div>
+            <div class="card">
+              <span class="kicker" data-i18n="login.newServerKicker"></span>
+              <h2 data-i18n="login.newServerTitle"></h2>
+              <p data-i18n="login.newServerText"></p>
+              <a class="button button-secondary button-lg" href="/development" data-i18n="login.newServerButton"></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Server list -->
+      <section class="page" id="view-home" hidden>
+        <div class="site-container">
+          <div class="page-head">
+            <div>
+              <span class="kicker" data-i18n="home.kicker"></span>
+              <h1 data-i18n="home.title"></h1>
+              <p data-i18n="home.intro"></p>
+            </div>
+            <div class="user-card" id="user-card"></div>
+          </div>
+
+          <section class="card card-feature" id="invite-card" hidden>
+            <div class="card-head">
+              <div>
+                <span class="kicker" data-i18n="invite.kicker"></span>
+                <h2 data-i18n="invite.title"></h2>
+                <p data-i18n="invite.text"></p>
+              </div>
+            </div>
+            <div class="notice" id="invite-message" hidden></div>
+            <div class="invite-grid" id="invite-list"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <span class="kicker" data-i18n="servers.kicker"></span>
+                <h2 data-i18n="servers.title"></h2>
+                <p data-i18n="servers.text"></p>
+              </div>
+            </div>
+            <div class="notice" id="guild-empty" hidden data-i18n="servers.empty"></div>
+            <div class="guild-grid" id="guild-grid"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- Super console -->
+      <section class="page" id="view-super" hidden>
+        <div class="site-container">
+          <div class="page-head">
+            <div>
+              <span class="kicker kicker-danger" data-i18n="super.kicker"></span>
+              <h1 data-i18n="super.title"></h1>
+              <p data-i18n="super.intro"></p>
+            </div>
+            <button class="button button-secondary" type="button" id="super-refresh" data-i18n="super.refresh"></button>
+          </div>
+
+          <div class="notice notice-error" id="super-message" role="alert" hidden></div>
+          <div class="card skeleton-card" id="super-loading"><p class="muted" data-i18n="super.loading"></p></div>
+
+          <div id="super-content" hidden>
+            <div class="metric-row">
+              <div class="metric"><span data-i18n="super.metricBots"></span><strong class="mono" id="metric-bots">0</strong></div>
+              <div class="metric"><span data-i18n="super.metricGuilds"></span><strong class="mono" id="metric-guilds">0</strong></div>
+              <div class="metric"><span data-i18n="super.metricPlayers"></span><strong class="mono" id="metric-players">0</strong></div>
+              <div class="metric"><span data-i18n="super.metricBlocks"></span><strong class="mono" id="metric-blocks">0</strong></div>
+            </div>
+
+            <section class="card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.botsKicker"></span>
+                  <h2 data-i18n="super.botsTitle"></h2>
+                  <p data-i18n="super.botsText"></p>
+                </div>
+              </div>
+              <div class="empty" id="super-workers-empty" hidden data-i18n="super.noBots"></div>
+              <div class="table-list" id="super-workers"></div>
+            </section>
+
+            <section class="card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.guildsKicker"></span>
+                  <h2 data-i18n="super.guildsTitle"></h2>
+                  <p data-i18n="super.guildsText"></p>
+                </div>
+              </div>
+              <div class="empty" id="super-guilds-empty" hidden data-i18n="super.noGuilds"></div>
+              <div class="table-list" id="super-guilds"></div>
+            </section>
+
+            <section class="card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.blocksKicker"></span>
+                  <h2 data-i18n="super.blocksTitle"></h2>
+                  <p data-i18n="super.blocksText"></p>
+                </div>
+              </div>
+              <div class="block-forms">
+                <form id="block-user-form" data-kind="USER" novalidate>
+                  <label class="field"><span data-i18n="super.userId"></span><input name="subjectId" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="123456789012345678"></label>
+                  <label class="field"><span data-i18n="super.reason"></span><input name="reason" autocomplete="off" maxlength="500"></label>
+                  <button class="button button-secondary" type="submit" data-i18n="super.blockUser"></button>
+                </form>
+                <form id="block-guild-form" data-kind="GUILD" novalidate>
+                  <label class="field"><span data-i18n="super.guildId"></span><input name="subjectId" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="123456789012345678"></label>
+                  <label class="field"><span data-i18n="super.reason"></span><input name="reason" autocomplete="off" maxlength="500"></label>
+                  <button class="button button-danger" type="submit" data-i18n="super.blockGuild"></button>
+                </form>
+              </div>
+              <div class="empty" id="super-blocks-empty" hidden data-i18n="super.noBlocks"></div>
+              <div class="table-list" id="super-blocks"></div>
+            </section>
+
+            <section class="card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.auditKicker"></span>
+                  <h2 data-i18n="super.auditTitle"></h2>
+                  <p data-i18n="super.auditText"></p>
+                </div>
+              </div>
+              <div class="empty" id="super-audit-empty" hidden data-i18n="super.noAudit"></div>
+              <div class="log-table" id="super-audit"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-container">
+        <div class="site-footer-bottom">
+          <span data-i18n="footer.credits"></span>
+          <span class="mono" data-i18n="footer.tagline"></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Guild app shell -->
+  <div id="guild-view" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand sidebar-brand" href="/" data-nav aria-label="Muse - Home">
+        <svg class="brand-mark" width="24" height="24" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="10.9" cy="21" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <circle class="brand-dot" cx="19.4" cy="18.8" r="2.4"/>
+        </svg>
+        <span>Muse</span>
+      </a>
+      <a class="sidebar-back" href="/" data-nav>
+        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>
+        <span data-i18n="guild.back"></span>
+      </a>
+      <div class="sidebar-guild" id="sidebar-guild"></div>
+      <nav class="sidebar-nav" data-i18n-aria-label="guild.sections">
+        <button type="button" data-tab="overview" class="active">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+          <span data-i18n="guild.tabs.overview"></span>
+        </button>
+        <button type="button" data-tab="settings">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+          <span data-i18n="guild.tabs.settings"></span>
+        </button>
+        <button type="button" data-tab="groups">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.6 2.7 2.2 3 4.6"/></svg>
+          <span data-i18n="guild.tabs.groups"></span>
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sidebar-access"><span data-i18n="guild.access"></span><strong class="mono" id="sidebar-access"></strong></div>
+        <div class="sidebar-user" id="sidebar-user"></div>
+        <div class="sidebar-links">
+          <a class="button button-secondary button-sm" href="/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
+          <button class="button button-ghost button-sm" type="button" data-logout data-i18n="nav.logout"></button>
+        </div>
       </div>
     </aside>
 
-    <main class="main">
-      <header class="topbar">
+    <main class="workspace">
+      <header class="workspace-head">
         <div>
-          <p class="eyebrow">DISCORD MUSIC FLEET</p>
-          <h1 id="page-title">Seleziona un server</h1>
-          <p id="page-subtitle" class="muted">Scegli un server dalla barra laterale.</p>
+          <span class="kicker" id="workspace-kicker"></span>
+          <h1 id="guild-title"></h1>
+          <p id="guild-subtitle"></p>
         </div>
-        <div id="status-pill" class="status-pill">In attesa</div>
+        <span class="live-pill is-idle" id="guild-pill"><i></i><span id="guild-pill-text"></span></span>
       </header>
 
-      <section id="empty-state" class="panel empty-state">
-        <h2>Nessun server selezionato</h2>
-        <p class="muted">Qui potrai gestire i worker Muse singolarmente, a gruppi temporanei o tutti insieme.</p>
-      </section>
+      <div class="content">
+        <div class="notice notice-error" id="guild-message" role="alert" hidden></div>
 
-      <div id="guild-content" hidden>
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <p class="section-label">WORKER</p>
-              <h2>Music bot disponibili</h2>
+        <!-- Overview -->
+        <div class="tab-stack" id="tab-overview">
+          <div class="stat-grid">
+            <div class="stat-card"><span data-i18n="overview.statBots"></span><strong id="stat-bots">0</strong></div>
+            <div class="stat-card"><span data-i18n="overview.statOnline"></span><strong id="stat-online">0</strong></div>
+            <div class="stat-card"><span data-i18n="overview.statVoice"></span><strong id="stat-voice">0</strong></div>
+            <div class="stat-card"><span data-i18n="overview.statGroups"></span><strong id="stat-groups">0</strong></div>
+          </div>
+          <section class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="overview.eyebrow"></p>
+                <h2 data-i18n="overview.title"></h2>
+                <p class="muted" data-i18n="overview.text"></p>
+              </div>
             </div>
-            <div class="button-row">
-              <button id="select-all" class="button ghost">Seleziona tutti</button>
-              <button id="select-none" class="button ghost">Nessuno</button>
+            <div class="empty" id="overview-empty" hidden data-i18n="overview.empty"></div>
+            <div class="table-list" id="overview-bots"></div>
+          </section>
+        </div>
+
+        <!-- Worker selection (settings + groups) -->
+        <section class="panel" id="selection-panel" hidden>
+          <div class="panel-title">
+            <div>
+              <p class="eyebrow" data-i18n="selection.eyebrow"></p>
+              <h2 data-i18n="selection.title"></h2>
+              <p class="muted" data-i18n="selection.text"></p>
+            </div>
+            <div class="panel-actions">
+              <button class="button button-secondary button-sm" type="button" id="select-all" data-i18n="selection.all"></button>
+              <button class="button button-ghost button-sm" type="button" id="select-none" data-i18n="selection.none"></button>
             </div>
           </div>
-          <div id="worker-grid" class="worker-grid"></div>
+          <div class="empty" id="worker-empty" hidden data-i18n="selection.empty"></div>
+          <div class="worker-grid" id="worker-grid"></div>
         </section>
 
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <p class="section-label">GRUPPI</p>
-              <h2>Gruppi worker del server</h2>
-              <p class="muted">Crea combinazioni riutilizzabili come 3+2, 4+1 o qualsiasi gruppo sovrapposto.</p>
+        <!-- Settings -->
+        <div class="tab-stack" id="tab-settings" hidden>
+          <section class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="settings.eyebrow"></p>
+                <h2 data-i18n="settings.title"></h2>
+                <p class="muted" data-i18n="settings.text"></p>
+              </div>
             </div>
-          </div>
+            <form id="settings-form" novalidate></form>
+            <div class="apply-row">
+              <div>
+                <strong id="selection-summary"></strong>
+                <p class="form-message" id="form-message"></p>
+              </div>
+              <button class="button button-primary" type="button" id="apply-button" data-i18n="settings.apply"></button>
+            </div>
+          </section>
+        </div>
 
-          <div id="group-list" class="group-list"></div>
+        <!-- Groups -->
+        <div class="tab-stack" id="tab-groups" hidden>
+          <section class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="groups.eyebrow"></p>
+                <h2 data-i18n="groups.title"></h2>
+                <p class="muted" data-i18n="groups.text"></p>
+              </div>
+            </div>
+            <div class="empty" id="group-empty" hidden data-i18n="groups.empty"></div>
+            <div class="table-list" id="group-list"></div>
+          </section>
 
-          <div class="group-editor">
-            <div class="group-editor-copy">
-              <strong id="group-editor-title">Nuovo gruppo</strong>
-              <span id="group-editor-hint" class="muted">Seleziona i worker sopra, assegna un nome e salva.</span>
+          <section class="panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="groups.editorEyebrow"></p>
+                <h2 id="group-editor-title"></h2>
+                <p class="muted" id="group-editor-hint"></p>
+              </div>
             </div>
-            <input id="group-name" class="text-input" type="text" maxlength="48" autocomplete="off" placeholder="Es. Principali">
-            <div id="group-offline-row" class="offline-row" hidden>
-              <span id="group-offline-note" class="muted"></span>
-              <button id="drop-offline-members" class="button ghost" type="button">Rimuovi non disponibili</button>
+            <div class="group-editor">
+              <label class="field"><span data-i18n="groups.name"></span><input id="group-name" type="text" maxlength="48" autocomplete="off" data-i18n-placeholder="groups.namePlaceholder"></label>
+              <div class="panel-actions">
+                <button class="button button-ghost" type="button" id="cancel-group-edit" hidden data-i18n="groups.cancel"></button>
+                <button class="button button-primary" type="button" id="save-group"></button>
+              </div>
             </div>
-            <div class="button-row">
-              <button id="cancel-group-edit" class="button ghost" type="button" hidden>Annulla</button>
-              <button id="save-group" class="button primary" type="button">Crea gruppo</button>
+            <div class="offline-row" id="group-offline-row" hidden>
+              <span id="group-offline-note"></span>
+              <button class="button button-secondary button-sm" type="button" id="drop-offline-members" data-i18n="groups.dropOffline"></button>
             </div>
-          </div>
-          <p id="group-message" class="muted"></p>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <div>
-              <p class="section-label">CONFIGURAZIONE</p>
-              <h2>Impostazioni selezionate</h2>
-              <p class="muted">Attiva solo i campi che vuoi modificare. Le altre impostazioni restano invariate.</p>
-            </div>
-          </div>
-
-          <form id="settings-form" class="settings-grid"></form>
-
-          <div class="apply-row">
-            <div>
-              <strong id="selection-summary">0 worker selezionati</strong>
-              <p id="form-message" class="muted"></p>
-            </div>
-            <button id="apply-button" class="button primary" type="button">Applica configurazione</button>
-          </div>
-        </section>
+            <p class="form-message" id="group-message"></p>
+          </section>
+        </div>
       </div>
     </main>
   </div>
 
-  <script src="/assets/dashboard.js" defer></script>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

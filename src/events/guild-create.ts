@@ -7,6 +7,7 @@ import {prisma} from '../utils/db.js';
 import {REST} from '@discordjs/rest';
 import {Setting} from '@prisma/client';
 import registerCommandsOnGuild from '../utils/register-commands-on-guild.js';
+import {blocklist} from '../control/blocklist.js';
 
 export async function createGuildSettings(guildId: string): Promise<Setting> {
   return prisma.setting.upsert({
@@ -21,6 +22,13 @@ export async function createGuildSettings(guildId: string): Promise<Setting> {
 }
 
 export default async (guild: Guild): Promise<void> => {
+  // A blocked guild is left immediately: no settings row, no commands, no welcome DM.
+  if (blocklist.isGuildBlocked(guild.id)) {
+    await guild.leave();
+    console.log(`Left blocked guild ${guild.id} right after being added`);
+    return;
+  }
+
   await createGuildSettings(guild.id);
 
   const config = container.get<Config>(TYPES.Config);

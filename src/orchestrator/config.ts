@@ -111,6 +111,21 @@ export type OrchestratorConfig = {
   apiToken: string;
   workers: WorkerDefinition[];
   groupsFile: string;
+  /** Super-console block list; defaults to blocks.json next to the groups file. */
+  blocksFile?: string;
+  /** Super-console audit log; defaults to super-audit.json next to the groups file. */
+  auditFile?: string;
+  /** Blocklist reconcile period; defaults to 60 seconds. */
+  blocklistReconcileIntervalMs?: number;
+};
+
+const resolveStateFile = (variable: string, fallback: string): string => {
+  const resolved = resolveContainedPath(process.env[variable] ?? fallback, '/state/');
+  if (!resolved) {
+    throw new Error(`${variable} must be stored under /state`);
+  }
+
+  return resolved;
 };
 
 export const loadOrchestratorConfig = (): OrchestratorConfig => {
@@ -124,9 +139,11 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     throw new Error('MUSE_ORCHESTRATOR_TOKEN_FILE must point to a mounted secret');
   }
 
-  const groupsFile = resolveContainedPath(process.env.MUSE_ORCHESTRATOR_GROUPS_FILE ?? '/state/groups.json', '/state/');
-  if (!groupsFile) {
-    throw new Error('MUSE_ORCHESTRATOR_GROUPS_FILE must be stored under /state');
+  const groupsFile = resolveStateFile('MUSE_ORCHESTRATOR_GROUPS_FILE', '/state/groups.json');
+  const blocksFile = resolveStateFile('MUSE_ORCHESTRATOR_BLOCKS_FILE', '/state/blocks.json');
+  const auditFile = resolveStateFile('MUSE_ORCHESTRATOR_AUDIT_FILE', '/state/super-audit.json');
+  if (new Set([groupsFile, blocksFile, auditFile]).size !== 3) {
+    throw new Error('Orchestrator groups, blocks and audit files must be distinct');
   }
 
   return {
@@ -135,5 +152,7 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     apiToken: readTokenFile(tokenFile, 'orchestrator API token'),
     workers: loadWorkerDefinitions(),
     groupsFile,
+    blocksFile,
+    auditFile,
   };
 };

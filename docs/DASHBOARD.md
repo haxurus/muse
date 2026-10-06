@@ -21,6 +21,14 @@ Permissions are rechecked against Discord before every configuration mutation. T
 
 The callback verifies that the granted token includes both `identify` and `guilds`. A cancelled or failed login (Discord `error` parameter, invalid/expired/replayed state, missing scopes, Discord errors) redirects to `MUSE_DASHBOARD_PUBLIC_URL/?login=failed`, where the page shows a short message.
 
+### Blocked users
+
+After loading the Discord user, the callback asks the orchestrator `GET /v1/blocks/users/:userId` (see [SUPER_CONSOLE.md](SUPER_CONSOLE.md)):
+
+- `{blocked: true}`: the OAuth token is revoked, no session is created and the browser goes to `/?login=blocked` ("Accesso non consentito.").
+- orchestrator error, timeout or malformed answer: **fail closed**. The token is revoked, no session is created and the browser goes to `/?login=failed`. Signing in therefore needs the orchestrator to be reachable; existing sessions keep working.
+- the configured super admin is never checked (no self-lockout, and the super console stays reachable while the orchestrator is degraded).
+
 ## Discord application setup
 
 Use a dedicated Discord application for the dashboard when possible.
@@ -39,6 +47,40 @@ https://<dashboard-host>/auth/discord/callback
 5. Set `MUSE_DASHBOARD_PUBLIC_URL` to the same HTTPS origin, without a path.
 
 The dashboard does not require a bot user on this OAuth application.
+
+## Super admin
+
+`MUSE_SUPER_ADMIN_USER_ID` (optional) is the Discord user ID of the Muse owner. It must be a 17-20 digit snowflake; any other non-empty value stops the dashboard at startup. Empty or unset means **no super admin**: the super console and the bot invite links are disabled for everyone (fail closed).
+
+In production it comes from `deploy/.env` (`MUSE_SUPER_ADMIN_USER_ID: ${MUSE_SUPER_ADMIN_USER_ID:-}` in `docker-compose.prod.yml`).
+
+`GET /api/session` returns `superAdmin: true` only for that user. The browser uses it to show the "Super console" link and the invite buttons; the server enforces the check on every super-admin route independently.
+
+### Bot invite links
+
+```text
+GET /invite/:workerId        workerId = muse-NN
+```
+
+- no session: `302 /auth/discord` (the login starts; afterwards the user lands on the home page);
+- signed in but not the super admin (or no super admin configured): `302 /development`, a static "Muse è ancora in sviluppo." notice with links to the GitHub repository;
+- super admin: the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
+  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=3214336`
+  (View Channels, Send Messages, Read Message History, Connect, Speak).
+
+### Super console API
+
+All routes need a session (`401 {code: "UNAUTHORIZED"}`) and the super admin (`403 {code: "SUPER_ADMIN_REQUIRED"}`). Mutations additionally need the exact Origin and the `x-csrf-token` header, share the per-session mutation budget and write the usual `dashboard_mutation` audit line (actions `super.guild.leave`, `super.block.put`, `super.block.delete`, with `subjectKind`/`subjectId`).
+
+```text
+GET    /api/super/overview                     -> orchestrator GET    /v1/super/overview
+GET    /api/super/bots                         -> orchestrator GET    /v1/workers (id, ready, bot id/name)
+POST   /api/super/guilds/:guildId/leave        -> orchestrator POST   /v1/super/guilds/:guildId/leave
+PUT    /api/super/blocks/:kind/:subjectId      -> orchestrator PUT    /v1/super/blocks/:kind/:subjectId
+DELETE /api/super/blocks/:kind/:subjectId      -> orchestrator DELETE /v1/super/blocks/:kind/:subjectId
+```
+
+The dashboard validates parameters before proxying: `kind` is `GUILD` or `USER`, ids are 17-20 digit snowflakes, `reason` is an optional string of at most 500 characters (trimmed, empty dropped), `workerIds` is an optional array of `muse-NN` ids (deduplicated, at most 32). Requests to the orchestrator carry the orchestrator token plus `x-muse-actor-id` (session user id) and `x-muse-actor-name` (Discord username, control characters dropped, percent-encoded, at most 64 characters). Orchestrator 4xx responses keep their status and short message as for the other routes.
 
 ## Session security
 
@@ -118,6 +160,8 @@ GET  /auth/discord
 GET  /auth/discord/callback
 POST /auth/logout
 
+GET  /invite/:workerId                 (see "Bot invite links")
+
 GET   /api/session
 GET   /api/guilds/:guildId
 PATCH  /api/guilds/:guildId
@@ -145,6 +189,27 @@ Example:
 ```
 
 The orchestrator and each worker validate the request again before persistence.
+
+Super-admin endpoints are listed under "Super console API" above.
+
+## User interface
+
+The UI is a small vanilla JavaScript single page app (`dashboard/index.html`, `dashboard.js`, `dashboard.css`) that shares the visual language of Sentinel: dark-only palette (background `#0a0b0d`, amber accent `#f5a524`), Geist and Geist Mono, sticky blurred header, uppercase mono "kicker" labels, hairline metric rows, pills and switches. Copy is Italian; all strings live in the `STRINGS` object at the top of `dashboard.js` so another locale can be added without touching the markup (elements carry `data-i18n` keys).
+
+| Path | View |
+| --- | --- |
+| `/` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card with one invite per bot |
+| `/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, logout) and three sections: **Panoramica** (bots in the server with ready/voice state), **Impostazioni** (bot selection, one switch per field, mixed values shown as "Valori diversi", only enabled fields are patched) and **Gruppi** (create, edit, select, delete, keep or drop unavailable members) |
+| `/super` | Super console (super admin only): KPI row, worker status with invite buttons, linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
+| `/development` | Static "Accesso limitato" notice used by the invite links |
+
+The HTML views are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
+
+The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers. Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
+
+### Fonts
+
+Geist and Geist Mono (variable woff2 from the `geist` npm package 1.7.2) are self-hosted in `dashboard/fonts/` with their SIL Open Font License (`OFL.txt`) and loaded with `font-display: swap`. They are served from a fixed allowlist as `font/woff2` (`Cache-Control: public, max-age=604800`); no request leaves the dashboard origin. The Docker image already copies the whole `dashboard/` directory.
 
 ## Nginx Proxy Manager
 

@@ -3,10 +3,14 @@ import {Client} from 'discord.js';
 import Config from '../services/config.js';
 import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
-import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
+import {HttpError, errorBody, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
 import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
 import type PlaybackWorker from '../playback/worker.js';
 import {assertGuildId} from './snowflake.js';
+import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklist.js';
+import type {WorkerBlocklistResult, WorkerLeaveGuildResult, WorkerStatus} from './types.js';
+
+const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
 export default class WorkerControlServer {
   private server?: Server;
@@ -57,6 +61,7 @@ export default class WorkerControlServer {
     this.server = undefined;
   }
 
+  // eslint-disable-next-line complexity
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       if (request.method === 'GET' && request.url === '/health') {
@@ -84,6 +89,21 @@ export default class WorkerControlServer {
         return;
       }
 
+      if (request.method === 'PUT' && segments.join('/') === 'v1/blocklist') {
+        const next = sanitizeBlocklist(await readJsonBody(request, MAX_BLOCKLIST_BODY_BYTES));
+        sendJson(response, 200, await this.applyBlocklist(next.guildIds, next.userIds));
+        return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'leave'
+        && request.method === 'POST') {
+        sendJson(response, 200, await this.leaveGuild(segments[2]));
+        return;
+      }
+
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'settings') {
         const guildId = segments[2];
         assertGuildId(guildId);
@@ -105,17 +125,56 @@ export default class WorkerControlServer {
 
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
-      const statusCode = error instanceof HttpError ? error.statusCode : 500;
-      const message = error instanceof HttpError ? error.message : 'internal server error';
-      if (!(error instanceof HttpError)) {
-        console.error('Worker control API error:', error);
+      if (error instanceof HttpError) {
+        sendJson(response, error.statusCode, errorBody(error));
+        return;
       }
 
-      sendJson(response, statusCode, {error: message});
+      console.error('Worker control API error:', error);
+      sendJson(response, 500, {error: 'internal server error'});
     }
   }
 
-  private status() {
+  private async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {
+    assertGuildId(guildId);
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) {
+      throw new HttpError(404, 'worker is not a member of that guild', 'NOT_IN_GUILD');
+    }
+
+    await guild.leave();
+    console.log(`Worker ${this.config.WORKER_ID} left guild ${guildId} on orchestrator request`);
+    return {workerId: this.config.WORKER_ID, guildId, left: true};
+  }
+
+  /** Replace the blocklist, then leave every blocked guild this bot is still a member of. */
+  private async applyBlocklist(guildIds: string[], userIds: string[]): Promise<WorkerBlocklistResult> {
+    blocklist.set({guildIds, userIds});
+
+    const blockedGuilds = this.client.guilds.cache.filter(guild => blocklist.isGuildBlocked(guild.id));
+    const left: string[] = [];
+    const failed: string[] = [];
+    await Promise.all(blockedGuilds.map(async guild => {
+      try {
+        await guild.leave();
+        left.push(guild.id);
+      } catch (error: unknown) {
+        failed.push(guild.id);
+        console.error(`Worker ${this.config.WORKER_ID} failed to leave blocked guild ${guild.id}: ${errorLabel(error)}`);
+      }
+    }));
+
+    if (left.length > 0) {
+      console.log(`Worker ${this.config.WORKER_ID} left blocked guilds: ${left.join(', ')}`);
+    }
+
+    return {workerId: this.config.WORKER_ID, left: left.sort(), failed: failed.sort()};
+  }
+
+  private status(): WorkerStatus {
+    const players = this.playerManager.snapshot();
+    const activeGuildIds = new Set(players.filter(player => player.connected).map(player => player.guildId));
+
     return {
       workerId: this.config.WORKER_ID,
       discordReady: this.client.isReady(),
@@ -123,13 +182,18 @@ export default class WorkerControlServer {
         ? {
           id: this.client.user.id,
           username: this.client.user.username,
+          avatarUrl: this.client.user.displayAvatarURL(),
         }
         : null,
       guilds: this.client.guilds.cache.map(guild => ({
         id: guild.id,
         name: guild.name,
+        iconUrl: guild.iconURL(),
+        memberCount: guild.memberCount,
+        ownerId: guild.ownerId,
+        playerActive: activeGuildIds.has(guild.id),
       })),
-      players: this.playerManager.snapshot(),
+      players,
       uptimeSeconds: Math.floor(process.uptime()),
     };
   }

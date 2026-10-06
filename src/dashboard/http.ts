@@ -8,6 +8,8 @@ export type HttpErrorDetails = {
   retryAfterSeconds?: number;
   causeName?: string;
   causeStatus?: number;
+  /** Stable machine-readable error code returned to the browser alongside `error`. */
+  code?: string;
 };
 
 /**
@@ -60,7 +62,7 @@ export const describeUpstreamError = (error: unknown): UpstreamFailure => {
 };
 
 export const securityHeaders = (): Record<string, string> => ({
-  'content-security-policy': 'default-src \'self\'; img-src \'self\' https://cdn.discordapp.com data:; style-src \'self\'; script-src \'self\'; connect-src \'self\'; object-src \'none\'; frame-src \'none\'; frame-ancestors \'none\'; base-uri \'none\'; form-action \'self\'',
+  'content-security-policy': 'default-src \'self\'; font-src \'self\'; img-src \'self\' https://cdn.discordapp.com data:; style-src \'self\'; script-src \'self\'; connect-src \'self\'; object-src \'none\'; frame-src \'none\'; frame-ancestors \'none\'; base-uri \'none\'; form-action \'self\'',
   'cross-origin-opener-policy': 'same-origin',
   'cross-origin-resource-policy': 'same-origin',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
@@ -74,7 +76,7 @@ export const send = (
   response: ServerResponse,
   statusCode: number,
   contentType: string,
-  body: string,
+  body: string | Buffer,
   extraHeaders: Record<string, string | string[]> = {},
 ): void => {
   response.writeHead(statusCode, {

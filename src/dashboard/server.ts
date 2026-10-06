@@ -4,18 +4,55 @@ import path from 'node:path';
 import {HttpError} from '../control/http.js';
 import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
-import {DashboardHttpError, describeUpstreamError, readJsonBody, send, sendJson} from './http.js';
-import OrchestratorClient, {GuildSettingsUpdate} from './orchestrator-client.js';
+import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
+import OrchestratorClient, {BlockKind, GuildSettingsUpdate, SuperActor} from './orchestrator-client.js';
 import type {DashboardSession} from './session-store.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
 
-const staticAsset = (fileName: string): string =>
-  readFileSync(path.join(STATIC_ROOT, fileName), 'utf8');
+type StaticAsset = {
+  contentType: string;
+  body: Buffer;
+  cacheControl: string;
+};
 
-const INDEX_HTML = staticAsset('index.html');
-const DASHBOARD_CSS = staticAsset('dashboard.css');
-const DASHBOARD_JS = staticAsset('dashboard.js');
+const NO_STORE = 'no-store';
+const FONT_CACHE = 'public, max-age=604800';
+
+const staticAsset = (fileName: string, contentType: string, cacheControl = NO_STORE): StaticAsset => ({
+  contentType,
+  body: readFileSync(path.join(STATIC_ROOT, fileName)),
+  cacheControl,
+});
+
+const INDEX_HTML = staticAsset('index.html', 'text/html; charset=utf-8');
+const DEVELOPMENT_HTML = staticAsset('development.html', 'text/html; charset=utf-8');
+
+/** Every file the dashboard serves is loaded once at startup from this fixed allowlist. */
+const STATIC_ASSETS = new Map<string, StaticAsset>([
+  ['/assets/dashboard.css', staticAsset('dashboard.css', 'text/css; charset=utf-8')],
+  ['/assets/dashboard.js', staticAsset('dashboard.js', 'text/javascript; charset=utf-8')],
+  ['/assets/fonts/Geist-Variable.woff2', staticAsset('fonts/Geist-Variable.woff2', 'font/woff2', FONT_CACHE)],
+  ['/assets/fonts/GeistMono-Variable.woff2', staticAsset('fonts/GeistMono-Variable.woff2', 'font/woff2', FONT_CACHE)],
+  ['/assets/fonts/OFL.txt', staticAsset('fonts/OFL.txt', 'text/plain; charset=utf-8', FONT_CACHE)],
+]);
+
+const NOINDEX = {'x-robots-tag': 'noindex, nofollow'};
+
+const SNOWFLAKE = /^\d{17,20}$/u;
+const WORKER_ID = /^muse-\d{2}$/u;
+const MAX_BLOCK_REASON_LENGTH = 500;
+const MAX_LEAVE_WORKERS = 32;
+
+/** Bot invite permissions: View Channels, Send Messages, Read Message History, Connect, Speak. */
+export const BOT_INVITE_PERMISSIONS = '3214336';
+
+export const botInviteUrl = (botId: string): string =>
+  `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(botId)}&scope=bot+applications.commands&permissions=${BOT_INVITE_PERMISSIONS}`;
+
+const sendAsset = (response: ServerResponse, asset: StaticAsset, extraHeaders: Record<string, string> = {}): void => {
+  send(response, 200, asset.contentType, asset.body, {'cache-control': asset.cacheControl, ...extraHeaders});
+};
 
 const avatarUrl = (userId: string, avatar?: string | null): string | null =>
   avatar ? `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=128` : null;
@@ -33,24 +70,57 @@ type MutationResult = {
 
 type MutationAudit = {
   action: string;
-  guildId: string;
+  guildId?: string;
   groupId?: string;
   workerIds?: string[];
+  subjectKind?: BlockKind;
+  subjectId?: string;
 };
+
+type GuildMutationAudit = MutationAudit & {guildId: string};
 
 const auditMutation = (session: DashboardSession, audit: MutationAudit, outcome: string): void => {
   console.log(JSON.stringify({
     event: 'dashboard_mutation',
     timestamp: new Date().toISOString(),
     userId: session.user.id,
-    guildId: audit.guildId,
+    guildId: audit.guildId ?? null,
     action: audit.action,
     ...(audit.groupId === undefined ? {} : {groupId: audit.groupId}),
+    ...(audit.subjectKind === undefined ? {} : {subjectKind: audit.subjectKind}),
+    ...(audit.subjectId === undefined ? {} : {subjectId: audit.subjectId}),
     workerCount: audit.workerIds?.length ?? null,
     workerIds: audit.workerIds ?? null,
     outcome,
   }));
 };
+
+const superActor = (session: DashboardSession): SuperActor => ({
+  userId: session.user.id,
+  username: session.user.username,
+});
+
+const readBlockReason = async (request: IncomingMessage): Promise<string | undefined> => {
+  const input = await readJsonBody(request);
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new HttpError(400, 'request body must be an object');
+  }
+
+  const {reason} = input as {reason?: unknown};
+  if (reason === undefined || reason === null) {
+    return undefined;
+  }
+
+  if (typeof reason !== 'string' || reason.length > MAX_BLOCK_REASON_LENGTH) {
+    throw new HttpError(400, `reason must be a string of at most ${MAX_BLOCK_REASON_LENGTH} characters`);
+  }
+
+  const trimmed = reason.trim();
+  return trimmed === '' ? undefined : trimmed;
+};
+
+const unauthorized = (): DashboardHttpError =>
+  new DashboardHttpError(401, 'authentication required', {code: 'UNAUTHORIZED'});
 
 export type DashboardServerDependencies = {
   auth?: DashboardAuth;
@@ -63,8 +133,10 @@ export default class DashboardServer {
   private readonly orchestrator: OrchestratorClient;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
-    this.auth = dependencies.auth ?? new DashboardAuth(config);
     this.orchestrator = dependencies.orchestrator ?? new OrchestratorClient(config);
+    this.auth = dependencies.auth ?? new DashboardAuth(config, {
+      isUserBlocked: async userId => this.orchestrator.isUserBlocked(userId),
+    });
   }
 
   get port(): number | undefined {
@@ -115,18 +187,7 @@ export default class DashboardServer {
         return;
       }
 
-      if (request.method === 'GET' && pathname === '/') {
-        send(response, 200, 'text/html; charset=utf-8', INDEX_HTML);
-        return;
-      }
-
-      if (request.method === 'GET' && pathname === '/assets/dashboard.css') {
-        send(response, 200, 'text/css; charset=utf-8', DASHBOARD_CSS);
-        return;
-      }
-
-      if (request.method === 'GET' && pathname === '/assets/dashboard.js') {
-        send(response, 200, 'text/javascript; charset=utf-8', DASHBOARD_JS);
+      if (request.method === 'GET' && await this.handlePage(request, response, pathname)) {
         return;
       }
 
@@ -151,6 +212,11 @@ export default class DashboardServer {
       }
 
       const segments = routeSegments(request, this.config.publicUrl);
+      if (segments[0] === 'api' && segments[1] === 'super') {
+        await this.handleSuper(request, response, segments.slice(2));
+        return;
+      }
+
       if (segments[0] === 'api' && segments[1] === 'guilds') {
         const guildId = segments[2];
 
@@ -207,7 +273,7 @@ export default class DashboardServer {
     sendJson(
       response,
       statusCode,
-      {error: message},
+      details.code === undefined ? {error: message} : {error: message, code: details.code},
       details.retryAfterSeconds === undefined ? {} : {'retry-after': String(details.retryAfterSeconds)},
     );
   }
@@ -239,8 +305,233 @@ export default class DashboardServer {
         avatarUrl: avatarUrl(session.user.id, session.user.avatar),
       },
       csrfToken: session.csrfToken,
+      superAdmin: this.auth.isSuperAdmin(session),
       expiresAt: new Date(session.expiresAt).toISOString(),
       guilds,
+    });
+  }
+
+  /** Serves the HTML views and the allowlisted static assets. Returns false when the path is not a page. */
+  private async handlePage(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<boolean> {
+    const asset = STATIC_ASSETS.get(pathname);
+    if (asset) {
+      sendAsset(response, asset);
+      return true;
+    }
+
+    const segments = pathname.split('/').filter(Boolean);
+    const isAppView = pathname === '/'
+      || pathname === '/super'
+      || (segments.length === 2 && segments[0] === 'server' && SNOWFLAKE.test(segments[1]));
+    if (isAppView) {
+      sendAsset(response, INDEX_HTML, NOINDEX);
+      return true;
+    }
+
+    if (pathname === '/development') {
+      sendAsset(response, DEVELOPMENT_HTML, NOINDEX);
+      return true;
+    }
+
+    if (segments.length === 2 && segments[0] === 'invite') {
+      await this.invite(request, response, segments[1]);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Bot invite links. Anonymous visitors start the Discord login, signed-in users who
+   * are not the super admin see the development notice, and the super admin is sent
+   * to Discord's bot authorization page for the requested worker's application.
+   */
+  private async invite(request: IncomingMessage, response: ServerResponse, workerId: string): Promise<void> {
+    const session = this.auth.currentSession(request);
+    if (!session) {
+      redirect(response, new URL('/auth/discord', this.config.publicUrl).toString());
+      return;
+    }
+
+    if (!this.auth.isSuperAdmin(session)) {
+      redirect(response, new URL('/development', this.config.publicUrl).toString());
+      return;
+    }
+
+    if (!WORKER_ID.test(workerId)) {
+      throw new HttpError(404, 'unknown bot');
+    }
+
+    const {workers} = await this.orchestrator.workers();
+    const worker = workers.find(candidate => candidate.workerId === workerId);
+    if (!worker) {
+      throw new HttpError(404, 'unknown bot');
+    }
+
+    const botId = worker.ok ? worker.value?.bot?.id : undefined;
+    if (typeof botId !== 'string' || !SNOWFLAKE.test(botId)) {
+      throw new DashboardHttpError(503, 'bot is offline, retry shortly');
+    }
+
+    redirect(response, botInviteUrl(botId));
+  }
+
+  /** Session + super-admin gate for every /api/super endpoint. */
+  private requireSuperAdmin(request: IncomingMessage): DashboardSession {
+    const session = this.auth.currentSession(request);
+    if (!session) {
+      throw unauthorized();
+    }
+
+    this.assertSuperAdmin(session);
+    return session;
+  }
+
+  private assertSuperAdmin(session: DashboardSession): void {
+    if (!this.auth.isSuperAdmin(session)) {
+      throw new DashboardHttpError(403, 'super admin required', {code: 'SUPER_ADMIN_REQUIRED'});
+    }
+  }
+
+  private async handleSuper(request: IncomingMessage, response: ServerResponse, segments: string[]): Promise<void> {
+    const route = segments.join('/');
+
+    if (request.method === 'GET' && route === 'overview') {
+      const session = this.requireSuperAdmin(request);
+      sendJson(response, 200, await this.orchestrator.superOverview(superActor(session)));
+      return;
+    }
+
+    if (request.method === 'GET' && route === 'bots') {
+      this.requireSuperAdmin(request);
+      sendJson(response, 200, {bots: await this.superBots()});
+      return;
+    }
+
+    if (request.method === 'POST' && segments.length === 3 && segments[0] === 'guilds' && segments[2] === 'leave') {
+      await this.superLeave(request, response, segments[1]);
+      return;
+    }
+
+    if (segments.length === 3 && segments[0] === 'blocks' && (request.method === 'PUT' || request.method === 'DELETE')) {
+      await this.superBlock(request, response, request.method, segments[1], segments[2]);
+      return;
+    }
+
+    this.requireSuperAdmin(request);
+    sendJson(response, 404, {error: 'not found'});
+  }
+
+  private async superBots() {
+    const {workers} = await this.orchestrator.workers();
+    return workers
+      .filter(worker => WORKER_ID.test(worker.workerId))
+      .map(worker => {
+        const bot = worker.ok ? worker.value?.bot ?? null : null;
+        return {
+          workerId: worker.workerId,
+          ready: worker.ok && worker.value?.discordReady === true,
+          bot: bot ? {id: bot.id, username: bot.username} : null,
+        };
+      });
+  }
+
+  /**
+   * Super-admin mutations: session, super admin, Origin + CSRF, then the shared
+   * mutation budget. Every attempt by an authenticated user is audited like guild mutations.
+   */
+  private async superMutate(
+    request: IncomingMessage,
+    response: ServerResponse,
+    audit: MutationAudit,
+    execute: (actor: SuperActor) => Promise<MutationResult>,
+  ): Promise<void> {
+    const session = this.auth.currentSession(request);
+    if (!session) {
+      throw unauthorized();
+    }
+
+    let outcome = 'failed';
+    try {
+      this.assertSuperAdmin(session);
+      this.auth.assertCsrf(request, session);
+      this.auth.assertMutationAllowed(session);
+      const result = await execute(superActor(session));
+      sendJson(response, result.statusCode, result.body);
+      outcome = 'ok';
+    } catch (error: unknown) {
+      outcome = error instanceof HttpError ? `rejected_${error.statusCode}` : 'failed';
+      throw error;
+    } finally {
+      auditMutation(session, audit, outcome);
+    }
+  }
+
+  private async superLeave(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
+    const audit: MutationAudit = {action: 'super.guild.leave', guildId: SNOWFLAKE.test(guildId) ? guildId : undefined};
+    await this.superMutate(request, response, audit, async actor => {
+      if (!SNOWFLAKE.test(guildId)) {
+        throw new HttpError(400, 'invalid Discord server id');
+      }
+
+      const input = await readJsonBody(request);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new HttpError(400, 'request body must be an object');
+      }
+
+      const {workerIds} = input as {workerIds?: unknown};
+      if (workerIds !== undefined
+        && (!Array.isArray(workerIds)
+          || workerIds.length > MAX_LEAVE_WORKERS
+          || workerIds.some(workerId => typeof workerId !== 'string' || !WORKER_ID.test(workerId)))) {
+        throw new HttpError(400, 'workerIds must be an array of worker ids');
+      }
+
+      const selected = workerIds === undefined ? undefined : [...new Set(workerIds as string[])];
+      audit.workerIds = selected;
+
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.superLeaveGuild(guildId, selected === undefined ? {} : {workerIds: selected}, actor),
+      };
+    });
+  }
+
+  private async superBlock(
+    request: IncomingMessage,
+    response: ServerResponse,
+    method: 'PUT' | 'DELETE',
+    kind: string,
+    subjectId: string,
+  ): Promise<void> {
+    const audit: MutationAudit = {action: method === 'PUT' ? 'super.block.put' : 'super.block.delete'};
+    await this.superMutate(request, response, audit, async actor => {
+      if (kind !== 'GUILD' && kind !== 'USER') {
+        throw new HttpError(400, 'block kind must be GUILD or USER');
+      }
+
+      if (!SNOWFLAKE.test(subjectId)) {
+        throw new HttpError(400, 'invalid Discord id');
+      }
+
+      audit.subjectKind = kind;
+      audit.subjectId = subjectId;
+      if (kind === 'GUILD') {
+        audit.guildId = subjectId;
+      }
+
+      if (method === 'DELETE') {
+        return {
+          statusCode: 200,
+          body: await this.orchestrator.superDeleteBlock(kind, subjectId, actor),
+        };
+      }
+
+      const reason = await readBlockReason(request);
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.superPutBlock(kind, subjectId, reason === undefined ? {} : {reason}, actor),
+      };
     });
   }
 
@@ -267,8 +558,8 @@ export default class DashboardServer {
   private async mutate(
     request: IncomingMessage,
     response: ServerResponse,
-    audit: MutationAudit,
-    execute: (entry: MutationAudit) => Promise<MutationResult>,
+    audit: GuildMutationAudit,
+    execute: (entry: GuildMutationAudit) => Promise<MutationResult>,
   ): Promise<void> {
     const session = this.auth.requireSession(request);
     let outcome = 'failed';

@@ -19,14 +19,14 @@ Implemented:
 - fleet health checks, database backup, deploy and rollback awareness;
 - Discord OAuth dashboard with guild-level authorization;
 - one/subset/all worker settings management from the dashboard;
-- persistent per-guild worker groups with arbitrary overlapping membership.
+- persistent per-guild worker groups with arbitrary overlapping membership;
+- super console backend: fleet overview, forced guild leave, guild/user blocks and an audit log (see `SUPER_CONSOLE.md`).
 
 Not implemented yet:
 
 - automatic voice-channel worker assignment;
 - player reservations/leases;
-- per-guild quotas;
-- audit log UI.
+- per-guild quotas.
 
 ## Container topology
 
@@ -55,8 +55,16 @@ GET   /health
 GET   /v1/status
 GET   /v1/guilds/:guildId/settings
 PATCH /v1/guilds/:guildId/settings
+POST  /v1/guilds/:guildId/leave
+PUT   /v1/blocklist
 POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "true")
 ```
+
+`GET /v1/status` reports, per guild, `id`, `name`, `iconUrl`, `memberCount`, `ownerId` and `playerActive` (the bot has a voice connection there), and `bot.avatarUrl`. The extra fields are optional for the orchestrator, so mixed-version fleets keep working.
+
+`POST /v1/guilds/:guildId/leave` makes the bot leave the guild: `200 {workerId, guildId, left: true}`, `404 {error, code: "NOT_IN_GUILD"}` when it is not a member, `400` for a malformed id.
+
+`PUT /v1/blocklist` with `{guildIds: string[], userIds: string[]}` (Discord ids, at most 5000 each, duplicates removed, body up to 512 KiB) replaces the worker's in-memory blocklist and immediately leaves every blocked guild it is in: `200 {workerId, left: string[], failed: string[]}` (`failed` lists guilds it could not leave). Invalid input is `400 {error, code: "INVALID_BLOCKLIST"}` and leaves the current list unchanged.
 
 The settings endpoint only accepts the existing Muse guild settings:
 
@@ -88,8 +96,17 @@ GET    /v1/guilds/:guildId/groups
 POST   /v1/guilds/:guildId/groups
 PATCH  /v1/guilds/:guildId/groups/:groupId
 DELETE /v1/guilds/:guildId/groups/:groupId
+GET    /v1/super/overview
+POST   /v1/super/guilds/:guildId/leave
+PUT    /v1/super/blocks/:kind/:subjectId
+DELETE /v1/super/blocks/:kind/:subjectId
+GET    /v1/blocks/users/:userId
 POST   /v1/playback        (worker control token, not the API token; see below)
 ```
+
+The `/v1/super/*` and `/v1/blocks/*` routes are the super console backend; their contract (actor headers, payloads, error codes, reconcile loop) is documented in `SUPER_CONSOLE.md`.
+
+Errors are JSON `{"error": "<message>"}`. Newer routes also include a machine-readable `"code"` (for example `{"error": "you cannot block yourself", "code": "CANNOT_BLOCK_SELF"}`); clients should branch on `code` when present and on the status otherwise.
 
 `:guildId` must be a Discord snowflake (`^[1-9]\d{9,21}$`); other values are rejected with 400 before any worker is contacted. When `workerIds` is given in a settings update, only listed workers that are reachable and members of the guild are patched; the others are reported in `failed` with `WorkerNotInGuild`.
 
@@ -149,10 +166,10 @@ while another Discord server can define completely different groups using the sa
 
 A worker may belong to multiple groups. A group remains persisted if one of its workers is temporarily unavailable; the dashboard identifies unavailable members rather than silently deleting them.
 
-The group state is included in production backup and rollback together with the five worker SQLite databases.
+The group state is included in production backup and rollback together with the five worker SQLite databases. The super console keeps its block list in `/state/blocks.json` and its audit log in `/state/super-audit.json` in the same volume, with the same durability rules (see `SUPER_CONSOLE.md`).
 
 Writes are durable and atomic: the next state is written to a temporary file, fsynced and renamed over `groups.json` (the directory is fsynced where the platform supports it), and only then applied in memory. Before each write the previous good state is saved as `groups.json.bak`. On startup the file is schema-validated; if it is unreadable or invalid the orchestrator falls back to `groups.json.bak` (with a warning), and refuses to start with a clear error if neither is valid.
 
 ### Single instance
 
-The orchestrator keeps the group store in memory and is the only writer of `/state/groups.json`. Run exactly one orchestrator instance per state volume; multiple replicas would silently overwrite each other's changes.
+The orchestrator keeps the group, block and audit stores in memory and is the only writer of `/state/groups.json`, `/state/blocks.json` and `/state/super-audit.json`. Run exactly one orchestrator instance per state volume; multiple replicas would silently overwrite each other's changes.

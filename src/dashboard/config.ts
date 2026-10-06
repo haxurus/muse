@@ -39,6 +39,26 @@ const validateInternalUrl = (value: string, label: string): string => {
   return value.replace(/\/$/u, '');
 };
 
+const SUPER_ADMIN_PATTERN = /^\d{17,20}$/u;
+
+/**
+ * Parses MUSE_SUPER_ADMIN_USER_ID. Empty or unset means "no super admin": the super
+ * console and the bot invite links stay disabled (fail closed). Any other value must
+ * be a Discord user ID, otherwise startup fails.
+ */
+export const parseSuperAdminUserId = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim() ?? '';
+  if (trimmed === '') {
+    return undefined;
+  }
+
+  if (!SUPER_ADMIN_PATTERN.test(trimmed)) {
+    throw new Error('MUSE_SUPER_ADMIN_USER_ID must be a Discord user ID (17-20 digits) or empty');
+  }
+
+  return trimmed;
+};
+
 export type DashboardConfig = {
   host: string;
   port: number;
@@ -49,6 +69,8 @@ export type DashboardConfig = {
   orchestratorUrl: string;
   orchestratorToken: string;
   sessionTtlMs: number;
+  /** Discord user ID allowed to use the super console and bot invite links. */
+  superAdminUserId?: string;
 };
 
 export const loadDashboardConfig = (): DashboardConfig => {
@@ -65,6 +87,8 @@ export const loadDashboardConfig = (): DashboardConfig => {
   if (!/^\d{10,32}$/u.test(clientId)) {
     throw new Error('MUSE_DASHBOARD_DISCORD_CLIENT_ID must be a Discord application ID');
   }
+
+  const superAdminUserId = parseSuperAdminUserId(process.env.MUSE_SUPER_ADMIN_USER_ID);
 
   const ttlHours = Number.parseInt(process.env.MUSE_DASHBOARD_SESSION_HOURS ?? '8', 10);
   if (!Number.isInteger(ttlHours) || ttlHours < 1 || ttlHours > 24) {
@@ -90,5 +114,6 @@ export const loadDashboardConfig = (): DashboardConfig => {
       'Orchestrator token',
     ),
     sessionTtlMs: ttlHours * 60 * 60 * 1000,
+    ...(superAdminUserId === undefined ? {} : {superAdminUserId}),
   };
 };

@@ -88,7 +88,11 @@ const startDashboard = async (publicUrl = PUBLIC_URL) => {
   const store = new SessionStore(config.sessionTtlMs);
   const discord = fakeDiscord();
   const orchestrator = fakeOrchestrator();
-  const auth = new DashboardAuth(config, {store, discord: discord as unknown as DiscordOAuthClient});
+  const auth = new DashboardAuth(config, {
+    store,
+    discord: discord as unknown as DiscordOAuthClient,
+    isUserBlocked: vi.fn(async () => false),
+  });
   const server = new DashboardServer(config, {auth, orchestrator: orchestrator as unknown as OrchestratorClient});
   await server.start();
   servers.push(server);
