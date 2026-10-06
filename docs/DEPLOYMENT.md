@@ -290,6 +290,15 @@ Muse is considered healthy only after the Discord client has reached ready state
 
 Rollback pointers (`previous-image`, `previous-backup`, `previous-config`) are written only after the new release is healthy, and only when the digest actually changed. They always describe one consistent release: its image, the backup of its state taken just before it was replaced, and its Compose configuration.
 
+### Disk space and old images
+
+Every release pulls a new multi-arch image. To keep the disk from filling up:
+
+- after a healthy deploy or rollback, `muse-deploy` removes every `ghcr.io/haxurus/muse` image except the current and the previous release (after a rollback: the restored release and the one rolled back from). Images of other projects are never touched, and an image still used by a container is skipped;
+- before pulling a release, if less than 5 GiB is free on `/var/lib/docker` or `/srv/docker/muse` (whichever is fuller), old Muse images are pruned first; if less than 3 GiB is still free, the command stops before stopping the fleet or taking the backup.
+
+A service that crashes and is restarted by Docker during startup (for example because of an invalid Discord token) fails the health wait immediately instead of after the 240-second timeout, and the worker process now exits with `Muse failed to start (<code>)` on such errors.
+
 ## 12. Backups
 
 Before replacing a running release the deploy script stops Muse, verifies that no container of the project is still running, and archives all five worker SQLite databases plus the orchestrator's per-guild group state. If any container keeps running the deploy aborts before touching data.

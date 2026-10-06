@@ -85,4 +85,10 @@ const hasDatabaseBeenMigratedToPrisma = async () => {
     migrationsApplied: () => spinner.succeed('Database migrations applied.'),
     startBot,
   });
-})();
+})().catch((error: unknown) => {
+  // A startup failure (e.g. an invalid Discord token) must stop the process so
+  // the container fails visibly instead of running without ever becoming ready.
+  const code = (error as {code?: unknown})?.code;
+  console.error(`Muse failed to start${typeof code === 'string' ? ` (${code})` : ''}:`, error instanceof Error ? error.message : error);
+  process.exit(1);
+});
