@@ -25,6 +25,7 @@ const staticAsset = (fileName: string, contentType: string, cacheControl = NO_ST
   cacheControl,
 });
 
+const HOME_HTML = staticAsset('home.html', 'text/html; charset=utf-8');
 const INDEX_HTML = staticAsset('index.html', 'text/html; charset=utf-8');
 const DEVELOPMENT_HTML = staticAsset('development.html', 'text/html; charset=utf-8');
 
@@ -32,6 +33,7 @@ const DEVELOPMENT_HTML = staticAsset('development.html', 'text/html; charset=utf
 const STATIC_ASSETS = new Map<string, StaticAsset>([
   ['/assets/dashboard.css', staticAsset('dashboard.css', 'text/css; charset=utf-8')],
   ['/assets/dashboard.js', staticAsset('dashboard.js', 'text/javascript; charset=utf-8')],
+  ['/assets/home.js', staticAsset('home.js', 'text/javascript; charset=utf-8')],
   ['/assets/fonts/Geist-Variable.woff2', staticAsset('fonts/Geist-Variable.woff2', 'font/woff2', FONT_CACHE)],
   ['/assets/fonts/GeistMono-Variable.woff2', staticAsset('fonts/GeistMono-Variable.woff2', 'font/woff2', FONT_CACHE)],
   ['/assets/fonts/OFL.txt', staticAsset('fonts/OFL.txt', 'text/plain; charset=utf-8', FONT_CACHE)],
@@ -39,13 +41,20 @@ const STATIC_ASSETS = new Map<string, StaticAsset>([
 
 const NOINDEX = {'x-robots-tag': 'noindex, nofollow'};
 
+/** Path of the signed-in app (server list). The public home page lives at "/". */
+export const DASHBOARD_PATH = '/dashboard';
+
+/** Anchor of the super-admin "Nuovo server" invite card inside the dashboard. */
+export const NEW_SERVER_ANCHOR = 'nuovo-server';
+
 const SNOWFLAKE = /^\d{17,20}$/u;
 const WORKER_ID = /^muse-\d{2}$/u;
 const MAX_BLOCK_REASON_LENGTH = 500;
 const MAX_LEAVE_WORKERS = 32;
 
 /** Bot invite permissions: View Channels, Send Messages, Read Message History, Connect, Speak. */
-export const BOT_INVITE_PERMISSIONS = '3214336';
+// View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak.
+export const BOT_INVITE_PERMISSIONS = '3230720';
 
 export const botInviteUrl = (botId: string): string =>
   `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(botId)}&scope=bot+applications.commands&permissions=${BOT_INVITE_PERMISSIONS}`;
@@ -319,8 +328,14 @@ export default class DashboardServer {
       return true;
     }
 
+    if (pathname === '/') {
+      // The public home page is the only indexable HTML view.
+      sendAsset(response, HOME_HTML);
+      return true;
+    }
+
     const segments = pathname.split('/').filter(Boolean);
-    const isAppView = pathname === '/'
+    const isAppView = pathname === DASHBOARD_PATH
       || pathname === '/super'
       || (segments.length === 2 && segments[0] === 'server' && SNOWFLAKE.test(segments[1]));
     if (isAppView) {
@@ -333,12 +348,29 @@ export default class DashboardServer {
       return true;
     }
 
+    if (pathname === '/add') {
+      this.add(request, response);
+      return true;
+    }
+
     if (segments.length === 2 && segments[0] === 'invite') {
       await this.invite(request, response, segments[1]);
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * "Aggiungi a Discord" from the public home page. Only the super admin can add the
+   * bots to new servers, so they land on the dashboard invite card; everybody else
+   * (anonymous or signed in) sees the development notice.
+   */
+  private add(request: IncomingMessage, response: ServerResponse): void {
+    const session = this.auth.currentSession(request);
+    const superAdmin = session !== undefined && this.auth.isSuperAdmin(session);
+    const target = superAdmin ? `${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}` : '/development';
+    redirect(response, new URL(target, this.config.publicUrl).toString());
   }
 
   /**

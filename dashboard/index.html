@@ -18,7 +18,7 @@
   <div id="site-view" class="public-site">
     <header class="site-header">
       <div class="site-container site-nav">
-        <a class="brand" href="/" data-nav aria-label="Muse - Home">
+        <a class="brand" href="/" aria-label="Muse - Home">
           <svg class="brand-mark" width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
             <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
             <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -28,7 +28,7 @@
           <span>Muse</span>
         </a>
         <nav class="site-nav-links" data-i18n-aria-label="nav.label">
-          <a href="/" data-nav data-route-link="home" data-i18n="nav.servers"></a>
+          <a href="/dashboard" data-nav data-route-link="home" data-i18n="nav.servers"></a>
           <a href="/super" data-nav data-route-link="super" data-super-only hidden data-i18n="nav.super"></a>
         </nav>
         <div class="site-nav-end">
@@ -40,7 +40,7 @@
         <details class="site-mobile-menu">
           <summary data-i18n-aria-label="nav.menu"><span></span><span></span></summary>
           <div>
-            <a href="/" data-nav data-i18n="nav.servers"></a>
+            <a href="/dashboard" data-nav data-i18n="nav.servers"></a>
             <a href="/super" data-nav data-super-only hidden data-i18n="nav.super"></a>
             <div class="site-mobile-actions">
               <a class="button button-primary" href="/auth/discord" data-auth="anonymous" data-i18n="nav.login"></a>
@@ -106,7 +106,7 @@
             <div class="user-card" id="user-card"></div>
           </div>
 
-          <section class="card card-feature" id="invite-card" hidden>
+          <section class="card card-feature" id="nuovo-server" hidden>
             <div class="card-head">
               <div>
                 <span class="kicker" data-i18n="invite.kicker"></span>
@@ -232,7 +232,7 @@
   <!-- Guild app shell -->
   <div id="guild-view" class="app-shell" hidden>
     <aside class="sidebar">
-      <a class="brand sidebar-brand" href="/" data-nav aria-label="Muse - Home">
+      <a class="brand sidebar-brand" href="/" aria-label="Muse - Home">
         <svg class="brand-mark" width="24" height="24" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
           <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
           <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -241,7 +241,7 @@
         </svg>
         <span>Muse</span>
       </a>
-      <a class="sidebar-back" href="/" data-nav>
+      <a class="sidebar-back" href="/dashboard" data-nav>
         <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>
         <span data-i18n="guild.back"></span>
       </a>

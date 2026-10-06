@@ -284,7 +284,7 @@ describe('dashboard OAuth state and cookies', () => {
     );
 
     expect(callback.status).toBe(302);
-    expect(callback.headers.location).toBe(`${PUBLIC_URL}/`);
+    expect(callback.headers.location).toBe(`${PUBLIC_URL}/dashboard`);
     const sessionCookie = (callback.headers['set-cookie'] ?? []).find(value => value.startsWith('__Host-muse_session='));
     expect(sessionCookie).toBeDefined();
     expect(sessionCookie).toContain('Path=/;');
@@ -320,18 +320,18 @@ describe('dashboard OAuth state and cookies', () => {
     const state = new URL(begin.headers.location!).searchParams.get('state')!;
     const callbackPath = `/auth/discord/callback?code=abc&state=${encodeURIComponent(state)}`;
 
-    expect((await call(dashboard.port, 'GET', callbackPath, {cookie: stateCookie})).headers.location).toBe(`${PUBLIC_URL}/`);
+    expect((await call(dashboard.port, 'GET', callbackPath, {cookie: stateCookie})).headers.location).toBe(`${PUBLIC_URL}/dashboard`);
 
     const replay = await call(dashboard.port, 'GET', callbackPath, {cookie: stateCookie});
     expect(replay.status).toBe(302);
-    expect(replay.headers.location).toBe(`${PUBLIC_URL}/?login=failed`);
+    expect(replay.headers.location).toBe(`${PUBLIC_URL}/dashboard?login=failed`);
 
     const mismatch = await call(dashboard.port, 'GET', callbackPath, {cookie: '__Secure-muse_oauth_state=other'});
-    expect(mismatch.headers.location).toBe(`${PUBLIC_URL}/?login=failed`);
+    expect(mismatch.headers.location).toBe(`${PUBLIC_URL}/dashboard?login=failed`);
 
     const cancelled = await call(dashboard.port, 'GET', '/auth/discord/callback?error=access_denied');
     expect(cancelled.status).toBe(302);
-    expect(cancelled.headers.location).toBe(`${PUBLIC_URL}/?login=failed`);
+    expect(cancelled.headers.location).toBe(`${PUBLIC_URL}/dashboard?login=failed`);
     expect(dashboard.discord.exchangeCode).toHaveBeenCalledTimes(1);
   });
 
@@ -354,7 +354,7 @@ describe('dashboard OAuth state and cookies', () => {
       {cookie: stateCookie},
     );
 
-    expect(callback.headers.location).toBe(`${PUBLIC_URL}/?login=failed`);
+    expect(callback.headers.location).toBe(`${PUBLIC_URL}/dashboard?login=failed`);
     expect(dashboard.discord.revoke).toHaveBeenCalledWith('discord-access-token');
     expect(dashboard.discord.currentUser).not.toHaveBeenCalled();
   });
