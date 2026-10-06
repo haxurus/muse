@@ -493,6 +493,23 @@ describe('PLAY-13 private cookie-copy preservation', () => {
     }
   });
 
+  it('treats an empty mounted cookies file as no cookies', async () => {
+    const fixtureDirectory = await fs.mkdtemp(path.join(tmpdir(), 'muse-playback-gaps-fixture-'));
+    const sourcePath = path.join(fixtureDirectory, 'mounted-cookies.txt');
+    await fs.writeFile(sourcePath, '', 'utf8');
+    process.env.YT_DLP_COOKIES_PATH = sourcePath;
+    process.env.YT_DLP_PATH = '/fake/yt-dlp';
+    dependencyMocks.execa.mockResolvedValue({stdout: VALID_MEDIA_RESPONSE});
+
+    try {
+      await getYouTubeMediaSource('https://www.youtube.com/watch?v=abcdefghijk');
+      const [, args] = dependencyMocks.execa.mock.calls[0] as [string, string[]];
+      expect(args).not.toContain('--cookies');
+    } finally {
+      await fs.rm(fixtureDirectory, {recursive: true, force: true});
+    }
+  });
+
   it('removes the private cookie copy when extraction fails', async () => {
     const fixtureDirectory = await fs.mkdtemp(path.join(tmpdir(), 'muse-playback-gaps-fixture-'));
     const sourcePath = path.join(fixtureDirectory, 'mounted-cookies.txt');

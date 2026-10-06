@@ -94,6 +94,19 @@ describe('deploy tooling', () => {
     expect(rollbackBody).toContain('prune_images "$current"');
   });
 
+  it('mounts optional YouTube cookies into every worker and creates missing optional secrets', async () => {
+    const compose = await read('deploy/docker-compose.prod.yml');
+    const muse = await read('ops/muse-deploy');
+    const install = await read('ops/install-vps.sh');
+
+    expect(compose).toContain('YT_DLP_COOKIES_PATH: /run/secrets/youtube_cookies');
+    expect(compose.match(/^ {6}- youtube_cookies$/gmu)).toHaveLength(5);
+    expect(compose).toContain('file: ./secrets/youtube_cookies');
+    expect(muse).toContain('OPTIONAL_SECRETS=(spotify_client_id spotify_client_secret youtube_cookies)');
+    expect(muse.indexOf('  ensure_optional_secrets\n  validate_runtime_config')).toBeGreaterThan(-1);
+    expect(install).toContain('ensure_runtime_secret youtube_cookies');
+  });
+
   it('fails fast when a service restarts during startup', async () => {
     const muse = await read('ops/muse-deploy');
     expect(muse).toContain('{{.RestartCount}}');

@@ -44,7 +44,7 @@ jobs:
             orchestrator_api_token dashboard_discord_client_secret \
             discord_token_01 discord_token_02 discord_token_03 discord_token_04 discord_token_05 \
             control_token_01 control_token_02 control_token_03 control_token_04 control_token_05 \
-            youtube_api_key spotify_client_id spotify_client_secret; do
+            youtube_api_key spotify_client_id spotify_client_secret youtube_cookies; do
             printf 'ci-placeholder\n' > "deploy/secrets/$secret"
           done
           MUSE_IMAGE="ghcr.io/haxurus/muse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \

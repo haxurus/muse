@@ -105,6 +105,22 @@ compose() {
     --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
 }
 
+# Optional secrets referenced by the Compose file. Releases that add a new one
+# must still deploy on installations created before it existed, so a missing
+# file is created empty with the runtime permissions instead of failing.
+OPTIONAL_SECRETS=(spotify_client_id spotify_client_secret youtube_cookies)
+
+ensure_optional_secrets() {
+  local secret file
+  for secret in "${OPTIONAL_SECRETS[@]}"; do
+    file="$BASE/secrets/$secret"
+    if [[ ! -e "$file" ]]; then
+      install -m 640 -o root -g "$RUNTIME_GID" /dev/null "$file"
+      echo "Created empty optional secret $secret."
+    fi
+  done
+}
+
 validate_runtime_config() {
   local secret client_id public_url
 
@@ -454,6 +470,7 @@ deploy_image() {
 
   old="$(current_image)"
 
+  ensure_optional_secrets
   validate_runtime_config
   require_edge_network
   ensure_disk_space "$image" "$old"
@@ -529,6 +546,7 @@ rollback() {
     || die 1 "The backup recorded for the previous image is missing: $target_backup"
   current="$(current_image)"
   ensure_dirs
+  ensure_optional_secrets
 
   validate_config_set "$PREVIOUS_CONFIG/docker-compose.yml" "$PREVIOUS_CONFIG/overlays" "$target"
   ensure_disk_space "$target" "$current"

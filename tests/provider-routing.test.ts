@@ -198,6 +198,17 @@ describe('GetSongs provider routing', () => {
     expect(youtubeAPI.search).not.toHaveBeenCalledWith(url, false);
   });
 
+  it('accepts Spotify app links with a locale segment and tracking query', async () => {
+    const {getSongs, spotifyAPI, youtubeAPI} = makeGetSongsHarness();
+    const result = [makeSong('Spotify result', 'spotify-result')];
+    spotifyAPI.getTrack.mockResolvedValue({name: 'Spotify song', artist: 'Spotify artist'});
+    youtubeAPI.search.mockResolvedValue(result);
+
+    await expect(getSongs.getSongs('https://open.spotify.com/intl-it/track/4uLU6hMCjMI75M1A2tKUQC?si=abc123', 20, false))
+      .resolves.toEqual([result, '']);
+    expect(spotifyAPI.getTrack).toHaveBeenCalledWith('https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC');
+  });
+
   it('rejects arbitrary direct-stream URLs by default', async () => {
     const {getSongs} = makeGetSongsHarness();
     const url = 'https://radio.example/live.m3u8';

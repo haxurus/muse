@@ -114,6 +114,8 @@ ensure_runtime_secret dashboard_discord_client_secret
 ensure_runtime_secret youtube_api_key
 ensure_runtime_secret spotify_client_id
 ensure_runtime_secret spotify_client_secret
+# Optional Netscape cookies file for yt-dlp (YouTube bot check on datacenter IPs).
+ensure_runtime_secret youtube_cookies
 
 # --- Dedicated ingress network for the dashboard edge -------------------------
 
