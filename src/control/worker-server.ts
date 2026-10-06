@@ -8,7 +8,8 @@ import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.
 import type PlaybackWorker from '../playback/worker.js';
 import {assertGuildId} from './snowflake.js';
 import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklist.js';
-import type {WorkerBlocklistResult, WorkerLeaveGuildResult, WorkerStatus} from './types.js';
+import type {WorkerBlocklistResult, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusAnnounceResult} from './types.js';
+import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -95,6 +96,11 @@ export default class WorkerControlServer {
         return;
       }
 
+      if (request.method === 'POST' && segments.join('/') === 'v1/status-channel/announce') {
+        sendJson(response, 200, await this.announceStatus(await readJsonBody(request)));
+        return;
+      }
+
       if (segments.length === 4
         && segments[0] === 'v1'
         && segments[1] === 'guilds'
@@ -133,6 +139,18 @@ export default class WorkerControlServer {
       console.error('Worker control API error:', error);
       sendJson(response, 500, {error: 'internal server error'});
     }
+  }
+
+  /** Post a status message on orchestrator request (the super console test button). Discord failures are a 200 with `ok: false`. */
+  private async announceStatus(input: unknown): Promise<WorkerStatusAnnounceResult> {
+    const request = parseStatusAnnounceRequest(input);
+    const {channelId} = request;
+    const result = await postStatusMessage(this.client, {...request, workerId: this.config.WORKER_ID});
+    if (!result.ok) {
+      console.warn(`Worker ${this.config.WORKER_ID} could not post a status message in ${channelId} (${result.error})`);
+    }
+
+    return {workerId: this.config.WORKER_ID, ...result};
   }
 
   private async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {

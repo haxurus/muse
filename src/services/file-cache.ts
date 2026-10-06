@@ -304,7 +304,8 @@ export default class FileCacheProvider {
     for await (const dirent of await fs.opendir(temporaryDirectory)) {
       if (dirent.isFile()) {
         debug(`${dirent.name} was abandoned in the cache temporary directory. Removing from disk.`);
-        await fs.unlink(path.join(temporaryDirectory, dirent.name));
+        // A write finalizing concurrently may already have removed its temporary file.
+        await this.removeTemporaryFile(path.join(temporaryDirectory, dirent.name));
       }
     }
 
@@ -319,7 +320,7 @@ export default class FileCacheProvider {
 
         if (!model) {
           debug(`${dirent.name} was present on disk but was not in the database. Removing from disk.`);
-          await fs.unlink(path.join(this.config.CACHE_DIR, dirent.name));
+          await this.removeTemporaryFile(path.join(this.config.CACHE_DIR, dirent.name));
         }
       }
     }

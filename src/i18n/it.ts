@@ -205,4 +205,12 @@ export const IT_MESSAGES: MessageDictionary = {
   playbackNoPlayableSongs: 'Nessun brano riproducibile trovato per questa ricerca.',
   playbackNoSongToSkip: 'Non c\'è un brano a cui passare.',
   playbackQueueEmpty: 'La coda è vuota.',
+
+  // Canale di stato dei bot
+  statusOnlineTitle: 'Bot avviato',
+  statusOnlineDescription: 'Bot connesso come {tag}.',
+  statusTestTitle: 'Messaggio di prova',
+  statusTestDescription: 'Prova del canale di stato inviata da {tag}.',
+  statusFieldAuthor: 'Autore azione',
+  statusFieldDetails: 'Dettagli',
 };

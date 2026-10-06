@@ -1100,6 +1100,7 @@ const renderOverviewData = () => {
   $('super-blocks-empty').hidden = blocks.length > 0;
   $('super-audit').replaceChildren(...audit.map(renderAudit));
   $('super-audit-empty').hidden = audit.length > 0;
+  renderStatusChannel();
 };
 
 /** Runs a super-admin mutation, then reloads the overview. Returns the response body or null. */
@@ -1112,6 +1113,178 @@ const superAction = async (url, method, body) => {
   } catch (error) {
     handleFailure(error, message => showNotice($('super-message'), message));
     return null;
+  }
+};
+
+/* ---------- Bot status channel ---------- */
+
+const currentStatusChannelId = () => {
+  const setting = overview && overview.statusChannel;
+  return setting && typeof setting.statusChannelId === 'string' ? setting.statusChannelId : null;
+};
+
+const MAX_MENTION_ROLES = 10;
+
+/** Roles being edited; saved together with the channel. Reset from the overview unless edited. */
+let statusRoleDraft = [];
+let statusRolesDirty = false;
+
+const savedMentionRoleIds = () => {
+  const setting = overview && overview.statusChannel;
+  return setting ? list(setting.mentionRoleIds).filter(id => typeof id === 'string') : [];
+};
+
+const renderStatusRoles = () => {
+  $('status-role-list').replaceChildren(...statusRoleDraft.map(roleId => {
+    const chip = el('span', 'chip status-role-chip');
+    const remove = el('button', '', '×');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', t('super.statusChannel.removeRole', {id: roleId}));
+    remove.addEventListener('click', () => {
+      statusRoleDraft = statusRoleDraft.filter(id => id !== roleId);
+      statusRolesDirty = true;
+      renderStatusRoles();
+    });
+    chip.append(el('span', 'mono', `@${roleId}`), remove);
+    return chip;
+  }));
+};
+
+const addStatusRole = () => {
+  const input = $('status-role-form').elements.roleId;
+  const roleId = input.value.trim();
+  if (!SNOWFLAKE.test(roleId)) {
+    showNotice($('super-message'), t('super.statusChannel.invalidRoleId'));
+    input.focus();
+    return;
+  }
+
+  if (statusRoleDraft.includes(roleId)) {
+    showNotice($('super-message'), t('super.statusChannel.roleExists'));
+    return;
+  }
+
+  if (statusRoleDraft.length >= MAX_MENTION_ROLES) {
+    showNotice($('super-message'), t('super.statusChannel.tooManyRoles'));
+    return;
+  }
+
+  showNotice($('super-message'), '');
+  statusRoleDraft = [...statusRoleDraft, roleId];
+  statusRolesDirty = true;
+  input.value = '';
+  renderStatusRoles();
+};
+
+const setStatusChannelBusy = busy => {
+  const channelId = currentStatusChannelId();
+  $('status-channel-form').querySelector('button[type="submit"]').disabled = busy;
+  $('status-channel-disable').disabled = busy || channelId === null;
+  $('status-channel-test').disabled = busy || channelId === null;
+};
+
+const renderStatusChannel = () => {
+  const setting = (overview && overview.statusChannel) || {};
+  const channelId = currentStatusChannelId();
+  const input = $('status-channel-form').elements.channelId;
+  // Do not overwrite what the super admin is typing when the overview reloads.
+  if (document.activeElement !== input) input.value = channelId || '';
+  setStatusChannelBusy(false);
+  if (!statusRolesDirty) statusRoleDraft = savedMentionRoleIds();
+  renderStatusRoles();
+
+  const current = $('status-channel-current');
+  if (channelId === null) {
+    current.replaceChildren(el('span', '', t('super.statusChannel.none')));
+    return;
+  }
+
+  const parts = [
+    el('strong', '', t('super.statusChannel.current')),
+    tag(channelId, 'info'),
+    el('span', '', t('super.statusChannel.roles', {count: savedMentionRoleIds().length})),
+  ];
+  const actor = setting.updatedBy;
+  if (actor && typeof setting.updatedAt === 'string') {
+    parts.push(el('span', '', t('super.statusChannel.updated', {
+      date: formatDate(setting.updatedAt),
+      name: actor.username || actor.userId || '—',
+    })));
+  }
+
+  current.replaceChildren(...parts);
+};
+
+const statusErrorLabel = code => {
+  const label = lookup(`super.statusChannel.errors.${code}`);
+  return typeof label === 'string' ? label : String(code || '—');
+};
+
+const renderStatusResults = results => {
+  const names = overview ? botNameById() : new Map();
+  $('status-channel-results').replaceChildren(...results.map(result => {
+    const row = el('div', 'status-result');
+    const copy = el('div');
+    copy.append(el('strong', '', names.get(result.workerId) || result.workerId), el('span', 'mono', result.workerId));
+    row.append(copy, result.ok ? tag(t('super.statusChannel.posted'), 'ok') : tag(statusErrorLabel(result.error), 'danger'));
+    return row;
+  }));
+};
+
+const runStatusChannelAction = async action => {
+  setStatusChannelBusy(true);
+  try {
+    return await action();
+  } finally {
+    setStatusChannelBusy(false);
+  }
+};
+
+const saveStatusChannel = async () => {
+  const input = $('status-channel-form').elements.channelId;
+  const channelId = input.value.trim();
+  if (!SNOWFLAKE.test(channelId)) {
+    showNotice($('super-message'), t('super.statusChannel.invalidId'));
+    input.focus();
+    return;
+  }
+
+  const mentionRoleIds = [...statusRoleDraft];
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {channelId, mentionRoleIds}));
+  if (result) {
+    statusRolesDirty = false;
+    renderStatusChannel();
+    $('status-channel-results').replaceChildren();
+    toast(t('super.statusChannel.saved'));
+  }
+};
+
+const disableStatusChannel = async () => {
+  if (currentStatusChannelId() === null || !window.confirm(t('super.statusChannel.confirmDisable'))) return;
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {channelId: null}));
+  if (result) {
+    $('status-channel-results').replaceChildren();
+    toast(t('super.statusChannel.disabled'));
+  }
+};
+
+const testStatusChannel = async () => {
+  if (currentStatusChannelId() === null) {
+    showNotice($('super-message'), t('super.statusChannel.notSet'));
+    return;
+  }
+
+  toast(t('super.statusChannel.testing'));
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel/test', 'POST'));
+  if (!result) return;
+  const results = list(result.results).filter(item => item && typeof item.workerId === 'string');
+  renderStatusResults(results);
+  const ok = results.filter(item => item.ok === true).length;
+  const failed = results.length - ok;
+  if (failed > 0) {
+    showNotice($('super-message'), t('super.statusChannel.testPartial', {ok, failed}));
+  } else {
+    toast(t('super.statusChannel.testOk', {count: ok}));
   }
 };
 
@@ -1258,6 +1431,24 @@ const wire = () => {
 
   $('super-refresh').addEventListener('click', () => {
     void loadOverview();
+  });
+
+  $('status-channel-form').addEventListener('submit', event => {
+    event.preventDefault();
+    void saveStatusChannel();
+  });
+
+  $('status-role-form').addEventListener('submit', event => {
+    event.preventDefault();
+    addStatusRole();
+  });
+
+  $('status-channel-disable').addEventListener('click', () => {
+    void disableStatusChannel();
+  });
+
+  $('status-channel-test').addEventListener('click', () => {
+    void testStatusChannel();
   });
 
   for (const form of [$('block-user-form'), $('block-guild-form')]) {

@@ -53,8 +53,8 @@ export const PLAYBACK_OUTCOME_UNKNOWN_MESSAGE: string = EN_MESSAGES.playbackOutc
 
 const DEFAULT_ORCHESTRATOR_URL = 'http://orchestrator:3100';
 
-/** Resolve the private playback endpoint from MUSE_ORCHESTRATOR_URL (http/https origin with an optional path). */
-export const resolveOrchestratorPlaybackUrl = (value: string | undefined = process.env.MUSE_ORCHESTRATOR_URL): string => {
+/** Resolve a private orchestrator endpoint (`route` starts with '/') from MUSE_ORCHESTRATOR_URL (http/https origin with an optional path). */
+export const resolveOrchestratorUrl = (route: string, value: string | undefined = process.env.MUSE_ORCHESTRATOR_URL): string => {
   const configured = value?.trim();
   let url: URL;
   try {
@@ -67,8 +67,12 @@ export const resolveOrchestratorPlaybackUrl = (value: string | undefined = proce
     throw new Error('MUSE_ORCHESTRATOR_URL must be an http(s) URL without credentials, query or fragment');
   }
 
-  return `${url.origin}${url.pathname.replace(/\/+$/u, '')}/v1/playback`;
+  return `${url.origin}${url.pathname.replace(/\/+$/u, '')}${route}`;
 };
+
+/** Resolve the private playback endpoint from MUSE_ORCHESTRATOR_URL. */
+export const resolveOrchestratorPlaybackUrl = (value: string | undefined = process.env.MUSE_ORCHESTRATOR_URL): string =>
+  resolveOrchestratorUrl('/v1/playback', value);
 
 export const parsePlaybackRequest = (input: unknown): PlaybackRequest => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {

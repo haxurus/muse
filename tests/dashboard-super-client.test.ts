@@ -102,3 +102,32 @@ describe('orchestrator super-admin client', () => {
       .rejects.toMatchObject({statusCode: 502, message: 'orchestrator unavailable'});
   });
 });
+
+describe('orchestrator status channel client', () => {
+  it('forwards the actor headers on the status channel routes', async () => {
+    const client = new OrchestratorClient(config);
+    gotMock.get.mockReturnValue(jsonResult({statusChannelId: null, updatedAt: null, updatedBy: null}));
+    gotMock.put.mockReturnValue(jsonResult({statusChannelId: '666666666666666666'}));
+    gotMock.post.mockReturnValue(jsonResult({statusChannelId: '666666666666666666', results: []}));
+
+    await expect(client.superStatusChannel(actor)).resolves.toEqual({statusChannelId: null, updatedAt: null, updatedBy: null});
+    await client.superSetStatusChannel({channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']}, actor);
+    await client.superSetStatusChannel({channelId: null}, actor);
+    await expect(client.superTestStatusChannel(actor)).resolves.toEqual({statusChannelId: '666666666666666666', results: []});
+
+    expect(gotMock.get.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel');
+    expect(gotMock.put.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel');
+    expect(gotMock.post.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel/test');
+    expect(optionsOf(gotMock.put, 0).json).toEqual({channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']});
+    expect(optionsOf(gotMock.put, 1).json).toEqual({channelId: null});
+    expect(optionsOf(gotMock.post).json).toBeUndefined();
+
+    for (const mock of [gotMock.get, gotMock.put, gotMock.post]) {
+      expect(optionsOf(mock).headers).toEqual({
+        authorization: 'Bearer not-a-real-token',
+        'x-muse-actor-id': actor.userId,
+        'x-muse-actor-name': 'haxurus',
+      });
+    }
+  });
+});

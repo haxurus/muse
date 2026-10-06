@@ -83,7 +83,7 @@ Target of the "Add to Discord" buttons on the public home pages (they pass `?lan
 
 ### Super console API
 
-All routes need a session (`401 {code: "UNAUTHORIZED"}`) and the super admin (`403 {code: "SUPER_ADMIN_REQUIRED"}`). Mutations additionally need the exact Origin and the `x-csrf-token` header, share the per-session mutation budget and write the usual `dashboard_mutation` audit line (actions `super.guild.leave`, `super.block.put`, `super.block.delete`, with `subjectKind`/`subjectId`).
+All routes need a session (`401 {code: "UNAUTHORIZED"}`) and the super admin (`403 {code: "SUPER_ADMIN_REQUIRED"}`). Mutations additionally need the exact Origin and the `x-csrf-token` header, share the per-session mutation budget and write the usual `dashboard_mutation` audit line (actions `super.guild.leave`, `super.block.put`, `super.block.delete`, `super.status_channel.put`, `super.status_channel.test`, with `subjectKind`/`subjectId`).
 
 ```text
 GET    /api/super/overview                     -> orchestrator GET    /v1/super/overview
@@ -91,9 +91,12 @@ GET    /api/super/bots                         -> orchestrator GET    /v1/worker
 POST   /api/super/guilds/:guildId/leave        -> orchestrator POST   /v1/super/guilds/:guildId/leave
 PUT    /api/super/blocks/:kind/:subjectId      -> orchestrator PUT    /v1/super/blocks/:kind/:subjectId
 DELETE /api/super/blocks/:kind/:subjectId      -> orchestrator DELETE /v1/super/blocks/:kind/:subjectId
+GET    /api/super/status-channel               -> orchestrator GET    /v1/super/status-channel
+PUT    /api/super/status-channel               -> orchestrator PUT    /v1/super/status-channel   (body {channelId: string | null, mentionRoleIds?: string[]})
+POST   /api/super/status-channel/test          -> orchestrator POST   /v1/super/status-channel/test
 ```
 
-The dashboard validates parameters before proxying: `kind` is `GUILD` or `USER`, ids are 17-20 digit snowflakes, `reason` is an optional string of at most 500 characters (trimmed, empty dropped), `workerIds` is an optional array of `muse-NN` ids (deduplicated, at most 32). Requests to the orchestrator carry the orchestrator token plus `x-muse-actor-id` (session user id) and `x-muse-actor-name` (Discord username, control characters dropped, percent-encoded, at most 64 characters). Orchestrator 4xx responses keep their status and short message as for the other routes.
+The dashboard validates parameters before proxying: `kind` is `GUILD` or `USER`, ids (including the status `channelId`, or `null` to disable it, and the optional `mentionRoleIds`, at most 10, deduplicated) are 17-20 digit snowflakes, `reason` is an optional string of at most 500 characters (trimmed, empty dropped), `workerIds` is an optional array of `muse-NN` ids (deduplicated, at most 32). Requests to the orchestrator carry the orchestrator token plus `x-muse-actor-id` (session user id) and `x-muse-actor-name` (Discord username, control characters dropped, percent-encoded, at most 64 characters). Orchestrator 4xx responses keep their status and short message as for the other routes.
 
 ## Session security
 
@@ -244,7 +247,7 @@ The web UI is bilingual (Italian and English), following Sentinel:
 | `/it`, `/en` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "How it works", self-hosting steps, security, call to action. "Sign in" links to `/<lang>/dashboard`, "Add to Discord" to `/add?lang=<lang>` |
 | `/<lang>/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
 | `/<lang>/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, language, logout) and three sections: **Overview** (bots in the server with ready/voice state), **Settings** (bot selection, one switch per field including the bot language, mixed values shown as "Mixed values", only enabled fields are patched) and **Groups** (create, edit, select, delete, keep or drop unavailable members) |
-| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
+| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, bot status channel (save, disable, test with per-bot results), linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
 | `/<lang>/development` | Static "Limited access" notice used by `/add` and the invite links |
 
 The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) and `/<lang>/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.

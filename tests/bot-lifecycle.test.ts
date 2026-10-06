@@ -622,3 +622,92 @@ describe('per-guild Player isolation', () => {
     expect(youtubeAPI.findAudioFallback).toHaveBeenCalledWith(song);
   });
 });
+
+describe('bot status channel announcement', () => {
+  const managedWorker = (readyFile: string) => ({READY_FILE: readyFile, WORKER_ID: 'muse-01', CONTROL_TOKEN: 'c'.repeat(32)});
+
+  it('never blocks readiness on the orchestrator config request', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const directory = await mkdtemp(path.join(tmpdir(), 'muse-status-'));
+    let fail: (error: Error) => void = () => undefined;
+    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      fail = reject;
+    }));
+    vi.stubEnv('MUSE_ORCHESTRATOR_URL', '');
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const {config, handlers} = await registerBot(true);
+      const readyFile = path.join(directory, 'ready');
+      Object.assign(config, managedWorker(readyFile));
+
+      // The config request is still pending, yet startup has completed.
+      await invoke(handlers, 'ready');
+      expect(existsSync(readyFile)).toBe(true);
+      expect(mocks.spinner.succeed).toHaveBeenCalledOnce();
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fetcher.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/worker/config');
+      expect(fetcher.mock.calls[0][1]).toMatchObject({headers: {authorization: `Bearer ${'c'.repeat(32)}`}});
+
+      fail(new Error('connect ECONNREFUSED'));
+      await vi.waitFor(() => {
+        expect(warn).toHaveBeenCalledWith('Status channel: could not read the worker config from the orchestrator (Error)');
+      });
+      expect(existsSync(readyFile)).toBe(true);
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      await rm(directory, {force: true, recursive: true});
+    }
+  });
+
+  it('announces after startup and at most once per 5 minutes on full reconnects', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const directory = await mkdtemp(path.join(tmpdir(), 'muse-status-'));
+    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify({statusChannelId: '987654321098765432'}), {status: 200}));
+    vi.stubEnv('MUSE_ORCHESTRATOR_URL', '');
+    vi.stubGlobal('fetch', fetcher);
+    const send = vi.fn(async () => ({}));
+    const channel = {
+      type: ChannelType.GuildText,
+      guild: {id: 'guild-a', members: {me: {id: 'application-id'}}},
+      permissionsFor: () => ({has: () => true}),
+      send,
+    };
+    let now: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const {client, config, handlers} = await registerBot(true, makeCommandSet(), ['guild-a']);
+      Object.assign(config, managedWorker(path.join(directory, 'ready')));
+      Object.assign(client, {isReady: () => true, channels: {fetch: vi.fn(async () => channel)}});
+      Object.assign(client.user, {username: 'Muse One', tag: 'Muse One#0420'});
+
+      await invoke(handlers, 'ready');
+      await vi.waitFor(() => {
+        expect(send).toHaveBeenCalledOnce();
+      });
+      expect(send.mock.calls[0]).toEqual([{embeds: [expect.anything()], allowedMentions: {parse: [], roles: []}}]);
+
+      // A non-resumable reconnect right away is rate limited: no config request, no message.
+      await invoke(handlers, 'shardDisconnect');
+      await invoke(handlers, 'shardReady', 0);
+      await new Promise(resolve => {
+        setTimeout(resolve, 20);
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledOnce();
+
+      const later = Date.now() + (5 * 60 * 1000);
+      now = vi.spyOn(Date, 'now').mockReturnValue(later);
+      await invoke(handlers, 'shardReady', 0);
+      await vi.waitFor(() => {
+        expect(send).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      now?.mockRestore();
+      log.mockRestore();
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+      await rm(directory, {force: true, recursive: true});
+    }
+  });
+});

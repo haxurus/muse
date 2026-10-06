@@ -128,6 +128,8 @@ sudoedit /srv/docker/muse/secrets/spotify_client_secret
 
 Spotify is optional. If disabled, keep both Spotify files empty.
 
+If you set a bot status channel in the super console, every bot must be in that channel's server with the **View Channel**, **Send Messages** and **Embed Links** permissions in that channel; mentioned roles must be mentionable, or the bots need "Mention @everyone, @here and All Roles" (the setting is stored in `data/orchestrator/platform-settings.json`, covered by the orchestrator state backups).
+
 ### YouTube cookies (optional, usually needed on a VPS)
 
 YouTube often answers requests from datacenter IP ranges with "Sign in to confirm you're not a bot". yt-dlp then needs the cookies of a signed-in YouTube account, stored in `secrets/youtube_cookies` (Netscape `cookies.txt` format) and mounted into every worker as `/run/secrets/youtube_cookies`. An empty file means "no cookies" and is created automatically by the installer and by `muse-deploy`.

@@ -43,3 +43,37 @@ export type WorkerBlocklistResult = {
   left: string[];
   failed: string[];
 };
+
+/** Why a worker could not post a status message (see src/status/announce.ts). */
+export const STATUS_ANNOUNCE_ERRORS = [
+  'NOT_READY',
+  'CHANNEL_NOT_FOUND',
+  'INVALID_CHANNEL',
+  'MISSING_PERMISSIONS',
+  'DISCORD_ERROR',
+] as const;
+
+export type StatusAnnounceError = typeof STATUS_ANNOUNCE_ERRORS[number];
+
+export const isStatusAnnounceError = (value: unknown): value is StatusAnnounceError =>
+  typeof value === 'string' && (STATUS_ANNOUNCE_ERRORS as readonly string[]).includes(value);
+
+export type StatusAnnounceResult = {ok: true} | {ok: false; error: StatusAnnounceError};
+
+/** Body of `POST /v1/status-channel/announce` on a worker. */
+export type StatusAnnounceRequest = {
+  channelId: string;
+  /** Super console test message instead of the startup "online" message. */
+  test: boolean;
+  /** Roles pinged by the message (0-10). */
+  mentionRoleIds: string[];
+};
+
+/** Answer of `POST /v1/status-channel/announce` on a worker. */
+export type WorkerStatusAnnounceResult = StatusAnnounceResult & {workerId: string};
+
+/** `GET /v1/worker/config` on the orchestrator (worker control token). */
+export type WorkerPlatformConfig = {
+  statusChannelId: string | null;
+  mentionRoleIds: string[];
+};
