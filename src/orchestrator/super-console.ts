@@ -10,6 +10,7 @@ import {
   normalizeReason,
   type Actor,
   type AuditEntry,
+  type AuditEntryInput,
   type AuditOutcome,
   type AuditStore,
   type BlockKind,
@@ -430,7 +431,7 @@ export default class SuperConsole {
   }
 
   /** Audit entries are written after the action; a failed audit write never fails the action. */
-  private record(entry: Omit<AuditEntry, 'id' | 'at'>): void {
+  private record(entry: AuditEntryInput): void {
     try {
       this.audit.append(entry);
     } catch (error: unknown) {

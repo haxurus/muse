@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {type Except} from 'type-fest';
 import {HttpError} from '../control/http.js';
 import {isSnowflake} from '../control/snowflake.js';
 import {MAX_BLOCKLIST_ENTRIES, type Blocklist} from '../control/blocklist.js';
@@ -37,6 +38,9 @@ export type AuditEntry = {
   details: Record<string, unknown>;
   outcome: AuditOutcome;
 };
+
+// Caller-supplied part of an audit entry; id and timestamp are assigned by the store.
+export type AuditEntryInput = Except<AuditEntry, 'id' | 'at'>;
 
 type BlockFile = {
   version: 1;
@@ -232,7 +236,7 @@ export class AuditStore {
     }));
   }
 
-  append(input: Omit<AuditEntry, 'id' | 'at'>): AuditEntry {
+  append(input: AuditEntryInput): AuditEntry {
     const entry: AuditEntry = {
       id: randomUUID(),
       at: new Date().toISOString(),
