@@ -1,6 +1,7 @@
 import got, {type CancelableRequest, type Response} from 'got';
 import type {GuildSettingsPatch} from '../control/settings-validation.js';
-import type {WorkerGuildSettings, WorkerStatus} from '../control/types.js';
+import type {WorkerBlocklistResult, WorkerGuildSettings, WorkerLeaveGuildResult, WorkerStatus} from '../control/types.js';
+import type {Blocklist} from '../control/blocklist.js';
 import type {WorkerDefinition} from './config.js';
 
 /** Worker responses are small JSON documents; anything larger is treated as a failure. */
@@ -69,5 +70,25 @@ export default class WorkerClient {
         json: patch,
       },
     )).json<WorkerGuildSettings>();
+  }
+
+  async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {
+    return capResponseSize(got.post(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/leave`,
+      requestOptions(this.worker.token),
+    )).json<WorkerLeaveGuildResult>();
+  }
+
+  /** Replace the worker's in-memory blocklist; the worker leaves blocked guilds immediately. */
+  async pushBlocklist(blocklist: Blocklist): Promise<WorkerBlocklistResult> {
+    return capResponseSize(got.put(
+      `${this.worker.baseUrl}/v1/blocklist`,
+      {
+        ...requestOptions(this.worker.token),
+        // Leaving newly blocked guilds is part of the request and can take a few Discord round trips.
+        timeout: {request: 10_000},
+        json: blocklist,
+      },
+    )).json<WorkerBlocklistResult>();
   }
 }

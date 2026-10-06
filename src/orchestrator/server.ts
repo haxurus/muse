@@ -1,11 +1,14 @@
 import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
-import {HttpError, getPathSegments, hasBearerToken, readJsonBody, sendJson} from '../control/http.js';
+import path from 'node:path';
+import {HttpError, errorBody, getPathSegments, hasBearerToken, readJsonBody, sendJson} from '../control/http.js';
 import {sanitizeGuildSettingsPatch} from '../control/settings-validation.js';
 import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
 import {handlePlaybackProxy} from '../playback/transport.js';
 import {assertGuildId} from '../control/snowflake.js';
+import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS} from './super-console.js';
+import {AuditStore, BlockStore} from './super-store.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -23,12 +26,19 @@ export default class OrchestratorServer {
   private server?: Server;
   private readonly workers: WorkerClient[];
   private readonly groups: GuildGroupStore;
+  private readonly superConsole: SuperConsole;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
     this.groups = new GuildGroupStore(
       config.groupsFile,
       new Set(config.workers.map(worker => worker.id)),
+    );
+    const stateDirectory = path.dirname(config.groupsFile);
+    this.superConsole = new SuperConsole(
+      this.workers,
+      new BlockStore(config.blocksFile ?? path.join(stateDirectory, 'blocks.json')),
+      new AuditStore(config.auditFile ?? path.join(stateDirectory, 'super-audit.json')),
     );
   }
 
@@ -46,9 +56,12 @@ export default class OrchestratorServer {
     });
 
     console.log(`Muse orchestrator listening on ${this.config.host}:${this.config.port} with ${this.workers.length} workers`);
+    // Workers keep the blocklist only in memory, so it is pushed at start and periodically.
+    this.superConsole.startReconcile(this.config.blocklistReconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   }
 
   async close(): Promise<void> {
+    this.superConsole.stopReconcile();
     if (!this.server) {
       return;
     }
@@ -63,6 +76,8 @@ export default class OrchestratorServer {
         resolve();
       });
     });
+
+    this.server = undefined;
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -82,6 +97,12 @@ export default class OrchestratorServer {
       }
 
       const segments = getPathSegments(request);
+      const superResult = await this.superConsole.route(request, segments);
+      if (superResult) {
+        sendJson(response, superResult.statusCode, superResult.body);
+        return;
+      }
+
       if (request.method === 'GET' && segments.join('/') === 'v1/workers') {
         sendJson(response, 200, {workers: await this.workerStatuses()});
         return;
@@ -152,13 +173,13 @@ export default class OrchestratorServer {
 
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
-      const statusCode = error instanceof HttpError ? error.statusCode : 500;
-      const message = error instanceof HttpError ? error.message : 'internal server error';
-      if (!(error instanceof HttpError)) {
-        console.error('Orchestrator API error:', error);
+      if (error instanceof HttpError) {
+        sendJson(response, error.statusCode, errorBody(error));
+        return;
       }
 
-      sendJson(response, statusCode, {error: message});
+      console.error('Orchestrator API error:', error);
+      sendJson(response, 500, {error: 'internal server error'});
     }
   }
 

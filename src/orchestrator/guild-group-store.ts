@@ -1,8 +1,7 @@
-import {closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync} from 'node:fs';
-import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {HttpError} from '../control/http.js';
 import {assertGuildId, isSnowflake} from '../control/snowflake.js';
+import {commitWithBackup, isPlainObject, isPrintable, loadWithBackup} from './durable-file.js';
 
 export type GuildWorkerGroup = {
   id: string;
@@ -17,18 +16,9 @@ type StoreData = {
   guilds: Record<string, GuildWorkerGroup[]>;
 };
 
-type LoadResult = {status: 'ok'; data: StoreData} | {status: 'missing'} | {status: 'invalid'};
-
 const MAX_GROUPS_PER_GUILD = 16;
 
-const isPrintableName = (name: string): boolean => {
-  const hasControlCharacter = [...name].some(character => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint < 32 || codePoint === 127;
-  });
-
-  return name.length >= 1 && name.length <= 48 && !hasControlCharacter;
-};
+const isPrintableName = (name: string): boolean => isPrintable(name, 1, 48);
 
 const normalizeName = (value: unknown): string => {
   if (typeof value !== 'string') {
@@ -61,9 +51,6 @@ const normalizeWorkerIds = (value: unknown, configuredWorkerIds: Set<string>): s
   return workerIds.sort();
 };
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 // Workers removed from the configuration are tolerated: groups keep unavailable members.
 const isValidGroup = (value: unknown): value is GuildWorkerGroup => isPlainObject(value)
   && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 64
@@ -80,47 +67,18 @@ const isValidStore = (value: unknown): value is StoreData => isPlainObject(value
     && groups.length <= MAX_GROUPS_PER_GUILD
     && groups.every(group => isValidGroup(group)));
 
-const serialize = (data: StoreData): string => `${JSON.stringify(data, null, 2)}\n`;
-
-/** Write via temp file + fsync + rename, then fsync the directory where the platform supports it. */
-const writeDurably = (target: string, content: string): void => {
-  const directory = path.dirname(target);
-  const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.tmp`);
-  const fd = openSync(temporary, 'w', 0o600);
-  try {
-    writeSync(fd, content);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-
-  renameSync(temporary, target);
-  try {
-    const directoryFd = openSync(directory, 'r');
-    try {
-      fsyncSync(directoryFd);
-    } finally {
-      closeSync(directoryFd);
-    }
-  } catch {
-    // Directory fsync is not supported on every platform (for example Windows).
-  }
-};
-
 /**
  * Single-process store: the orchestrator must run as exactly one instance per state volume,
  * because concurrent writers would overwrite each other's changes.
  */
 export default class GuildGroupStore {
   private data: StoreData;
-  private readonly backupPath: string;
 
   constructor(
     private readonly filePath: string,
     private readonly configuredWorkerIds: Set<string>,
   ) {
-    this.backupPath = `${filePath}.bak`;
-    this.data = this.load();
+    this.data = loadWithBackup<StoreData>(this.filePath, isValidStore, () => ({version: 1, guilds: {}}), 'Group store');
   }
 
   list(guildId: string): GuildWorkerGroup[] {
@@ -219,53 +177,11 @@ export default class GuildGroupStore {
     }
   }
 
-  private read(filePath: string): LoadResult {
-    let raw: string;
-    try {
-      raw = readFileSync(filePath, 'utf8');
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {status: 'missing'};
-      }
-
-      throw error;
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      return isValidStore(parsed) ? {status: 'ok', data: parsed} : {status: 'invalid'};
-    } catch {
-      return {status: 'invalid'};
-    }
-  }
-
-  private load(): StoreData {
-    mkdirSync(path.dirname(this.filePath), {recursive: true, mode: 0o700});
-
-    const primary = this.read(this.filePath);
-    if (primary.status === 'ok') {
-      return primary.data;
-    }
-
-    const backup = this.read(this.backupPath);
-    if (backup.status === 'ok') {
-      console.warn(`Group store ${this.filePath} is ${primary.status}; recovered from ${this.backupPath}`);
-      return backup.data;
-    }
-
-    if (primary.status === 'missing') {
-      return {version: 1, guilds: {}};
-    }
-
-    throw new Error(`Group store ${this.filePath} is unreadable or has an invalid schema, and no valid backup exists at ${this.backupPath}. Restore it from a backup before starting the orchestrator.`);
-  }
-
   /** Persist the next state first; memory only changes after the write succeeded. */
   private commit(guilds: Record<string, GuildWorkerGroup[]>): void {
     const next: StoreData = {version: 1, guilds};
     // The in-memory state always equals the last good file, so it is the backup copy.
-    writeDurably(this.backupPath, serialize(this.data));
-    writeDurably(this.filePath, serialize(next));
+    commitWithBackup(this.filePath, this.data, next);
     this.data = next;
   }
 }

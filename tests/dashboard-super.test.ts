@@ -1,0 +1,546 @@
+import {IncomingHttpHeaders, request} from 'node:http';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import DashboardAuth, {dashboardCookieNames} from '../src/dashboard/auth.js';
+import {loadDashboardConfig, parseSuperAdminUserId} from '../src/dashboard/config.js';
+import type {DashboardConfig} from '../src/dashboard/config.js';
+import type DiscordOAuthClient from '../src/dashboard/discord-oauth.js';
+import OrchestratorClient, {orchestratorError} from '../src/dashboard/orchestrator-client.js';
+import DashboardServer, {botInviteUrl} from '../src/dashboard/server.js';
+import SessionStore from '../src/dashboard/session-store.js';
+
+const PUBLIC_URL = 'https://music.example.test';
+const GUILD_ID = '111111111111111111';
+const SUPER_ADMIN_ID = '333333333333333333';
+const BOT_ID = '444444444444444444';
+const BLOCKED_USER_ID = '555555555555555555';
+
+const makeConfig = (superAdminUserId: string | null): DashboardConfig => ({
+  host: '127.0.0.1',
+  port: 0,
+  publicUrl: new URL(PUBLIC_URL),
+  oauthRedirectUri: new URL('/auth/discord/callback', PUBLIC_URL).toString(),
+  discordClientId: '123456789012345678',
+  discordClientSecret: 'not-a-real-secret',
+  orchestratorUrl: 'http://orchestrator:3100',
+  orchestratorToken: 'not-a-real-token',
+  sessionTtlMs: 8 * 60 * 60 * 1000,
+  ...(superAdminUserId === null ? {} : {superAdminUserId}),
+});
+
+const regularUser = {id: '222222222222222222', username: 'admin', global_name: null, avatar: null};
+const superUser = {id: SUPER_ADMIN_ID, username: 'haxurus', global_name: 'Haxurus', avatar: null};
+
+const fakeDiscord = (loginUser = regularUser) => ({
+  authorizationUrl: vi.fn((state: string) => `https://discord.com/oauth2/authorize?state=${encodeURIComponent(state)}`),
+  exchangeCode: vi.fn(async () => ({
+    access_token: 'discord-access-token',
+    token_type: 'Bearer',
+    expires_in: 3600,
+    scope: 'identify guilds',
+  })),
+  currentUser: vi.fn(async () => loginUser),
+  currentUserGuilds: vi.fn(async () => [{id: GUILD_ID, name: 'Guild', icon: null, owner: true, permissions: '0'}]),
+  revoke: vi.fn(async () => undefined),
+});
+
+const fakeOrchestrator = () => ({
+  guilds: vi.fn(async () => ({guilds: [{id: GUILD_ID, name: 'Guild', availableWorkers: 2}]})),
+  guildWorkers: vi.fn(async () => ({guildId: GUILD_ID, groups: [], workers: []})),
+  workers: vi.fn(async () => ({
+    workers: [
+      {workerId: 'muse-01', ok: true, value: {discordReady: true, bot: {id: BOT_ID, username: 'Muse One'}}},
+      {workerId: 'muse-02', ok: false, error: 'RequestError'},
+    ],
+  })),
+  isUserBlocked: vi.fn(async () => false),
+  superOverview: vi.fn(async () => ({workers: [], guilds: [], blocks: [], audit: []})),
+  superLeaveGuild: vi.fn(async () => ({left: ['muse-01'], failed: []})),
+  superPutBlock: vi.fn(async () => ({block: {kind: 'USER', subjectId: BLOCKED_USER_ID}, pushed: ['muse-01'], failed: []})),
+  superDeleteBlock: vi.fn(async () => ({ok: true})),
+});
+
+type HttpResult = {
+  status: number;
+  headers: IncomingHttpHeaders;
+  body: Buffer;
+  text: string;
+};
+
+const call = async (
+  port: number,
+  method: string,
+  path: string,
+  headers: Record<string, string> = {},
+  body?: string,
+): Promise<HttpResult> => new Promise((resolve, reject) => {
+  const outgoing = request({host: '127.0.0.1', port, method, path, headers}, response => {
+    const chunks: Buffer[] = [];
+    response.on('data', (chunk: Buffer) => chunks.push(chunk));
+    response.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      resolve({status: response.statusCode ?? 0, headers: response.headers, body: buffer, text: buffer.toString('utf8')});
+    });
+    response.on('error', reject);
+  });
+  outgoing.on('error', reject);
+  outgoing.end(body);
+});
+
+const cookiePair = (setCookie: string): string => setCookie.split(';')[0];
+
+const servers: DashboardServer[] = [];
+
+type StartOptions = {
+  superAdminUserId?: string | null;
+  loginUser?: typeof regularUser;
+  isUserBlocked?: (userId: string) => Promise<boolean>;
+};
+
+const startDashboard = async (options: StartOptions = {}) => {
+  const config = makeConfig(options.superAdminUserId === undefined ? SUPER_ADMIN_ID : options.superAdminUserId);
+  const store = new SessionStore(config.sessionTtlMs);
+  const discord = fakeDiscord(options.loginUser);
+  const orchestrator = fakeOrchestrator();
+  const blockCheck: (userId: string) => Promise<boolean> = options.isUserBlocked ?? (async () => false);
+  const isUserBlocked = vi.fn(blockCheck);
+  const auth = new DashboardAuth(config, {store, discord: discord as unknown as DiscordOAuthClient, isUserBlocked});
+  const server = new DashboardServer(config, {auth, orchestrator: orchestrator as unknown as OrchestratorClient});
+  await server.start();
+  servers.push(server);
+
+  const names = dashboardCookieNames(true);
+  const superSession = store.createSession(superUser, 'discord-access-token', 3600);
+  const userSession = store.createSession(regularUser, 'discord-access-token', 3600);
+  const headersFor = (session: typeof superSession, overrides: Record<string, string> = {}) => ({
+    cookie: `${names.session}=${session.id}`,
+    origin: config.publicUrl.origin,
+    'x-csrf-token': session.csrfToken,
+    'content-type': 'application/json',
+    ...overrides,
+  });
+
+  return {
+    config,
+    store,
+    discord,
+    orchestrator,
+    isUserBlocked,
+    port: server.port!,
+    names,
+    superSession,
+    userSession,
+    superHeaders: (overrides: Record<string, string> = {}) => headersFor(superSession, overrides),
+    userHeaders: (overrides: Record<string, string> = {}) => headersFor(userSession, overrides),
+  };
+};
+
+const login = async (port: number, extraCookie = '') => {
+  const begin = await call(port, 'GET', '/auth/discord');
+  const stateCookie = cookiePair((begin.headers['set-cookie'] ?? [])[0]);
+  const state = new URL(begin.headers.location!).searchParams.get('state')!;
+  return call(
+    port,
+    'GET',
+    `/auth/discord/callback?code=abc&state=${encodeURIComponent(state)}`,
+    {cookie: extraCookie ? `${stateCookie}; ${extraCookie}` : stateCookie},
+  );
+};
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  await Promise.all(servers.splice(0).map(async server => server.close()));
+});
+
+describe('MUSE_SUPER_ADMIN_USER_ID', () => {
+  it('accepts a Discord user ID and treats empty values as disabled', () => {
+    expect(parseSuperAdminUserId(SUPER_ADMIN_ID)).toBe(SUPER_ADMIN_ID);
+    expect(parseSuperAdminUserId(` ${SUPER_ADMIN_ID} `)).toBe(SUPER_ADMIN_ID);
+    expect(parseSuperAdminUserId(undefined)).toBeUndefined();
+    expect(parseSuperAdminUserId('')).toBeUndefined();
+    expect(parseSuperAdminUserId('   ')).toBeUndefined();
+  });
+
+  it('rejects anything that is not a 17-20 digit snowflake', () => {
+    for (const value of ['1234', '123456789012345678901', 'abc', '33333333333333333x', '-333333333333333333']) {
+      expect(() => parseSuperAdminUserId(value)).toThrow(/MUSE_SUPER_ADMIN_USER_ID/u);
+    }
+  });
+
+  it('fails dashboard startup when the configured value is invalid', () => {
+    vi.stubEnv('MUSE_DASHBOARD_DISCORD_CLIENT_ID', '123456789012345678');
+    vi.stubEnv('MUSE_SUPER_ADMIN_USER_ID', 'not-a-snowflake');
+
+    expect(() => loadDashboardConfig()).toThrow(/MUSE_SUPER_ADMIN_USER_ID/u);
+  });
+});
+
+describe('dashboard session super-admin flag', () => {
+  it('reports superAdmin only for the configured user', async () => {
+    const dashboard = await startDashboard();
+
+    const asSuper = await call(dashboard.port, 'GET', '/api/session', {cookie: dashboard.superHeaders().cookie});
+    const asUser = await call(dashboard.port, 'GET', '/api/session', {cookie: dashboard.userHeaders().cookie});
+
+    expect(asSuper.status).toBe(200);
+    expect(JSON.parse(asSuper.text)).toMatchObject({superAdmin: true});
+    expect(JSON.parse(asUser.text)).toMatchObject({superAdmin: false});
+  });
+
+  it('never grants superAdmin when no super admin is configured', async () => {
+    const dashboard = await startDashboard({superAdminUserId: null});
+
+    const result = await call(dashboard.port, 'GET', '/api/session', {cookie: dashboard.superHeaders().cookie});
+
+    expect(JSON.parse(result.text)).toMatchObject({superAdmin: false});
+  });
+});
+
+describe('bot invite links', () => {
+  it('starts the Discord login for anonymous visitors', async () => {
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/invite/muse-01');
+
+    expect(result.status).toBe(302);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/auth/discord`);
+    expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
+  });
+
+  it('sends signed-in users who are not the super admin to the development notice', async () => {
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.userHeaders().cookie});
+
+    expect(result.status).toBe(302);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+    expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when no super admin is configured', async () => {
+    const dashboard = await startDashboard({superAdminUserId: null});
+
+    const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.superHeaders().cookie});
+
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/development`);
+  });
+
+  it('redirects the super admin to the Discord bot authorization for that worker', async () => {
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.superHeaders().cookie});
+
+    expect(result.status).toBe(302);
+    expect(result.headers.location).toBe(botInviteUrl(BOT_ID));
+    const location = new URL(result.headers.location!);
+    expect(location.origin + location.pathname).toBe('https://discord.com/oauth2/authorize');
+    expect(location.searchParams.get('client_id')).toBe(BOT_ID);
+    expect(location.searchParams.get('scope')).toBe('bot applications.commands');
+    expect(location.searchParams.get('permissions')).toBe('3214336');
+  });
+
+  it('returns 404 for malformed or unknown worker ids', async () => {
+    const dashboard = await startDashboard();
+    const cookie = dashboard.superHeaders().cookie;
+
+    expect((await call(dashboard.port, 'GET', '/invite/muse-1', {cookie})).status).toBe(404);
+    expect((await call(dashboard.port, 'GET', '/invite/evil', {cookie})).status).toBe(404);
+    expect((await call(dashboard.port, 'GET', '/invite/muse-09', {cookie})).status).toBe(404);
+    expect(dashboard.orchestrator.workers).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 503 when the worker is offline', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/invite/muse-02', {cookie: dashboard.superHeaders().cookie});
+
+    expect(result.status).toBe(503);
+  });
+});
+
+describe('super console API', () => {
+  it('requires a session (401 UNAUTHORIZED) and the super admin (403 SUPER_ADMIN_REQUIRED)', async () => {
+    const dashboard = await startDashboard();
+
+    const anonymous = await call(dashboard.port, 'GET', '/api/super/overview');
+    expect(anonymous.status).toBe(401);
+    expect(JSON.parse(anonymous.text)).toEqual({error: 'authentication required', code: 'UNAUTHORIZED'});
+
+    const regular = await call(dashboard.port, 'GET', '/api/super/overview', {cookie: dashboard.userHeaders().cookie});
+    expect(regular.status).toBe(403);
+    expect(JSON.parse(regular.text)).toEqual({error: 'super admin required', code: 'SUPER_ADMIN_REQUIRED'});
+
+    const anonymousMutation = await call(dashboard.port, 'PUT', `/api/super/blocks/USER/${BLOCKED_USER_ID}`, {}, '{}');
+    expect(anonymousMutation.status).toBe(401);
+
+    const regularMutation = await call(dashboard.port, 'PUT', `/api/super/blocks/USER/${BLOCKED_USER_ID}`, dashboard.userHeaders(), '{}');
+    expect(regularMutation.status).toBe(403);
+    expect(JSON.parse(regularMutation.text)).toMatchObject({code: 'SUPER_ADMIN_REQUIRED'});
+
+    expect(dashboard.orchestrator.superOverview).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superPutBlock).not.toHaveBeenCalled();
+  });
+
+  it('denies everything when no super admin is configured', async () => {
+    const dashboard = await startDashboard({superAdminUserId: null});
+
+    const result = await call(dashboard.port, 'GET', '/api/super/overview', {cookie: dashboard.superHeaders().cookie});
+
+    expect(result.status).toBe(403);
+  });
+
+  it('proxies the overview with the actor headers', async () => {
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/api/super/overview', {cookie: dashboard.superHeaders().cookie});
+
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.text)).toEqual({workers: [], guilds: [], blocks: [], audit: []});
+    expect(dashboard.orchestrator.superOverview).toHaveBeenCalledWith({userId: SUPER_ADMIN_ID, username: 'haxurus'});
+  });
+
+  it('lists inviteable bots for the super admin', async () => {
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/api/super/bots', {cookie: dashboard.superHeaders().cookie});
+
+    expect(JSON.parse(result.text)).toEqual({
+      bots: [
+        {workerId: 'muse-01', ready: true, bot: {id: BOT_ID, username: 'Muse One'}},
+        {workerId: 'muse-02', ready: false, bot: null},
+      ],
+    });
+  });
+
+  it('rejects mutations without CSRF token or with a foreign Origin', async () => {
+    const dashboard = await startDashboard();
+    const missingCsrf = dashboard.superHeaders();
+    delete (missingCsrf as Record<string, string>)['x-csrf-token'];
+
+    const noToken = await call(dashboard.port, 'POST', `/api/super/guilds/${GUILD_ID}/leave`, missingCsrf, '{}');
+    expect(noToken.status).toBe(403);
+    expect(JSON.parse(noToken.text)).toEqual({error: 'invalid CSRF token'});
+
+    const foreign = await call(
+      dashboard.port,
+      'DELETE',
+      `/api/super/blocks/USER/${BLOCKED_USER_ID}`,
+      dashboard.superHeaders({origin: 'https://evil.example.test'}),
+    );
+    expect(foreign.status).toBe(403);
+    expect(JSON.parse(foreign.text)).toEqual({error: 'invalid request origin'});
+
+    expect(dashboard.orchestrator.superLeaveGuild).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superDeleteBlock).not.toHaveBeenCalled();
+  });
+
+  it('counts super mutations in the mutation budget', async () => {
+    const dashboard = await startDashboard();
+    dashboard.superSession.mutationWindowStartedAt = Date.now();
+    dashboard.superSession.mutationCount = 30;
+
+    const result = await call(dashboard.port, 'POST', `/api/super/guilds/${GUILD_ID}/leave`, dashboard.superHeaders(), '{}');
+
+    expect(result.status).toBe(429);
+    expect(dashboard.orchestrator.superLeaveGuild).not.toHaveBeenCalled();
+  });
+
+  it('forwards leave requests with the actor and writes an audit line', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+
+    const result = await call(
+      dashboard.port,
+      'POST',
+      `/api/super/guilds/${GUILD_ID}/leave`,
+      dashboard.superHeaders(),
+      JSON.stringify({workerIds: ['muse-01', 'muse-01', 'muse-02']}),
+    );
+
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.text)).toEqual({left: ['muse-01'], failed: []});
+    expect(dashboard.orchestrator.superLeaveGuild).toHaveBeenCalledWith(
+      GUILD_ID,
+      {workerIds: ['muse-01', 'muse-02']},
+      {userId: SUPER_ADMIN_ID, username: 'haxurus'},
+    );
+
+    const auditLines = log.mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'));
+    expect(auditLines).toHaveLength(1);
+    expect(JSON.parse(auditLines[0])).toMatchObject({
+      userId: SUPER_ADMIN_ID,
+      guildId: GUILD_ID,
+      action: 'super.guild.leave',
+      workerIds: ['muse-01', 'muse-02'],
+      outcome: 'ok',
+    });
+    expect(auditLines[0]).not.toContain(dashboard.superSession.csrfToken);
+  });
+
+  it('puts and deletes blocks with validated parameters', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+    const actor = {userId: SUPER_ADMIN_ID, username: 'haxurus'};
+
+    const put = await call(
+      dashboard.port,
+      'PUT',
+      `/api/super/blocks/USER/${BLOCKED_USER_ID}`,
+      dashboard.superHeaders(),
+      JSON.stringify({reason: '  spam  '}),
+    );
+    expect(put.status).toBe(200);
+    expect(dashboard.orchestrator.superPutBlock).toHaveBeenCalledWith('USER', BLOCKED_USER_ID, {reason: 'spam'}, actor);
+
+    const putGuild = await call(dashboard.port, 'PUT', `/api/super/blocks/GUILD/${GUILD_ID}`, dashboard.superHeaders(), '{}');
+    expect(putGuild.status).toBe(200);
+    expect(dashboard.orchestrator.superPutBlock).toHaveBeenLastCalledWith('GUILD', GUILD_ID, {}, actor);
+
+    const remove = await call(dashboard.port, 'DELETE', `/api/super/blocks/GUILD/${GUILD_ID}`, dashboard.superHeaders());
+    expect(remove.status).toBe(200);
+    expect(dashboard.orchestrator.superDeleteBlock).toHaveBeenCalledWith('GUILD', GUILD_ID, actor);
+
+    const lines = log.mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'));
+    expect(lines.map(line => (JSON.parse(line) as {action: string}).action))
+      .toEqual(['super.block.put', 'super.block.put', 'super.block.delete']);
+    expect(JSON.parse(lines[0])).toMatchObject({subjectKind: 'USER', subjectId: BLOCKED_USER_ID, outcome: 'ok'});
+  });
+
+  it('rejects invalid kinds, ids, reasons and worker lists before calling the orchestrator', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+    const headers = dashboard.superHeaders();
+
+    const cases: Array<[string, string, string | undefined]> = [
+      ['PUT', `/api/super/blocks/ROLE/${BLOCKED_USER_ID}`, '{}'],
+      ['PUT', '/api/super/blocks/USER/1234', '{}'],
+      ['PUT', `/api/super/blocks/USER/${BLOCKED_USER_ID}`, JSON.stringify({reason: 'x'.repeat(501)})],
+      ['PUT', `/api/super/blocks/USER/${BLOCKED_USER_ID}`, JSON.stringify({reason: 42})],
+      ['DELETE', '/api/super/blocks/GUILD/abc', undefined],
+      ['POST', '/api/super/guilds/abc/leave', '{}'],
+      ['POST', `/api/super/guilds/${GUILD_ID}/leave`, JSON.stringify({workerIds: ['../etc']})],
+      ['POST', `/api/super/guilds/${GUILD_ID}/leave`, JSON.stringify({workerIds: 'muse-01'})],
+    ];
+
+    for (const [method, path, body] of cases) {
+      const result = await call(dashboard.port, method, path, headers, body);
+      expect(result.status, `${method} ${path}`).toBe(400);
+    }
+
+    expect(dashboard.orchestrator.superPutBlock).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superDeleteBlock).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superLeaveGuild).not.toHaveBeenCalled();
+  });
+
+  it('keeps orchestrator 4xx statuses for super mutations', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+    dashboard.orchestrator.superDeleteBlock.mockRejectedValueOnce(orchestratorError(Object.assign(new Error('Response code 404'), {
+      name: 'HTTPError',
+      response: {statusCode: 404, headers: {}, body: JSON.stringify({error: 'block not found'})},
+    })));
+
+    const result = await call(dashboard.port, 'DELETE', `/api/super/blocks/USER/${BLOCKED_USER_ID}`, dashboard.superHeaders());
+
+    expect(result.status).toBe(404);
+    expect(JSON.parse(result.text)).toEqual({error: 'block not found'});
+  });
+});
+
+describe('blocked users at login', () => {
+  it('denies blocked users without creating a session and revokes the token', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const dashboard = await startDashboard({
+      loginUser: {...regularUser, id: BLOCKED_USER_ID},
+      isUserBlocked: async () => true,
+    });
+    const sessionsBefore = dashboard.store.size;
+
+    const callback = await login(dashboard.port);
+
+    expect(callback.status).toBe(302);
+    expect(callback.headers.location).toBe(`${PUBLIC_URL}/?login=blocked`);
+    expect((callback.headers['set-cookie'] ?? []).some(value => value.startsWith('__Host-muse_session='))).toBe(false);
+    expect(dashboard.store.size).toBe(sessionsBefore);
+    expect(dashboard.isUserBlocked).toHaveBeenCalledWith(BLOCKED_USER_ID);
+    expect(dashboard.discord.revoke).toHaveBeenCalledWith('discord-access-token');
+    expect(warn.mock.calls.map(args => String(args[0])).join('\n')).not.toContain('discord-access-token');
+  });
+
+  it('denies the login with ?login=failed when the block list cannot be checked', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const dashboard = await startDashboard({
+      isUserBlocked: async () => {
+        throw new Error('orchestrator unavailable');
+      },
+    });
+
+    const callback = await login(dashboard.port);
+
+    expect(callback.headers.location).toBe(`${PUBLIC_URL}/?login=failed`);
+    expect(dashboard.discord.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets allowed users in and never checks the block list for the super admin', async () => {
+    const allowed = await startDashboard();
+    expect((await login(allowed.port)).headers.location).toBe(`${PUBLIC_URL}/`);
+    expect(allowed.isUserBlocked).toHaveBeenCalledWith(regularUser.id);
+
+    const superAdmin = await startDashboard({loginUser: superUser, isUserBlocked: async () => true});
+    expect((await login(superAdmin.port)).headers.location).toBe(`${PUBLIC_URL}/`);
+    expect(superAdmin.isUserBlocked).not.toHaveBeenCalled();
+  });
+});
+
+describe('dashboard static pages and fonts', () => {
+  it('serves self-hosted Geist fonts as font/woff2', async () => {
+    const dashboard = await startDashboard();
+
+    for (const font of ['Geist-Variable.woff2', 'GeistMono-Variable.woff2']) {
+      const result = await call(dashboard.port, 'GET', `/assets/fonts/${font}`);
+      expect(result.status).toBe(200);
+      expect(result.headers['content-type']).toBe('font/woff2');
+      expect(result.body.subarray(0, 4).toString('latin1')).toBe('wOF2');
+      expect(Number(result.headers['content-length'])).toBe(result.body.length);
+    }
+
+    const license = await call(dashboard.port, 'GET', '/assets/fonts/OFL.txt');
+    expect(license.status).toBe(200);
+    expect(license.text).toContain('SIL Open Font License');
+  });
+
+  it('keeps a strict CSP that allows only self-hosted fonts and scripts', async () => {
+    const dashboard = await startDashboard();
+
+    const page = await call(dashboard.port, 'GET', '/');
+    const csp = String(page.headers['content-security-policy']);
+
+    expect(csp).toContain('font-src \'self\'');
+    expect(csp).toContain('script-src \'self\'');
+    expect(csp).toContain('style-src \'self\'');
+    expect(csp).not.toContain('unsafe-inline');
+    // No inline scripts, inline styles or inline event handlers.
+    expect(page.text).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>|\sstyle="|\son[a-z]+="/u);
+  });
+
+  it('serves the SPA views and the development notice with noindex', async () => {
+    const dashboard = await startDashboard();
+
+    for (const path of ['/', '/super', `/server/${GUILD_ID}`]) {
+      const result = await call(dashboard.port, 'GET', path);
+      expect(result.status, path).toBe(200);
+      expect(result.headers['content-type']).toBe('text/html; charset=utf-8');
+      expect(result.headers['x-robots-tag']).toBe('noindex, nofollow');
+    }
+
+    const development = await call(dashboard.port, 'GET', '/development');
+    expect(development.status).toBe(200);
+    expect(development.text).toContain('Muse è ancora in sviluppo.');
+    expect(development.text).toContain('https://github.com/haxurus/muse');
+    expect(development.text).not.toMatch(/\sstyle="|<script/u);
+
+    expect((await call(dashboard.port, 'GET', '/server/not-a-guild')).status).toBe(404);
+    expect((await call(dashboard.port, 'GET', '/assets/../package.json')).status).toBe(404);
+  });
+});

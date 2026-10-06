@@ -9,6 +9,7 @@ import DiscordOAuthClient, {
   hasRequiredScopes,
 } from './discord-oauth.js';
 import {DashboardHttpError, describeUpstreamError, parseCookies, redirect, safeEqual} from './http.js';
+import OrchestratorClient from './orchestrator-client.js';
 import SessionStore, {DashboardSession} from './session-store.js';
 
 const STATE_COOKIE_PATH = '/auth/discord/callback';
@@ -71,6 +72,11 @@ const retryAfterSeconds = (headers: Record<string, string | string[] | undefined
 export type DashboardAuthDependencies = {
   store?: SessionStore;
   discord?: DiscordOAuthClient;
+  /**
+   * Resolves whether a Discord user is on the orchestrator block list. Rejecting
+   * (orchestrator unavailable) denies the login. Defaults to the orchestrator API.
+   */
+  isUserBlocked?: (userId: string) => Promise<boolean>;
 };
 
 export default class DashboardAuth {
@@ -79,6 +85,8 @@ export default class DashboardAuth {
   private readonly secureCookies: boolean;
   private readonly cookieNames: DashboardCookieNames;
   private readonly loginFailedUrl: string;
+  private readonly loginBlockedUrl: string;
+  private readonly isUserBlocked: (userId: string) => Promise<boolean>;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardAuthDependencies = {}) {
     this.store = dependencies.store ?? new SessionStore(config.sessionTtlMs);
@@ -86,6 +94,13 @@ export default class DashboardAuth {
     this.secureCookies = config.publicUrl.protocol === 'https:';
     this.cookieNames = dashboardCookieNames(this.secureCookies);
     this.loginFailedUrl = new URL('/?login=failed', config.publicUrl).toString();
+    this.loginBlockedUrl = new URL('/?login=blocked', config.publicUrl).toString();
+    if (dependencies.isUserBlocked) {
+      this.isUserBlocked = dependencies.isUserBlocked;
+    } else {
+      const orchestrator = new OrchestratorClient(config);
+      this.isUserBlocked = async userId => orchestrator.isUserBlocked(userId);
+    }
   }
 
   close(): void {
@@ -131,6 +146,19 @@ export default class DashboardAuth {
       return;
     }
 
+    const access = await this.loginAccess(login.user);
+    if (access !== 'allowed') {
+      await this.revokeQuietly(login.token.access_token);
+      if (access === 'blocked') {
+        console.warn('Dashboard login denied: user is on the block list');
+        redirect(response, this.loginBlockedUrl, [clearState]);
+        return;
+      }
+
+      fail('block list unavailable');
+      return;
+    }
+
     const previousSessionId = cookies[this.cookieNames.session];
     if (previousSessionId) {
       this.store.delete(previousSessionId);
@@ -150,8 +178,18 @@ export default class DashboardAuth {
     ]);
   }
 
+  /** Whether this session belongs to the configured super admin (never true when unset). */
+  isSuperAdmin(session: DashboardSession): boolean {
+    const {superAdminUserId} = this.config;
+    return superAdminUserId !== undefined && superAdminUserId !== '' && session.user.id === superAdminUserId;
+  }
+
+  currentSession(request: IncomingMessage): DashboardSession | undefined {
+    return this.store.get(parseCookies(request)[this.cookieNames.session]);
+  }
+
   requireSession(request: IncomingMessage): DashboardSession {
-    const session = this.store.get(parseCookies(request)[this.cookieNames.session]);
+    const session = this.currentSession(request);
     if (!session) {
       throw new HttpError(401, 'authentication required');
     }
@@ -229,6 +267,22 @@ export default class DashboardAuth {
       const failure = describeUpstreamError(error);
       const status = failure.statusCode === undefined ? 'none' : String(failure.statusCode);
       return `Discord token exchange failed (name=${failure.name} status=${status})`;
+    }
+  }
+
+  /**
+   * Checks the orchestrator block list. The super admin is never blocked (no lockout,
+   * and the console stays reachable while the orchestrator is down). Any error denies.
+   */
+  private async loginAccess(user: DiscordUser): Promise<'allowed' | 'blocked' | 'unavailable'> {
+    if (this.config.superAdminUserId !== undefined && user.id === this.config.superAdminUserId) {
+      return 'allowed';
+    }
+
+    try {
+      return await this.isUserBlocked(user.id) ? 'blocked' : 'allowed';
+    } catch {
+      return 'unavailable';
     }
   }
 

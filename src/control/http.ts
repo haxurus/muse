@@ -1,10 +1,11 @@
 import {IncomingMessage, ServerResponse} from 'node:http';
 import {timingSafeEqual} from 'node:crypto';
 
-const MAX_JSON_BODY_BYTES = 64 * 1024;
+export const MAX_JSON_BODY_BYTES = 64 * 1024;
 
 export class HttpError extends Error {
-  constructor(public readonly statusCode: number, message: string) {
+  /** `code` is an optional machine-readable UPPER_SNAKE_CASE identifier sent next to `error`. */
+  constructor(public readonly statusCode: number, message: string, public readonly code?: string) {
     super(message);
     this.name = 'HttpError';
   }
@@ -20,14 +21,18 @@ export const sendJson = (response: ServerResponse, statusCode: number, body: unk
   response.end(payload);
 };
 
-export const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
+/** Error body shape shared by the control and orchestrator APIs: `{error, code?}`. */
+export const errorBody = (error: HttpError): {error: string; code?: string} =>
+  error.code === undefined ? {error: error.message} : {error: error.message, code: error.code};
+
+export const readJsonBody = async (request: IncomingMessage, maxBytes = MAX_JSON_BODY_BYTES): Promise<unknown> => {
   const chunks: Buffer[] = [];
   let bytes = 0;
 
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > MAX_JSON_BODY_BYTES) {
+    if (bytes > maxBytes) {
       throw new HttpError(413, 'request body too large');
     }
 
