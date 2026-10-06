@@ -270,7 +270,9 @@ export default class {
 
     this.client.on('guildCreate', logListenerFailures('guildCreate', handleGuildCreate));
     this.client.on('voiceStateUpdate', logListenerFailures('voiceStateUpdate', handleVoiceStateUpdate));
-    await this.client.login();
+    // Pass the token explicitly: without an argument discord.js only reads
+    // process.env.DISCORD_TOKEN, which is empty when the token comes from DISCORD_TOKEN_FILE.
+    await this.client.login(this.config.DISCORD_TOKEN);
   }
 
   private setReady(ready: boolean): void {
