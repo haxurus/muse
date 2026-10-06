@@ -552,8 +552,8 @@ select {
 .section-head { max-width: 720px; margin-bottom: 52px; }
 .section-head h2 { margin: 16px 0 0; font-size: clamp(2rem, 4vw, 3.1rem); letter-spacing: -.035em; }
 .section-head p { margin-top: 18px; color: var(--text-2); font-size: 1.02rem; line-height: 1.7; }
-.section-head p a, .section-note a { color: var(--accent); }
-.section-head p a:hover, .section-note a:hover { text-decoration: underline; }
+.section-head p a { color: var(--accent); }
+.section-head p a:hover { text-decoration: underline; }
 
 .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--line); }
 .feature { padding: 30px 28px 32px; background: var(--bg); transition: background .2s ease; }
@@ -579,8 +579,6 @@ select {
 .step-index { color: var(--accent); font-size: .9rem; padding-top: 3px; }
 .steps h3 { font-size: 1.2rem; margin-bottom: 8px; }
 .steps p { color: var(--muted); line-height: 1.65; }
-.section-note { margin-top: 22px; padding: 12px 14px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); color: var(--muted); font-size: .84rem; line-height: 1.6; }
-.section-note strong { margin-right: 6px; color: var(--text-2); font: 500 .7rem var(--font-mono-stack); letter-spacing: .1em; text-transform: uppercase; }
 
 .security-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 64px; align-items: start; }
 .security-layout .section-head { margin-bottom: 0; }
