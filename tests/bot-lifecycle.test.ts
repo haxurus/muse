@@ -258,7 +258,7 @@ describe('Discord command registration and ready lifecycle', () => {
     const {commands, handlers, setPresence} = await registerBot(true, makeCommandSet(), ['guild-a', 'guild-b']);
 
     expect(mocks.login).toHaveBeenCalledOnce();
-    expect(mocks.login).toHaveBeenCalledWith();
+    expect(mocks.login).toHaveBeenCalledWith('fake-token');
     await invoke(handlers, 'ready');
 
     expect(mocks.restSetToken).toHaveBeenCalledWith('fake-token');
