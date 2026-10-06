@@ -8,6 +8,7 @@ x-worker-environment: &worker-environment
   MUSE_CONTROL_HOST: 0.0.0.0
   MUSE_CONTROL_PORT: "3101"
   YT_DLP_AUTO_UPDATE: "false"
+  YT_DLP_COOKIES_PATH: /run/secrets/youtube_cookies
 
 x-worker-common: &worker-common
   image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
@@ -190,6 +191,7 @@ services:
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
+      - youtube_cookies
     volumes:
       - ./data/bot-01:/data
     networks:
@@ -209,6 +211,7 @@ services:
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
+      - youtube_cookies
     volumes:
       - ./data/bot-02:/data
     networks:
@@ -228,6 +231,7 @@ services:
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
+      - youtube_cookies
     volumes:
       - ./data/bot-03:/data
     networks:
@@ -247,6 +251,7 @@ services:
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
+      - youtube_cookies
     volumes:
       - ./data/bot-04:/data
     networks:
@@ -266,6 +271,7 @@ services:
       - youtube_api_key
       - spotify_client_id
       - spotify_client_secret
+      - youtube_cookies
     volumes:
       - ./data/bot-05:/data
     networks:
@@ -364,3 +370,5 @@ secrets:
     file: ./secrets/spotify_client_id
   spotify_client_secret:
     file: ./secrets/spotify_client_secret
+  youtube_cookies:
+    file: ./secrets/youtube_cookies

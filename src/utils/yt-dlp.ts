@@ -89,6 +89,13 @@ const withTemporaryCookies = async <T>(operation: (cookiesPath?: string) => Prom
     return operation();
   }
 
+  // Production always mounts the optional cookies secret; an empty file means
+  // "no cookies configured" rather than an invalid cookie jar.
+  const cookiesSize = await fs.stat(configuredCookiesPath).then(stats => stats.size, () => 0);
+  if (cookiesSize === 0) {
+    return operation();
+  }
+
   const temporaryDirectory = await fs.mkdtemp(path.join(tmpdir(), 'muse-yt-dlp-'));
   const temporaryCookiesPath = path.join(temporaryDirectory, 'youtube-cookies.txt');
 

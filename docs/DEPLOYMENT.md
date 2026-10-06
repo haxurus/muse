@@ -128,6 +128,21 @@ sudoedit /srv/docker/muse/secrets/spotify_client_secret
 
 Spotify is optional. If disabled, keep both Spotify files empty.
 
+### YouTube cookies (optional, usually needed on a VPS)
+
+YouTube often answers requests from datacenter IP ranges with "Sign in to confirm you're not a bot". yt-dlp then needs the cookies of a signed-in YouTube account, stored in `secrets/youtube_cookies` (Netscape `cookies.txt` format) and mounted into every worker as `/run/secrets/youtube_cookies`. An empty file means "no cookies" and is created automatically by the installer and by `muse-deploy`.
+
+- Use a **dedicated** Google account, not your personal one: YouTube can restrict accounts used for automated playback.
+- Export the cookies following the yt-dlp guide (private/incognito window, sign in, open youtube.com, export with a `cookies.txt` extension, close the window without signing out).
+- Copy the file to the VPS and install it with the runtime permissions:
+
+```bash
+sudo install -m 640 -o root -g 10001 /tmp/youtube_cookies.txt /srv/docker/muse/secrets/youtube_cookies && shred -u /tmp/youtube_cookies.txt
+sudo docker restart muse-muse-01-1 muse-muse-02-1 muse-muse-03-1 muse-muse-04-1 muse-muse-05-1
+```
+
+Workers copy the file to a private temporary directory for each extraction, so yt-dlp can refresh it without the read-only secret being modified. Cookies expire: when "Sign in to confirm you're not a bot" reappears in the worker logs, export them again.
+
 Verify permissions:
 
 ```bash
