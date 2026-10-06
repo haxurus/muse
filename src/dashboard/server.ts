@@ -184,7 +184,7 @@ export default class DashboardServer {
       isUserBlocked: async userId => this.orchestrator.isUserBlocked(userId),
     });
 
-    const origin = config.publicUrl.origin;
+    const {origin} = config.publicUrl;
     const render = (page: PageName): Record<Locale, Buffer> => {
       const rendered: Partial<Record<Locale, Buffer>> = {};
       for (const locale of LOCALES) {

@@ -3,7 +3,7 @@ import {TYPES} from '../types.js';
 import {inject, injectable} from 'inversify';
 import PlayerManager from '../managers/player.js';
 import Command from './index.js';
-import {UserError, t} from '../i18n/index.js';
+import {UserError} from '../i18n/index.js';
 import {getGuildLocale} from '../i18n/guild-locale.js';
 import {SlashCommandBuilder} from '@discordjs/builders';
 import {buildPlayingMessageEmbed} from '../utils/build-embed.js';

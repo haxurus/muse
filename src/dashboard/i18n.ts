@@ -459,6 +459,8 @@ const en: Messages = {
 
 export const DICTIONARIES: Readonly<Record<Locale, Messages>> = {it, en};
 
+// A Record alias cannot reference itself, so the recursive node keeps an index signature.
+// eslint-disable-next-line @typescript-eslint/consistent-indexed-object-style
 type DictionaryNode = {[key: string]: string | DictionaryNode};
 
 /** Flattens a nested dictionary to the dotted keys used in the templates ("hero.line1"). */
