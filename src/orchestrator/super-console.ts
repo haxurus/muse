@@ -1,17 +1,9 @@
 import type {IncomingMessage} from 'node:http';
 import {HttpError, readJsonBody} from '../control/http.js';
 import {assertGuildId, isSnowflake} from '../control/snowflake.js';
-import {
-  isStatusAnnounceError,
-  type StatusAnnounceError,
-  type WorkerBlocklistResult,
-  type WorkerStatus,
-  type WorkerStatusAnnounceResult,
-} from '../control/types.js';
+import type {WorkerBlocklistResult, WorkerStatus} from '../control/types.js';
 import type WorkerClient from './worker-client.js';
 import {isPlainObject, isPrintable} from './durable-file.js';
-import type {PlatformSettingsStore} from './platform-store.js';
-import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {
   MAX_ACTOR_NAME_LENGTH,
   isBlockKind,
@@ -42,9 +34,6 @@ export type SuperRouteResult = {
   body: unknown;
 };
 
-/** Per-worker result of a status channel test; `UNREACHABLE` when the worker did not answer. */
-export type StatusTestResult = {workerId: string; ok: true} | {workerId: string; ok: false; error: StatusAnnounceError | 'UNREACHABLE'};
-
 type PushResult = {
   pushed: string[];
   failed: WorkerFailure[];
@@ -71,21 +60,6 @@ const outcomeOf = (succeeded: number, failed: number): AuditOutcome => {
 
 const failuresOf = <T>(results: Array<Settled<T>>): WorkerFailure[] => results
   .flatMap(result => result.ok ? [] : [{workerId: result.workerId, error: result.error}]);
-
-const statusTestResult = (result: Settled<WorkerStatusAnnounceResult>): StatusTestResult => {
-  if (!result.ok) {
-    return {workerId: result.workerId, ok: false, error: 'UNREACHABLE'};
-  }
-
-  // Worker answers are validated, not trusted: anything unexpected is reported as DISCORD_ERROR.
-  const answer: unknown = result.value;
-  if (isPlainObject(answer) && answer.ok === true) {
-    return {workerId: result.workerId, ok: true};
-  }
-
-  const error = isPlainObject(answer) ? answer.error : undefined;
-  return {workerId: result.workerId, ok: false, error: isStatusAnnounceError(error) ? error : 'DISCORD_ERROR'};
-};
 
 /**
  * The dashboard backend asserts which Discord user performed a mutation. `x-muse-actor-id` is a
@@ -145,7 +119,6 @@ export default class SuperConsole {
     private readonly workers: WorkerClient[],
     private readonly blocks: BlockStore,
     private readonly audit: AuditStore,
-    private readonly platform: PlatformSettingsStore,
   ) {}
 
   // eslint-disable-next-line complexity
@@ -186,10 +159,6 @@ export default class SuperConsole {
       return request.method === 'PUT'
         ? {statusCode: 200, body: await this.upsertBlock(kind, subjectId, await readJsonBody(request), actor)}
         : {statusCode: 200, body: await this.deleteBlock(kind, subjectId, actor)};
-    }
-
-    if (segments.length >= 3 && segments[1] === 'super' && segments[2] === 'status-channel') {
-      return this.statusChannelRoute(request, segments.slice(3));
     }
 
     if (request.method === 'GET'
@@ -316,80 +285,7 @@ export default class SuperConsole {
       guilds: [...guilds.values()].sort((left, right) => left.name.localeCompare(right.name)),
       blocks: this.blocks.list(),
       audit: this.audit.list(OVERVIEW_AUDIT_LIMIT),
-      statusChannel: this.platform.statusChannel(),
     };
-  }
-
-  /** `GET|PUT /v1/super/status-channel` and `POST /v1/super/status-channel/test`. */
-  async statusChannelRoute(request: IncomingMessage, rest: string[]): Promise<SuperRouteResult | undefined> {
-    if (rest.length === 0 && request.method === 'GET') {
-      return {statusCode: 200, body: this.platform.statusChannel()};
-    }
-
-    if (rest.length === 0 && request.method === 'PUT') {
-      const actor = parseActor(request);
-      return {statusCode: 200, body: this.setStatusChannel(await readJsonBody(request), actor)};
-    }
-
-    if (rest.length === 1 && rest[0] === 'test' && request.method === 'POST') {
-      const actor = parseActor(request);
-      return {statusCode: 200, body: await this.testStatusChannel(actor)};
-    }
-
-    return undefined;
-  }
-
-  setStatusChannel(input: unknown, actor: Actor) {
-    const body = objectBody(input);
-    const {channelId} = body;
-    if (channelId !== null && !isSnowflake(channelId)) {
-      throw new HttpError(400, 'channelId must be a Discord channel id or null', 'INVALID_CHANNEL_ID');
-    }
-
-    const current = this.platform.statusChannel();
-    // Omitted means "keep the current roles"; [] removes every mention.
-    const mentionRoleIds = body.mentionRoleIds === undefined ? current.mentionRoleIds : parseMentionRoleIds(body.mentionRoleIds);
-    const previousChannelId = current.statusChannelId;
-    const action = channelId === null ? 'status_channel.clear' : 'status_channel.set';
-    const subjectId = channelId ?? previousChannelId ?? 'none';
-    const setting = this.persist(
-      {actor, action, subjectType: 'CHANNEL', subjectId},
-      () => this.platform.setStatusChannel(channelId, mentionRoleIds, actor),
-    );
-
-    this.record({
-      actor,
-      action,
-      subjectType: 'CHANNEL',
-      subjectId,
-      details: {previousChannelId, statusChannelId: channelId, mentionRoleCount: mentionRoleIds.length},
-      outcome: 'ok',
-    });
-
-    return setting;
-  }
-
-  /** Every worker posts a test message in the configured channel; unreachable workers are reported, never fatal. */
-  async testStatusChannel(actor: Actor) {
-    const {statusChannelId, mentionRoleIds} = this.platform.statusChannel();
-    if (statusChannelId === null) {
-      throw new HttpError(400, 'no status channel is configured', 'STATUS_CHANNEL_NOT_SET');
-    }
-
-    const settled = await Promise.all(this.workers.map(async worker => settle(worker.id, worker.announceStatus({channelId: statusChannelId, test: true, mentionRoleIds}))));
-    const results = settled.map(result => statusTestResult(result));
-    const succeeded = results.filter(result => result.ok).length;
-
-    this.record({
-      actor,
-      action: 'status_channel.test',
-      subjectType: 'CHANNEL',
-      subjectId: statusChannelId,
-      details: {mentionRoleCount: mentionRoleIds.length, results},
-      outcome: outcomeOf(succeeded, results.length - succeeded),
-    });
-
-    return {statusChannelId, results};
   }
 
   async leaveGuild(guildId: string, input: unknown, actor: Actor) {

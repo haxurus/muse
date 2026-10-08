@@ -115,8 +115,6 @@ export type OrchestratorConfig = {
   blocksFile?: string;
   /** Super-console audit log; defaults to super-audit.json next to the groups file. */
   auditFile?: string;
-  /** Platform settings (bot status channel); defaults to platform-settings.json next to the groups file. */
-  platformFile?: string;
   /** Blocklist reconcile period; defaults to 60 seconds. */
   blocklistReconcileIntervalMs?: number;
 };
@@ -144,9 +142,8 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
   const groupsFile = resolveStateFile('MUSE_ORCHESTRATOR_GROUPS_FILE', '/state/groups.json');
   const blocksFile = resolveStateFile('MUSE_ORCHESTRATOR_BLOCKS_FILE', '/state/blocks.json');
   const auditFile = resolveStateFile('MUSE_ORCHESTRATOR_AUDIT_FILE', '/state/super-audit.json');
-  const platformFile = resolveStateFile('MUSE_ORCHESTRATOR_PLATFORM_FILE', '/state/platform-settings.json');
-  if (new Set([groupsFile, blocksFile, auditFile, platformFile]).size !== 4) {
-    throw new Error('Orchestrator groups, blocks, audit and platform settings files must be distinct');
+  if (new Set([groupsFile, blocksFile, auditFile]).size !== 3) {
+    throw new Error('Orchestrator groups, blocks and audit files must be distinct');
   }
 
   return {
@@ -157,6 +154,5 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     groupsFile,
     blocksFile,
     auditFile,
-    platformFile,
   };
 };

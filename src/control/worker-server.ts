@@ -1,15 +1,17 @@
 import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
-import {Client} from 'discord.js';
+import {Client, type Guild} from 'discord.js';
 import Config from '../services/config.js';
 import PlayerManager from '../managers/player.js';
-import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {HttpError, errorBody, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
-import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
+import {getGuildSettingsView, updateGuildSettings} from './guild-settings.js';
+import {sanitizeGuildSettingsPatch} from './settings-validation.js';
 import type PlaybackWorker from '../playback/worker.js';
 import {assertGuildId} from './snowflake.js';
 import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklist.js';
-import type {WorkerBlocklistResult, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusAnnounceResult} from './types.js';
-import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
+import type {WorkerBlocklistResult, WorkerGuildMeta, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusTestResult} from './types.js';
+import {normalizeLocale} from '../i18n/index.js';
+import {postStatusMessage} from '../status/announce.js';
+import {assertStatusSettingsForGuild, buildGuildMeta} from '../status/guild-meta.js';
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -96,11 +98,6 @@ export default class WorkerControlServer {
         return;
       }
 
-      if (request.method === 'POST' && segments.join('/') === 'v1/status-channel/announce') {
-        sendJson(response, 200, await this.announceStatus(await readJsonBody(request)));
-        return;
-      }
-
       if (segments.length === 4
         && segments[0] === 'v1'
         && segments[1] === 'guilds'
@@ -111,22 +108,35 @@ export default class WorkerControlServer {
       }
 
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'settings') {
-        const guildId = segments[2];
-        assertGuildId(guildId);
-        if (!this.client.guilds.cache.has(guildId)) {
-          throw new HttpError(404, 'worker is not a member of that guild');
-        }
+        const guild = this.memberGuild(segments[2]);
 
         if (request.method === 'GET') {
-          sendJson(response, 200, await getGuildSettings(guildId));
+          sendJson(response, 200, await getGuildSettingsView(guild.id));
           return;
         }
 
         if (request.method === 'PATCH') {
           const patch = sanitizeGuildSettingsPatch(await readJsonBody(request));
-          sendJson(response, 200, await updateGuildSettings(guildId, patch));
+          // The status channel and roles must belong to this guild: checked here, where the Discord client is.
+          assertStatusSettingsForGuild(guild, patch);
+          sendJson(response, 200, await updateGuildSettings(guild.id, patch));
           return;
         }
+      }
+
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'meta' && request.method === 'GET') {
+        sendJson(response, 200, this.guildMeta(segments[2]));
+        return;
+      }
+
+      if (segments.length === 5
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'status-channel'
+        && segments[4] === 'test'
+        && request.method === 'POST') {
+        sendJson(response, 200, await this.testStatusChannel(segments[2]));
+        return;
       }
 
       sendJson(response, 404, {error: 'not found'});
@@ -141,16 +151,53 @@ export default class WorkerControlServer {
     }
   }
 
-  /** Post a status message on orchestrator request (the super console test button). Discord failures are a 200 with `ok: false`. */
-  private async announceStatus(input: unknown): Promise<WorkerStatusAnnounceResult> {
-    const request = parseStatusAnnounceRequest(input);
-    const {channelId} = request;
-    const result = await postStatusMessage(this.client, {...request, workerId: this.config.WORKER_ID});
-    if (!result.ok) {
-      console.warn(`Worker ${this.config.WORKER_ID} could not post a status message in ${channelId} (${result.error})`);
+  /** A guild this bot is a member of; `400` for a malformed id, `404` otherwise. */
+  private memberGuild(guildId: string): Guild {
+    assertGuildId(guildId);
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) {
+      throw new HttpError(404, 'worker is not a member of that guild', 'NOT_IN_GUILD');
     }
 
-    return {workerId: this.config.WORKER_ID, ...result};
+    return guild;
+  }
+
+  /** Channels and roles for the dashboard "Log" tab pickers, as seen by this bot. */
+  private guildMeta(guildId: string): WorkerGuildMeta {
+    if (!this.client.isReady()) {
+      throw new HttpError(503, 'worker is not connected to Discord', 'NOT_READY');
+    }
+
+    const guild = this.memberGuild(guildId);
+    return {workerId: this.config.WORKER_ID, guildId: guild.id, ...buildGuildMeta(guild)};
+  }
+
+  /** Post the test message with this bot's saved status setting for the guild. Discord failures are a 200 with `ok: false`. */
+  private async testStatusChannel(guildId: string): Promise<WorkerStatusTestResult> {
+    const workerId = this.config.WORKER_ID;
+    if (!this.client.isReady()) {
+      assertGuildId(guildId);
+      return {workerId, ok: false, error: 'NOT_READY'};
+    }
+
+    const guild = this.memberGuild(guildId);
+    const settings = await getGuildSettingsView(guild.id);
+    if (settings.statusChannelId === null) {
+      return {workerId, ok: false, error: 'NOT_CONFIGURED'};
+    }
+
+    const result = await postStatusMessage(this.client, {
+      guildId: guild.id,
+      channelId: settings.statusChannelId,
+      test: true,
+      mentionRoleIds: settings.statusMentionRoleIds,
+      locale: normalizeLocale(settings.locale),
+    });
+    if (!result.ok) {
+      console.warn(`Worker ${workerId} could not post the status test message in guild ${guild.id} (${result.error})`);
+    }
+
+    return {workerId, ...result};
   }
 
   private async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {

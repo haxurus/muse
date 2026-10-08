@@ -1,141 +1,134 @@
 import type {Client} from 'discord.js';
-import {isSnowflake} from '../control/snowflake.js';
-import {MAX_MENTION_ROLES} from '../control/mention-roles.js';
-import type {StatusAnnounceResult, WorkerPlatformConfig} from '../control/types.js';
-import {resolveOrchestratorUrl} from '../playback/protocol.js';
+import type {StatusAnnounceResult} from '../control/types.js';
+import {listStatusChannelTargets, type StatusChannelTarget} from '../control/guild-settings.js';
+import {normalizeLocale} from '../i18n/index.js';
 import type Config from '../services/config.js';
 import {postStatusMessage, type StatusMessageInput} from './announce.js';
 
-/** At most one "online" message per bot in this window, so a flapping gateway does not spam the channel. */
+/** At most one round of "Bot started" messages per bot process in this window, so a flapping gateway does not spam. */
 export const STATUS_ANNOUNCE_INTERVAL_MS = 5 * 60 * 1000;
-export const WORKER_CONFIG_TIMEOUT_MS = 5000;
-const MAX_WORKER_CONFIG_BYTES = 4096;
-
-const isValidRoleList = (value: unknown): value is string[] => Array.isArray(value)
-  && value.length <= MAX_MENTION_ROLES
-  && value.every(id => isSnowflake(id));
+/** Pause between two guilds, to stay well below Discord's rate limits on large fleets. */
+export const STATUS_GUILD_DELAY_MS = 1000;
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
-/** `GET /v1/worker/config` on the orchestrator, authenticated with this worker's control token. */
-export const fetchWorkerPlatformConfig = async (
-  token: string,
-  url: string = resolveOrchestratorUrl('/v1/worker/config'),
-  timeoutMs = WORKER_CONFIG_TIMEOUT_MS,
-): Promise<WorkerPlatformConfig> => {
-  const response = await fetch(url, {
-    method: 'GET',
-    redirect: 'error',
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {authorization: `Bearer ${token}`, accept: 'application/json'},
-  });
-  if (!response.ok) {
-    throw new Error(`Orchestrator answered ${response.status}`);
-  }
-
-  const text = await response.text();
-  if (text.length > MAX_WORKER_CONFIG_BYTES) {
-    throw new Error('Oversized worker config');
-  }
-
-  const body = JSON.parse(text) as unknown;
-  if (typeof body !== 'object' || body === null) {
-    throw new Error('Invalid worker config');
-  }
-
-  const {statusChannelId, mentionRoleIds} = body as {statusChannelId?: unknown; mentionRoleIds?: unknown};
-  if (statusChannelId !== null && !isSnowflake(statusChannelId)) {
-    throw new Error('Invalid worker config');
-  }
-
-  // A missing list (older orchestrator) means no mentions.
-  let roles: string[] = [];
-  if (mentionRoleIds !== undefined) {
-    if (!isValidRoleList(mentionRoleIds)) {
-      throw new Error('Invalid worker config');
-    }
-
-    roles = mentionRoleIds;
-  }
-
-  return {statusChannelId, mentionRoleIds: roles};
-};
-
 export type StatusAnnouncerDependencies = {
-  fetchConfig: (token: string) => Promise<WorkerPlatformConfig>;
+  listTargets: () => Promise<StatusChannelTarget[]>;
   post: (client: Client, input: StatusMessageInput) => Promise<StatusAnnounceResult>;
   now: () => number;
+  delay: (ms: number) => Promise<void>;
 };
 
-export type AnnounceOutcome = 'posted' | 'failed' | 'skipped';
+export type AnnounceSummary = {
+  outcome: 'done' | 'failed' | 'skipped';
+  posted: string[];
+  failed: Array<{guildId: string; error: string}>;
+};
+
+const skipped = (): AnnounceSummary => ({outcome: 'skipped', posted: [], failed: []});
+
+const sleep = async (ms: number): Promise<void> => new Promise<void>(resolve => {
+  setTimeout(resolve, ms);
+});
 
 /**
- * Posts the "bot online" message in the status channel chosen from the super console, after startup
- * and after a full reconnect. Only managed workers (MUSE_WORKER_ID) announce. It never throws and is
- * never awaited by the ready handlers, so the orchestrator or Discord being slow cannot delay readiness.
+ * Posts the "Bot started" message in every guild where this bot's own settings name a status channel
+ * (chosen per server in the dashboard "Log" tab), after startup and after a full reconnect. Only managed
+ * workers (MUSE_WORKER_ID) announce. Guilds are handled one at a time with a short pause; a failure in
+ * one guild is logged and the next one is tried. It never throws and is never awaited by the ready
+ * handlers, so Discord or the database being slow cannot delay readiness.
  */
 export default class StatusAnnouncer {
-  private lastPostedAt?: number;
+  private lastAnnouncedAt?: number;
   private inFlight = false;
   private readonly dependencies: StatusAnnouncerDependencies;
 
   constructor(
     private readonly client: Client,
-    private readonly config: Pick<Config, 'WORKER_ID' | 'CONTROL_TOKEN'>,
+    private readonly config: Pick<Config, 'WORKER_ID'>,
     dependencies: Partial<StatusAnnouncerDependencies> = {},
   ) {
     this.dependencies = {
-      fetchConfig: async token => fetchWorkerPlatformConfig(token),
+      listTargets: async () => listStatusChannelTargets(),
       post: async (target, input) => postStatusMessage(target, input),
       now: () => Date.now(),
+      delay: sleep,
       ...dependencies,
     };
   }
 
-  async announceOnline(): Promise<AnnounceOutcome> {
-    if (!this.config.WORKER_ID || !this.config.CONTROL_TOKEN || this.inFlight) {
-      return 'skipped';
+  async announceOnline(): Promise<AnnounceSummary> {
+    if (!this.config.WORKER_ID || this.inFlight) {
+      return skipped();
     }
 
-    if (this.lastPostedAt !== undefined && this.dependencies.now() - this.lastPostedAt < STATUS_ANNOUNCE_INTERVAL_MS) {
-      return 'skipped';
+    if (this.lastAnnouncedAt !== undefined && this.dependencies.now() - this.lastAnnouncedAt < STATUS_ANNOUNCE_INTERVAL_MS) {
+      return skipped();
     }
 
     this.inFlight = true;
     try {
       return await this.announce();
     } catch (error: unknown) {
-      console.warn(`Status channel: online message failed (${errorLabel(error)})`);
-      return 'failed';
+      console.warn(`Status channel: online messages failed (${errorLabel(error)})`);
+      return {outcome: 'failed', posted: [], failed: []};
     } finally {
       this.inFlight = false;
     }
   }
 
-  private async announce(): Promise<AnnounceOutcome> {
-    let config: WorkerPlatformConfig;
+  private async announce(): Promise<AnnounceSummary> {
+    let targets: StatusChannelTarget[];
     try {
-      config = await this.dependencies.fetchConfig(this.config.CONTROL_TOKEN);
+      targets = await this.dependencies.listTargets();
     } catch (error: unknown) {
       // Not counted against the rate limit: the next full reconnect tries again.
-      console.warn(`Status channel: could not read the worker config from the orchestrator (${errorLabel(error)})`);
-      return 'failed';
+      console.warn(`Status channel: could not read the status channel settings (${errorLabel(error)})`);
+      return {outcome: 'failed', posted: [], failed: []};
     }
 
-    const {statusChannelId, mentionRoleIds} = config;
-    if (statusChannelId === null) {
-      return 'skipped';
+    // Rows of servers this bot has left stay in the database: only current guilds are announced.
+    const current = targets.filter(target => this.client.guilds.cache.has(target.guildId));
+    if (current.length === 0) {
+      return skipped();
     }
 
-    // Count every attempt, so a channel with missing permissions is not retried on each reconnect.
-    this.lastPostedAt = this.dependencies.now();
-    const result = await this.dependencies.post(this.client, {channelId: statusChannelId, workerId: this.config.WORKER_ID, test: false, mentionRoleIds});
-    if (!result.ok) {
-      console.warn(`Status channel: online message not posted in ${statusChannelId} (${result.error})`);
-      return 'failed';
+    // Count every round, so a channel with missing permissions is not retried on each reconnect.
+    this.lastAnnouncedAt = this.dependencies.now();
+    const summary: AnnounceSummary = {outcome: 'done', posted: [], failed: []};
+    for (const [index, target] of current.entries()) {
+      if (index > 0) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.dependencies.delay(STATUS_GUILD_DELAY_MS);
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      const error = await this.postOne(target);
+      if (error === undefined) {
+        summary.posted.push(target.guildId);
+      } else {
+        summary.failed.push({guildId: target.guildId, error});
+        console.warn(`Status channel: online message not posted in guild ${target.guildId} (${error})`);
+      }
     }
 
-    console.log(`Status channel: online message posted in ${statusChannelId}`);
-    return 'posted';
+    console.log(`Status channel: online message posted in ${summary.posted.length}/${current.length} guilds`);
+    return summary;
+  }
+
+  /** Returns the error code, or undefined when the message was posted. Never throws. */
+  private async postOne(target: StatusChannelTarget): Promise<string | undefined> {
+    try {
+      const result = await this.dependencies.post(this.client, {
+        guildId: target.guildId,
+        channelId: target.channelId,
+        test: false,
+        mentionRoleIds: target.mentionRoleIds,
+        locale: normalizeLocale(target.locale),
+      });
+      return result.ok ? undefined : result.error;
+    } catch (error: unknown) {
+      return errorLabel(error);
+    }
   }
 }

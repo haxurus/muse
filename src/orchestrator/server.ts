@@ -9,18 +9,10 @@ import {handlePlaybackProxy} from '../playback/transport.js';
 import {assertGuildId} from '../control/snowflake.js';
 import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS} from './super-console.js';
 import {AuditStore, BlockStore} from './super-store.js';
-import {PlatformSettingsStore} from './platform-store.js';
-import type {WorkerPlatformConfig} from '../control/types.js';
+import {isPlainObject} from './durable-file.js';
+import {mergeGuildMeta, statusTestResult, workerErrorCode, type WorkerCallResult} from './guild-status.js';
 
-type WorkerResult<T> = {
-  workerId: string;
-  ok: true;
-  value: T;
-} | {
-  workerId: string;
-  ok: false;
-  error: string;
-};
+type WorkerResult<T> = WorkerCallResult<T>;
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -29,7 +21,6 @@ export default class OrchestratorServer {
   private readonly workers: WorkerClient[];
   private readonly groups: GuildGroupStore;
   private readonly superConsole: SuperConsole;
-  private readonly platform: PlatformSettingsStore;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
@@ -38,12 +29,10 @@ export default class OrchestratorServer {
       new Set(config.workers.map(worker => worker.id)),
     );
     const stateDirectory = path.dirname(config.groupsFile);
-    this.platform = new PlatformSettingsStore(config.platformFile ?? path.join(stateDirectory, 'platform-settings.json'));
     this.superConsole = new SuperConsole(
       this.workers,
       new BlockStore(config.blocksFile ?? path.join(stateDirectory, 'blocks.json')),
       new AuditStore(config.auditFile ?? path.join(stateDirectory, 'super-audit.json')),
-      this.platform,
     );
   }
 
@@ -96,17 +85,12 @@ export default class OrchestratorServer {
         return;
       }
 
-      const segments = getPathSegments(request);
-      if (segments.join('/') === 'v1/worker/config') {
-        sendJson(response, 200, this.workerConfig(request));
-        return;
-      }
-
       if (!hasBearerToken(request, this.config.apiToken)) {
         sendJson(response, 401, {error: 'unauthorized'});
         return;
       }
 
+      const segments = getPathSegments(request);
       const superResult = await this.superConsole.route(request, segments);
       if (superResult) {
         sendJson(response, superResult.statusCode, superResult.body);
@@ -125,6 +109,21 @@ export default class OrchestratorServer {
 
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'workers' && request.method === 'GET') {
         sendJson(response, 200, await this.guildWorkers(segments[2]));
+        return;
+      }
+
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'meta' && request.method === 'GET') {
+        sendJson(response, 200, await this.guildMeta(segments[2]));
+        return;
+      }
+
+      if (segments.length === 5
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'status-channel'
+        && segments[4] === 'test'
+        && request.method === 'POST') {
+        sendJson(response, 200, await this.testGuildStatusChannel(segments[2], await readJsonBody(request)));
         return;
       }
 
@@ -193,28 +192,6 @@ export default class OrchestratorServer {
     }
   }
 
-  /**
-   * Read-only platform settings for the workers, authenticated with the calling worker's own
-   * control token (like the playback relay). The admin API token is refused.
-   */
-  private workerConfig(request: IncomingMessage): WorkerPlatformConfig {
-    if (hasBearerToken(request, this.config.apiToken)) {
-      throw new HttpError(403, 'this route requires a worker control token', 'WORKER_TOKEN_REQUIRED');
-    }
-
-    const callers = this.config.workers.filter(worker => hasBearerToken(request, worker.token));
-    if (callers.length !== 1) {
-      throw new HttpError(401, 'unauthorized');
-    }
-
-    if (request.method !== 'GET') {
-      throw new HttpError(405, 'method not allowed');
-    }
-
-    const {statusChannelId, mentionRoleIds} = this.platform.statusChannel();
-    return {statusChannelId, mentionRoleIds};
-  }
-
   private async workerStatuses() {
     return Promise.all(this.workers.map(async worker => this.wrap(worker.id, worker.status())));
   }
@@ -263,6 +240,80 @@ export default class OrchestratorServer {
       workers,
       groups: this.groups.list(guildId),
     };
+  }
+
+  /** Workers whose status could be read and that are members of the guild, in configuration order. */
+  private async presentWorkers(guildId: string) {
+    const statuses = await this.workerStatuses();
+    return statuses.flatMap(result => {
+      if (!result.ok || !result.value.guilds.some(guild => guild.id === guildId)) {
+        return [];
+      }
+
+      const worker = this.workers.find(candidate => candidate.id === result.workerId)!;
+      return [{worker, ready: result.value.discordReady}];
+    });
+  }
+
+  /** Channel and role pickers of the dashboard "Log" tab: one bot's view plus who can post where. */
+  private async guildMeta(guildId: string) {
+    assertGuildId(guildId);
+    const present = await this.presentWorkers(guildId);
+    if (present.length === 0) {
+      throw new HttpError(404, 'no workers are available in that guild', 'NOT_IN_GUILD');
+    }
+
+    const answers = await Promise.all(present.map(async ({worker, ready}) => ({
+      ready,
+      result: await this.wrap<unknown>(worker.id, worker.guildMeta(guildId)),
+    })));
+    return mergeGuildMeta(guildId, answers);
+  }
+
+  /** Every selected bot present in the guild posts the test message with its own saved setting. */
+  private async testGuildStatusChannel(guildId: string, input: unknown) {
+    assertGuildId(guildId);
+    if (!isPlainObject(input)) {
+      throw new HttpError(400, 'request body must be an object', 'INVALID_BODY');
+    }
+
+    const requested = this.requestedWorkerIds(input.workerIds);
+    const present = await this.presentWorkers(guildId);
+    const presentIds = new Set(present.map(({worker}) => worker.id));
+    const selected = present.filter(({worker}) => requested === undefined || requested.has(worker.id));
+    // Requested bots that are down or not in the guild cannot post: reported, never fatal.
+    const missing = requested === undefined ? [] : [...requested].filter(workerId => !presentIds.has(workerId));
+    if (selected.length === 0) {
+      throw new HttpError(404, 'no matching workers are available in that guild', 'NOT_IN_GUILD');
+    }
+
+    const answers = await Promise.all(selected.map(async ({worker}) => this.wrap<unknown>(worker.id, worker.testStatusChannel(guildId))));
+    const results = [
+      ...answers.map(answer => statusTestResult(answer)),
+      ...missing.map(workerId => statusTestResult({workerId, ok: false, error: 'WorkerNotInGuild'})),
+    ];
+    const order = new Map(this.workers.map((worker, index) => [worker.id, index]));
+    results.sort((left, right) => (order.get(left.workerId) ?? 0) - (order.get(right.workerId) ?? 0));
+    return {guildId, results};
+  }
+
+  /** Optional `workerIds`: a non-empty array of configured worker ids; `undefined` means every worker. */
+  private requestedWorkerIds(value: unknown): Set<string> | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (!Array.isArray(value) || value.length === 0 || value.some(workerId => typeof workerId !== 'string')) {
+      throw new HttpError(400, 'workerIds must be a non-empty string array', 'INVALID_WORKER_IDS');
+    }
+
+    const requested = new Set(value as string[]);
+    const unknownIds = [...requested].filter(id => !this.workers.some(worker => worker.id === id));
+    if (unknownIds.length > 0) {
+      throw new HttpError(400, `unknown workers: ${unknownIds.join(', ')}`, 'UNKNOWN_WORKERS');
+    }
+
+    return requested;
   }
 
   private async updateGuildWorkers(guildId: string, input: unknown) {
@@ -328,10 +379,13 @@ export default class OrchestratorServer {
         value: await promise,
       };
     } catch (error: unknown) {
+      // A worker 4xx code (for example INVALID_STATUS_CHANNEL on a settings patch) is passed on when available.
+      const code = workerErrorCode(error);
       return {
         workerId,
         ok: false,
         error: errorLabel(error),
+        ...(code === undefined ? {} : {code}),
       };
     }
   }

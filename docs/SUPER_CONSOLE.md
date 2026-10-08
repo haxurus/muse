@@ -1,8 +1,10 @@
 # Super console
 
-The super console lets the configured super admin see the whole fleet, force bots out of a Discord server, block servers or users across all five bots, choose the Discord channel where the bots announce that they are online, and review an audit log of those actions.
+The super console lets the configured super admin see the whole fleet, force bots out of a Discord server, block servers or users across all five bots, and review an audit log of those actions.
 
 This document describes the backend (orchestrator and workers). The dashboard pages and the super-admin gate are described in `DASHBOARD.md`.
+
+The bot status channel (the "Bot started" message) is not a super console setting: every server chooses its own channel and roles in the dashboard "Log" tab, with the normal server permissions (see "Bot status channel" in `DASHBOARD.md`).
 
 ## Backend
 
@@ -20,15 +22,14 @@ browser --session/CSRF--> dashboard --orchestrator token + actor headers--> orch
 
 ### State files
 
-They live in the orchestrator `/state` volume (`./data/orchestrator` in production) next to `groups.json`:
+Both live in the orchestrator `/state` volume (`./data/orchestrator` in production) next to `groups.json`:
 
 | File | Env override | Content |
 | --- | --- | --- |
 | `/state/blocks.json` | `MUSE_ORCHESTRATOR_BLOCKS_FILE` | `{"version": 1, "blocks": [Block...]}` |
 | `/state/super-audit.json` | `MUSE_ORCHESTRATOR_AUDIT_FILE` | `{"version": 1, "entries": [AuditEntry...]}` (oldest first) |
-| `/state/platform-settings.json` | `MUSE_ORCHESTRATOR_PLATFORM_FILE` | `{"version": 1, "statusChannel": StatusChannelSetting}` (see [Bot status channel](#bot-status-channel)) |
 
-Overrides must normalize to a path under `/state/` and be distinct from each other and from the groups file, or the orchestrator refuses to start. A missing `platform-settings.json` means "no status channel".
+Overrides must normalize to a path under `/state/` and be distinct from the groups file, or the orchestrator refuses to start.
 
 Writes follow the group store rules: the previous good state is saved as `<file>.bak`, the next state is written to a temp file, fsynced and renamed (directory fsync where supported), and memory only changes after the write succeeded. On startup each file is schema-validated; an invalid file falls back to `<file>.bak` with a warning, and the orchestrator refuses to start if neither is valid. Only one orchestrator may run per state volume.
 
@@ -45,9 +46,8 @@ type AuditEntry = {
   id: string;                   // UUID
   at: string;                   // ISO 8601
   actor: {userId: string; username: string};
-  action: 'guild.leave' | 'block.upsert' | 'block.delete'
-    | 'status_channel.set' | 'status_channel.clear' | 'status_channel.test';
-  subjectType: 'GUILD' | 'USER' | 'CHANNEL';
+  action: 'guild.leave' | 'block.upsert' | 'block.delete';
+  subjectType: 'GUILD' | 'USER';
   subjectId: string;
   details: Record<string, unknown>;   // small; replaced by {truncated: true} above 4 KiB
   outcome: 'ok' | 'partial' | 'failed';
@@ -94,7 +94,6 @@ All responses are JSON. Errors are `{"error": "<message>", "code"?: "<CODE>"}`.
   }>;
   blocks: Block[];                     // newest first
   audit: AuditEntry[];                 // newest first, at most 200
-  statusChannel: StatusChannelSetting; // see "Bot status channel"
 }
 ```
 
@@ -130,75 +129,9 @@ Headers: actor (required). Removes the block and pushes the blocklist.
 
 `200 {blocked: boolean}`; `400 INVALID_SUBJECT_ID` for a malformed id. Used by the dashboard login.
 
-### Bot status channel
-
-The super admin can choose one Discord channel where **every bot posts a message when it comes online**. Only the "online" event is announced (no offline, crash or deploy messages). Each bot posts itself, with its own identity, so every bot must be a member of that channel's server with **View Channel**, **Send Messages** and **Embed Links** there.
-
-```ts
-type StatusChannelSetting = {
-  statusChannelId: string | null;          // Discord channel id; null = disabled (default)
-  mentionRoleIds: string[];                // 0-10 role ids pinged by every status message (default [])
-  updatedAt: string | null;                // ISO 8601
-  updatedBy: {userId: string; username: string} | null;
-};
-```
-
-When a bot announces:
-
-- After the Discord `ready` event, once startup has completed (commands registered, presence set, ready file written), and again after a full reconnect (`shardReady` after startup, i.e. a new session that could not be resumed; plain resumes never announce).
-- At most **once per 5 minutes** per bot process, so a flapping connection does not spam the channel. Every post attempt counts, including one that failed for missing permissions; a failed orchestrator request does not, so the next full reconnect tries again.
-- Only managed workers (`MUSE_WORKER_ID` set) announce. The bot reads the channel from the orchestrator (`GET /v1/worker/config`, 5 second timeout, see `ORCHESTRATOR.md`); this runs in the background and never delays or fails readiness. Failures (orchestrator unreachable, channel missing, missing permissions) are only logged as one concise warning.
-
-The message mirrors Sentinel's "Bot avviato" message:
-
-- **content**: only the mentions of the configured roles (`<@&roleA> <@&roleB>`), no content at all when no role is configured; `allowedMentions` is exactly `{parse: [], roles: [<configured role ids>]}`, so users, `@everyone` and `@here` are never pinged;
-- **embed**, green left bar (`#3ccf8e`):
-  - title "Bot started" (Italian "Bot avviato");
-  - description "Bot connected as `<bot tag>`." ("Bot connesso come `<bot tag>`.");
-  - field "Action author" ("Autore azione"): ``**<bot username>** · <@botId> · `botId` ``;
-  - field "Details" ("Dettagli"): `**Guild Count:** <servers>` and ``**Bot:** <bot username> · <@botId> · `botId` `` on two lines (the "Guild Count" / "Bot" labels are the same in both languages, as in Sentinel);
-  - footer: the hostname of `MUSE_DASHBOARD_PUBLIC_URL` (workers receive the whole `.env`), or `Muse` when it is missing or invalid; timestamp: now (Discord shows "Today at 19:29" in each reader's timezone).
-- **Test message** (super console button): same layout and the same role mentions (so the admin can check that they ping), title "Test message" ("Messaggio di prova"), description "Status channel test sent by `<bot tag>`." ("Prova del canale di stato inviata da `<bot tag>`."), violet left bar (`#a78bfa`).
-- Language: the `locale` setting of the channel's server **for that bot** (see `I18N.md`), English by default.
-
-Role mentions only notify people when the role is **mentionable** (Server Settings → Roles → "Allow anyone to @mention this role") or the bots have the **Mention @everyone, @here and All Roles** permission in the channel; otherwise Discord shows the mention without pinging anybody.
-
-The channel must be a standard text or announcement channel of a server (threads, forum posts, voice channel chats and DMs are refused with `INVALID_CHANNEL`).
-
-Worker error codes, reported by the test action and in the worker logs:
-
-| Code | Meaning |
-| --- | --- |
-| `NOT_READY` | The bot is not connected to Discord (yet). |
-| `CHANNEL_NOT_FOUND` | The channel does not exist, or the bot is not in its server. |
-| `INVALID_CHANNEL` | Not a standard text or announcement channel. |
-| `MISSING_PERMISSIONS` | The bot lacks View Channel, Send Messages or Embed Links there. |
-| `DISCORD_ERROR` | Any other Discord failure (or an unexpected worker answer). |
-| `UNREACHABLE` | Orchestrator only: the worker did not answer (down, restarting, timeout). |
-
-#### `GET /v1/super/status-channel`
-
-`200 StatusChannelSetting`. Actor headers are accepted but not required. The same object is in the overview as `statusChannel`.
-
-#### `PUT /v1/super/status-channel`
-
-Headers: actor (required). Body: `{"channelId": "<snowflake>" | null, "mentionRoleIds"?: ["<snowflake>", ...]}`. `channelId: null` disables the messages. `mentionRoleIds` omitted keeps the current roles, `[]` removes every mention; duplicates are removed, at most 10 roles.
-
-- `200 StatusChannelSetting` (the stored value). Saving does not contact the bots: they read the setting the next time they announce.
-- Audited as `status_channel.set` or `status_channel.clear`, subject type `CHANNEL`, subject the new channel (or the previous one when clearing), details `{previousChannelId, statusChannelId, mentionRoleCount}`.
-- `400 INVALID_ACTOR`, `400 INVALID_BODY` (not an object), `400 INVALID_CHANNEL_ID` (missing, or neither a snowflake nor `null`), `400 INVALID_ROLE_IDS` (not an array, a value that is not a snowflake, or more than 10 roles).
-
-#### `POST /v1/super/status-channel/test`
-
-Headers: actor (required). No body. Every configured worker is asked (`POST /v1/status-channel/announce` with `{channelId, test: true, mentionRoleIds}`, 10 second timeout) to post the test message in the configured channel.
-
-- `200 {statusChannelId, results: [{workerId, ok: true} | {workerId, ok: false, error}]}` in worker order, `error` being one of the codes above.
-- Audited as `status_channel.test` (subject the channel, details `{mentionRoleCount, results}`), outcome `ok` (every bot posted), `partial` or `failed` (none did).
-- `400 STATUS_CHANNEL_NOT_SET` when no channel is configured; `400 INVALID_ACTOR`.
-
 ### Worker endpoints
 
-Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/blocklist`, `POST /v1/status-channel/announce`, extended `GET /v1/status`). They use each worker's control token and are only called by the orchestrator. The orchestrator route `GET /v1/worker/config` goes the other way: workers call it with their own control token.
+Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/blocklist`, extended `GET /v1/status`). They use each worker's control token and are only called by the orchestrator.
 
 ### Audit and failure handling
 
@@ -215,7 +148,6 @@ Layout (Sentinel super console style):
 - kicker `SUPER CONSOLE`, title "Controllo globale di Muse.";
 - KPI row: Bot online (ready / total), Server collegati, Player attivi (sum of `activePlayers`), Blacklist;
 - **BOT · Stato dei worker**: avatar, username, worker id and bot id, Pronto / Non pronto / Offline, server and player counts, uptime, "Aggiungi a un server" (`/invite/:id`);
-- **STATO · Canale di log dei bot** (EN "STATUS · Bot status channel"): Channel ID field (client-side 17-20 digit check), "Salva", "Disattiva" (asks for confirmation) and "Invia messaggio di prova"; a role field ("Aggiungi ruolo", 17-20 digit check, no duplicates, at most 10) with removable chips, saved together with the channel by "Salva" (a hint explains Developer Mode → Server Settings → Roles → right click → Copia ID ruolo, and that the role must be mentionable or the bots need "Mention @everyone, @here and All Roles"); the current channel, number of mentioned roles and who changed it and when; after a test, one row per bot with "Pubblicato" or the translated error code. A hint explains how to copy the ID (Discord Developer Mode, right click on the channel → Copia ID canale) and the permissions every bot needs;
 - **DISCORD · Server collegati**: icon, name, id, owner id, members, chips of the bots present, "Bloccato" tag, "Fai uscire" (all bots) and "Blocca ed espelli" (both ask for confirmation);
 - **POLICY · Blacklist**: forms to block a user or a server (client-side 17-20 digit check, optional reason up to 500 characters) and rows with "Sblocca";
 - **AUDIT · Azioni super-admin**: action, subject, actor, outcome (`ok` / `partial` / `failed`) and time.
