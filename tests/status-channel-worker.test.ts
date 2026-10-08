@@ -127,7 +127,10 @@ const makeClient = (guilds: FakeGuild[], ready = true) => {
   const channels = new Map<string, FakeChannel>();
   for (const guild of guilds) {
     for (const channel of guild.channels.cache.values()) {
-      channels.set(channel.id, channel);
+      // Every fake guild reuses the same channel ids; the first guild (the one under test) owns them.
+      if (!channels.has(channel.id)) {
+        channels.set(channel.id, channel);
+      }
     }
   }
 
