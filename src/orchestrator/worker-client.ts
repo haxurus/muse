@@ -2,11 +2,11 @@ import got, {type CancelableRequest, type Response} from 'got';
 import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {
   WorkerBlocklistResult,
+  WorkerGuildMeta,
   WorkerGuildSettings,
   WorkerLeaveGuildResult,
   WorkerStatus,
-  StatusAnnounceRequest,
-  WorkerStatusAnnounceResult,
+  WorkerStatusTestResult,
 } from '../control/types.js';
 import type {Blocklist} from '../control/blocklist.js';
 import type {WorkerDefinition} from './config.js';
@@ -99,16 +99,23 @@ export default class WorkerClient {
     )).json<WorkerBlocklistResult>();
   }
 
-  /** Ask the worker to post a status message (online or test) in `channelId`, mentioning `mentionRoleIds`. */
-  async announceStatus(request: StatusAnnounceRequest): Promise<WorkerStatusAnnounceResult> {
+  /** Text/announcement channels (with this bot's post permission) and mentionable-candidate roles of a guild. */
+  async guildMeta(guildId: string): Promise<WorkerGuildMeta> {
+    return capResponseSize(got.get(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/meta`,
+      requestOptions(this.worker.token),
+    )).json<WorkerGuildMeta>();
+  }
+
+  /** Ask the worker to post the status test message with its saved setting for the guild. */
+  async testStatusChannel(guildId: string): Promise<WorkerStatusTestResult> {
     return capResponseSize(got.post(
-      `${this.worker.baseUrl}/v1/status-channel/announce`,
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/status-channel/test`,
       {
         ...requestOptions(this.worker.token),
         // Fetching the channel and sending the message takes a few Discord round trips.
         timeout: {request: 10_000},
-        json: request,
       },
-    )).json<WorkerStatusAnnounceResult>();
+    )).json<WorkerStatusTestResult>();
   }
 }

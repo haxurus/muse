@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     }>,
     restPut: vi.fn(),
     restSetToken: vi.fn(),
+    settingFindMany: vi.fn(),
     settingUpsert: vi.fn(),
     spinner,
     voiceStateHandler: vi.fn(),
@@ -63,7 +64,7 @@ vi.mock('../src/inversify.config.js', () => ({
 
 vi.mock('../src/utils/db.js', () => ({
   prisma: {
-    setting: {upsert: mocks.settingUpsert},
+    setting: {findMany: mocks.settingFindMany, upsert: mocks.settingUpsert},
   },
 }));
 
@@ -624,49 +625,48 @@ describe('per-guild Player isolation', () => {
 });
 
 describe('bot status channel announcement', () => {
-  const managedWorker = (readyFile: string) => ({READY_FILE: readyFile, WORKER_ID: 'muse-01', CONTROL_TOKEN: 'c'.repeat(32)});
+  const managedWorker = (readyFile: string) => ({READY_FILE: readyFile, WORKER_ID: 'muse-01'});
+  const statusChannelId = '987654321098765432';
+  const roleId = '555555555555555551';
 
-  it('never blocks readiness on the orchestrator config request', async () => {
+  it('never blocks readiness on the status channel settings', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const directory = await mkdtemp(path.join(tmpdir(), 'muse-status-'));
     let fail: (error: Error) => void = () => undefined;
-    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    mocks.settingFindMany.mockImplementation(async () => new Promise((_resolve, reject) => {
       fail = reject;
     }));
-    vi.stubEnv('MUSE_ORCHESTRATOR_URL', '');
-    vi.stubGlobal('fetch', fetcher);
     try {
-      const {config, handlers} = await registerBot(true);
+      const {config, handlers} = await registerBot(true, makeCommandSet(), ['guild-a']);
       const readyFile = path.join(directory, 'ready');
       Object.assign(config, managedWorker(readyFile));
 
-      // The config request is still pending, yet startup has completed.
+      // The settings query is still pending, yet startup has completed.
       await invoke(handlers, 'ready');
       expect(existsSync(readyFile)).toBe(true);
       expect(mocks.spinner.succeed).toHaveBeenCalledOnce();
-      expect(fetcher).toHaveBeenCalledOnce();
-      expect(fetcher.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/worker/config');
-      expect(fetcher.mock.calls[0][1]).toMatchObject({headers: {authorization: `Bearer ${'c'.repeat(32)}`}});
+      expect(mocks.settingFindMany).toHaveBeenCalledOnce();
+      expect(mocks.settingFindMany.mock.calls[0][0]).toMatchObject({where: {statusChannelId: {not: null}}});
 
-      fail(new Error('connect ECONNREFUSED'));
+      fail(new Error('database is locked'));
       await vi.waitFor(() => {
-        expect(warn).toHaveBeenCalledWith('Status channel: could not read the worker config from the orchestrator (Error)');
+        expect(warn).toHaveBeenCalledWith('Status channel: could not read the status channel settings (Error)');
       });
       expect(existsSync(readyFile)).toBe(true);
     } finally {
       warn.mockRestore();
-      vi.unstubAllGlobals();
-      vi.unstubAllEnvs();
       await rm(directory, {force: true, recursive: true});
     }
   });
 
-  it('announces after startup and at most once per 5 minutes on full reconnects', async () => {
+  it('posts only in configured guilds, in their language, at most once per 5 minutes', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const directory = await mkdtemp(path.join(tmpdir(), 'muse-status-'));
-    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify({statusChannelId: '987654321098765432'}), {status: 200}));
-    vi.stubEnv('MUSE_ORCHESTRATOR_URL', '');
-    vi.stubGlobal('fetch', fetcher);
+    // guild-b has no status channel (not returned by the query); guild-gone is a server the bot has left.
+    mocks.settingFindMany.mockResolvedValue([
+      {guildId: 'guild-a', statusChannelId, statusMentionRoleIds: roleId, locale: 'it'},
+      {guildId: 'guild-gone', statusChannelId: '987654321098765433', statusMentionRoleIds: '', locale: 'en'},
+    ]);
     const send = vi.fn(async () => ({}));
     const channel = {
       type: ChannelType.GuildText,
@@ -674,26 +674,32 @@ describe('bot status channel announcement', () => {
       permissionsFor: () => ({has: () => true}),
       send,
     };
+    const fetchChannel = vi.fn(async () => channel);
     let now: ReturnType<typeof vi.spyOn> | undefined;
     try {
-      const {client, config, handlers} = await registerBot(true, makeCommandSet(), ['guild-a']);
+      const {client, config, handlers} = await registerBot(true, makeCommandSet(), ['guild-a', 'guild-b']);
       Object.assign(config, managedWorker(path.join(directory, 'ready')));
-      Object.assign(client, {isReady: () => true, channels: {fetch: vi.fn(async () => channel)}});
+      Object.assign(client, {isReady: () => true, channels: {fetch: fetchChannel}});
       Object.assign(client.user, {username: 'Muse One', tag: 'Muse One#0420'});
 
       await invoke(handlers, 'ready');
       await vi.waitFor(() => {
         expect(send).toHaveBeenCalledOnce();
       });
-      expect(send.mock.calls[0]).toEqual([{embeds: [expect.anything()], allowedMentions: {parse: [], roles: []}}]);
+      expect(fetchChannel).toHaveBeenCalledOnce();
+      expect(fetchChannel).toHaveBeenCalledWith(statusChannelId);
+      const [message] = send.mock.calls[0] as unknown as [{content?: string; embeds: Array<{toJSON: () => {title?: string}}>; allowedMentions: unknown}];
+      expect(message.content).toBe(`<@&${roleId}>`);
+      expect(message.allowedMentions).toEqual({parse: [], roles: [roleId]});
+      expect(message.embeds[0].toJSON().title).toBe('Bot avviato');
 
-      // A non-resumable reconnect right away is rate limited: no config request, no message.
+      // A non-resumable reconnect right away is rate limited: no settings query, no message.
       await invoke(handlers, 'shardDisconnect');
       await invoke(handlers, 'shardReady', 0);
       await new Promise(resolve => {
         setTimeout(resolve, 20);
       });
-      expect(fetcher).toHaveBeenCalledOnce();
+      expect(mocks.settingFindMany).toHaveBeenCalledOnce();
       expect(send).toHaveBeenCalledOnce();
 
       const later = Date.now() + (5 * 60 * 1000);
@@ -705,8 +711,6 @@ describe('bot status channel announcement', () => {
     } finally {
       now?.mockRestore();
       log.mockRestore();
-      vi.unstubAllGlobals();
-      vi.unstubAllEnvs();
       await rm(directory, {force: true, recursive: true});
     }
   });

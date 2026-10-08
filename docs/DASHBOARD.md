@@ -83,7 +83,7 @@ Target of the "Add to Discord" buttons on the public home pages (they pass `?lan
 
 ### Super console API
 
-All routes need a session (`401 {code: "UNAUTHORIZED"}`) and the super admin (`403 {code: "SUPER_ADMIN_REQUIRED"}`). Mutations additionally need the exact Origin and the `x-csrf-token` header, share the per-session mutation budget and write the usual `dashboard_mutation` audit line (actions `super.guild.leave`, `super.block.put`, `super.block.delete`, `super.status_channel.put`, `super.status_channel.test`, with `subjectKind`/`subjectId`).
+All routes need a session (`401 {code: "UNAUTHORIZED"}`) and the super admin (`403 {code: "SUPER_ADMIN_REQUIRED"}`). Mutations additionally need the exact Origin and the `x-csrf-token` header, share the per-session mutation budget and write the usual `dashboard_mutation` audit line (actions `super.guild.leave`, `super.block.put`, `super.block.delete`, with `subjectKind`/`subjectId`).
 
 ```text
 GET    /api/super/overview                     -> orchestrator GET    /v1/super/overview
@@ -91,12 +91,9 @@ GET    /api/super/bots                         -> orchestrator GET    /v1/worker
 POST   /api/super/guilds/:guildId/leave        -> orchestrator POST   /v1/super/guilds/:guildId/leave
 PUT    /api/super/blocks/:kind/:subjectId      -> orchestrator PUT    /v1/super/blocks/:kind/:subjectId
 DELETE /api/super/blocks/:kind/:subjectId      -> orchestrator DELETE /v1/super/blocks/:kind/:subjectId
-GET    /api/super/status-channel               -> orchestrator GET    /v1/super/status-channel
-PUT    /api/super/status-channel               -> orchestrator PUT    /v1/super/status-channel   (body {channelId: string | null, mentionRoleIds?: string[]})
-POST   /api/super/status-channel/test          -> orchestrator POST   /v1/super/status-channel/test
 ```
 
-The dashboard validates parameters before proxying: `kind` is `GUILD` or `USER`, ids (including the status `channelId`, or `null` to disable it, and the optional `mentionRoleIds`, at most 10, deduplicated) are 17-20 digit snowflakes, `reason` is an optional string of at most 500 characters (trimmed, empty dropped), `workerIds` is an optional array of `muse-NN` ids (deduplicated, at most 32). Requests to the orchestrator carry the orchestrator token plus `x-muse-actor-id` (session user id) and `x-muse-actor-name` (Discord username, control characters dropped, percent-encoded, at most 64 characters). Orchestrator 4xx responses keep their status and short message as for the other routes.
+The dashboard validates parameters before proxying: `kind` is `GUILD` or `USER`, ids are 17-20 digit snowflakes, `reason` is an optional string of at most 500 characters (trimmed, empty dropped), `workerIds` is an optional array of `muse-NN` ids (deduplicated, at most 32). Requests to the orchestrator carry the orchestrator token plus `x-muse-actor-id` (session user id) and `x-muse-actor-name` (Discord username, control characters dropped, percent-encoded, at most 64 characters). Orchestrator 4xx responses keep their status and short message as for the other routes.
 
 ## Session security
 
@@ -193,6 +190,8 @@ GET  /assets/i18n/it.json, /assets/i18n/en.json   app dictionaries
 GET   /api/session
 GET   /api/guilds/:guildId
 PATCH  /api/guilds/:guildId
+GET    /api/guilds/:guildId/meta
+POST   /api/guilds/:guildId/status-channel/test
 POST   /api/guilds/:guildId/groups
 PATCH  /api/guilds/:guildId/groups/:groupId
 DELETE /api/guilds/:guildId/groups/:groupId
@@ -223,6 +222,44 @@ The orchestrator and each worker validate the request again before persistence.
 
 Super-admin endpoints are listed under "Super console API" above.
 
+## Bot status channel ("Log" tab)
+
+Every server chooses, for itself, the channel where the Muse bots announce that they are online, like the destination of Sentinel's base log console. There is no platform-wide status channel: the super console has no such setting.
+
+### What the bots post
+
+- When a bot becomes ready (after startup has completed: commands registered, presence set, ready file written) and again after a full reconnect (`shardReady` after startup, i.e. a new session that could not be resumed; plain resumes never announce), it posts the "Bot started" message in **every server whose own setting names a status channel**, one server at a time with a 1 second pause, in that server's bot language (`locale`, see `I18N.md`). Servers the bot has left are skipped.
+- At most **one round per 5 minutes** per bot process, so a flapping connection does not spam the channels. A round counts as soon as at least one server is configured, including posts that failed (for example for missing permissions); a failure to read the settings does not count, so the next full reconnect tries again.
+- It runs in the background and never delays or fails readiness. A failure in one server is logged as one concise warning (`Status channel: online message not posted in guild <id> (<CODE>)`) and the next server is tried; a summary line reports how many servers got the message. Only managed workers (`MUSE_WORKER_ID` set) announce.
+- The message mirrors Sentinel's "Bot avviato": the content is only the mentions of the configured roles (none when no role is configured) with `allowedMentions` exactly `{parse: [], roles: [<configured role ids>]}` (users, `@everyone` and `@here` are never pinged); a green (`#3ccf8e`) embed titled "Bot avviato" / "Bot started", description "Bot connesso come `<tag>`." / "Bot connected as `<tag>`.", fields "Autore azione" / "Action author" (bot name, mention and id) and "Dettagli" / "Details" (`**Guild Count:** <servers>` and `**Bot:** ...`, same labels in both languages), footer the hostname of `MUSE_DASHBOARD_PUBLIC_URL` (or `Muse`), timestamp now.
+- The test message (button below) has the same layout and the same role mentions, a violet (`#a78bfa`) bar, title "Messaggio di prova" / "Test message" and description "Prova del canale di stato inviata da `<tag>`." / "Status channel test sent by `<tag>`.".
+
+Each bot posts with its own identity, so every bot needs **View Channel**, **Send Messages** and **Embed Links** in the chosen channel. Role mentions only notify people when the role is mentionable or the bots have **Mention @everyone, @here and All Roles** there; otherwise Discord shows the mention without pinging anybody.
+
+### Storage and validation
+
+The setting is two ordinary guild settings stored in each worker's own SQLite database (`Setting.statusChannelId`, `Setting.statusMentionRoleIds`, migration `20261008120000_add_guild_status_channel`), exposed by the settings API as `statusChannelId: string | null` and `statusMentionRoleIds: string[]` (0-10 role ids). The Log tab saves them on every online bot of the server through the normal settings route (`PATCH /api/guilds/:guildId` with `workerIds` = all online bots), so the usual session, Origin, CSRF, budget, permission and audit rules (`settings.update`) apply. The orchestrator checks the shape (`INVALID_STATUS_CHANNEL`, `INVALID_STATUS_ROLES`); each worker checks, before saving, that the channel is a text or announcement channel of that server and that every role belongs to that server and is neither `@everyone` nor a managed role (see `ORCHESTRATOR.md`). `{"statusChannelId": null}` disables the message; `{"statusMentionRoleIds": []}` removes every mention.
+
+### Routes
+
+```text
+GET  /api/guilds/:guildId/meta                -> orchestrator GET  /v1/guilds/:guildId/meta
+POST /api/guilds/:guildId/status-channel/test -> orchestrator POST /v1/guilds/:guildId/status-channel/test
+```
+
+- `GET .../meta` is read-only: session (`401`) and the same guild access check as `GET /api/guilds/:guildId` (`403` for a server the user cannot manage, `404` when Muse is not in it). It returns the orchestrator answer: channels in Discord order with `parentName` (category) and `postableBy` (the bots that have the three permissions there), and the roles (no `@everyone`, no managed roles, highest first, with `color` and `mentionable`).
+- `POST .../status-channel/test` is a mutation (session, exact Origin, `x-csrf-token`, mutation budget, forced Discord permission refresh, audit line with action `status_channel.test`). Optional body `{workerIds: string[]}` (1-32 `muse-NN` ids, deduplicated); without it every bot of the server is asked. Each bot posts the test message with its **saved** setting and the answer is `{guildId, results: [{workerId, ok: true} | {workerId, ok: false, error}]}` with `error` one of `NOT_CONFIGURED`, `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR`, `UNREACHABLE`.
+
+### Tab layout
+
+"Canale di log" / "Status log" in the guild sidebar (the bot selection panel is hidden: the setting applies to every bot of the server):
+
+- panel **DESTINAZIONE** / **DESTINATION**: a state tag ("Attivo · #canale", "Disattivato", or "Valori diversi tra i bot" when the bots disagree, with a hint to pick the values and save to align them);
+- channel `<select>` grouped by category, options `#name` (announcement channels marked); channels where some online bot cannot post carry "⚠ senza permessi: <bots>" and, once selected, a warning explains which bots lack View Channel, Send Messages or Embed Links;
+- roles: an "Aggiungi un ruolo…" select and removable chips with the role color dot (at most 10); a warning lists selected roles that are not mentionable ("il ping non arriverà se il ruolo non è menzionabile o se i bot non hanno il permesso Menziona @everyone…");
+- "Salva" (applies to all online bots; per-bot failures are listed with their translated code), "Disattiva" (asks for confirmation, clears the channel and keeps the roles) and "Invia messaggio di prova" (one result row per bot: name, worker id and "Pubblicato" or the translated error; the test always uses the saved configuration);
+- panel **ANTEPRIMA** / **PREVIEW**: a static mock of the Discord message (green embed bar, mentions, fields, footer).
+
 ## User interface
 
 The UI is a public home page (`dashboard/home.html` + a tiny `home.js` that only closes the mobile menu) and a small vanilla JavaScript single page app (`dashboard/index.html`, `dashboard.js`), both styled by `dashboard.css`. They share the visual language of Sentinel: Geist and Geist Mono, sticky blurred header, uppercase mono "kicker" labels, hairline metric rows, pills and switches, an "IT | EN" language switcher.
@@ -246,8 +283,8 @@ The web UI is bilingual (Italian and English), following Sentinel:
 | --- | --- |
 | `/it`, `/en` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "How it works", self-hosting steps, security, call to action. "Sign in" links to `/<lang>/dashboard`, "Add to Discord" to `/add?lang=<lang>` |
 | `/<lang>/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
-| `/<lang>/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, language, logout) and three sections: **Overview** (bots in the server with ready/voice state), **Settings** (bot selection, one switch per field including the bot language, mixed values shown as "Mixed values", only enabled fields are patched) and **Groups** (create, edit, select, delete, keep or drop unavailable members) |
-| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, bot status channel (save, disable, test with per-bot results), linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
+| `/<lang>/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, language, logout) and four sections: **Overview** (bots in the server with ready/voice state), **Settings** (bot selection, one switch per field including the bot language, mixed values shown as "Mixed values", only enabled fields are patched), **Groups** (create, edit, select, delete, keep or drop unavailable members) and **Status log** (the "Bot started" channel and roles for every bot of the server, see "Bot status channel") |
+| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
 | `/<lang>/development` | Static "Limited access" notice used by `/add` and the invite links |
 
 The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) and `/<lang>/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.

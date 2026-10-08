@@ -8,8 +8,9 @@ vi.mock('../src/utils/get-guild-settings.js', () => ({
 }));
 
 vi.mock('../src/control/guild-settings.js', () => ({
-  sanitizeGuildSettingsPatch: vi.fn((patch: unknown) => patch),
+  getGuildSettingsView: vi.fn(async (guildId: string) => ({guildId})),
   updateGuildSettings: vi.fn(async (guildId: string) => ({guildId})),
+  listStatusChannelTargets: vi.fn(async () => []),
 }));
 
 import WorkerControlServer from '../src/control/worker-server.js';

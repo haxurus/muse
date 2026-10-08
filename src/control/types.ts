@@ -1,4 +1,4 @@
-import type {Setting} from '@prisma/client';
+import type {GuildSettingsView} from './settings-validation.js';
 
 /** Fields added after the first release are optional so mixed-version fleets keep working. */
 export type WorkerGuild = {
@@ -30,7 +30,8 @@ export type WorkerStatus = {
   uptimeSeconds: number;
 };
 
-export type WorkerGuildSettings = Setting;
+/** `GET|PATCH /v1/guilds/:guildId/settings` on a worker. */
+export type WorkerGuildSettings = GuildSettingsView;
 
 export type WorkerLeaveGuildResult = {
   workerId: string;
@@ -46,6 +47,7 @@ export type WorkerBlocklistResult = {
 
 /** Why a worker could not post a status message (see src/status/announce.ts). */
 export const STATUS_ANNOUNCE_ERRORS = [
+  'NOT_CONFIGURED',
   'NOT_READY',
   'CHANNEL_NOT_FOUND',
   'INVALID_CHANNEL',
@@ -60,20 +62,37 @@ export const isStatusAnnounceError = (value: unknown): value is StatusAnnounceEr
 
 export type StatusAnnounceResult = {ok: true} | {ok: false; error: StatusAnnounceError};
 
-/** Body of `POST /v1/status-channel/announce` on a worker. */
-export type StatusAnnounceRequest = {
-  channelId: string;
-  /** Super console test message instead of the startup "online" message. */
-  test: boolean;
-  /** Roles pinged by the message (0-10). */
-  mentionRoleIds: string[];
+/** Answer of `POST /v1/guilds/:guildId/status-channel/test` on a worker. */
+export type WorkerStatusTestResult = StatusAnnounceResult & {workerId: string};
+
+/** Per-worker result of the orchestrator test fan-out; `UNREACHABLE` when the worker did not answer. */
+export type StatusTestResult = {workerId: string; ok: true} | {workerId: string; ok: false; error: StatusAnnounceError | 'UNREACHABLE'};
+
+/** A channel where the status message can be posted (standard text or announcement channel). */
+export type GuildMetaChannel = {
+  id: string;
+  name: string;
+  type: 'text' | 'announcement';
+  parentName: string | null;
+  position: number;
+  /** This bot has View Channel, Send Messages and Embed Links there. */
+  canPost: boolean;
 };
 
-/** Answer of `POST /v1/status-channel/announce` on a worker. */
-export type WorkerStatusAnnounceResult = StatusAnnounceResult & {workerId: string};
+/** A role that can be mentioned by the status message (not @everyone, not managed by an integration). */
+export type GuildMetaRole = {
+  id: string;
+  name: string;
+  /** Discord role color as an integer (0 = no color). */
+  color: number;
+  mentionable: boolean;
+  position: number;
+};
 
-/** `GET /v1/worker/config` on the orchestrator (worker control token). */
-export type WorkerPlatformConfig = {
-  statusChannelId: string | null;
-  mentionRoleIds: string[];
+/** `GET /v1/guilds/:guildId/meta` on a worker: channels in display order, roles by position (highest first). */
+export type WorkerGuildMeta = {
+  workerId: string;
+  guildId: string;
+  channels: GuildMetaChannel[];
+  roles: GuildMetaRole[];
 };

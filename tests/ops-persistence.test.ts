@@ -303,12 +303,14 @@ describe('SQLite persistence', () => {
         finished_at: Date | null;
         migration_name: string;
       }>>('SELECT migration_name, finished_at FROM _prisma_migrations ORDER BY migration_name');
-      expect(appliedMigrations).toHaveLength(20);
+      expect(appliedMigrations).toHaveLength(21);
       expect(appliedMigrations.every(({finished_at: finishedAt}) => finishedAt !== null)).toBe(true);
       expect(appliedMigrations.map(({migration_name: name}) => name))
         .toContain('20220101155430_migrate_from_sequelize');
       expect(appliedMigrations.map(({migration_name: name}) => name))
         .toContain('20261006120000_add_guild_locale');
+      expect(appliedMigrations.map(({migration_name: name}) => name))
+        .toContain('20261008120000_add_guild_status_channel');
     } finally {
       await probeClient?.$disconnect();
       await reopenedClient?.$disconnect();
@@ -362,7 +364,8 @@ describe('SQLite persistence', () => {
       });
 
       await expect(reopenedClient.setting.findUnique({where: {guildId: 'persistent-guild'}}))
-        .resolves.toEqual(expect.objectContaining({guildId: 'persistent-guild', playlistLimit: 37}));
+        // The status message columns default to "disabled, no roles" for existing and new rows.
+        .resolves.toEqual(expect.objectContaining({guildId: 'persistent-guild', playlistLimit: 37, statusChannelId: null, statusMentionRoleIds: ''}));
       await expect(reopenedClient.favoriteQuery.findUnique({
         where: {guildId_name: {guildId: 'persistent-guild', name: 'persistent-favorite'}},
       })).resolves.toEqual(expect.objectContaining({

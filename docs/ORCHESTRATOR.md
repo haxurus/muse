@@ -55,9 +55,10 @@ GET   /health
 GET   /v1/status
 GET   /v1/guilds/:guildId/settings
 PATCH /v1/guilds/:guildId/settings
+GET   /v1/guilds/:guildId/meta
+POST  /v1/guilds/:guildId/status-channel/test
 POST  /v1/guilds/:guildId/leave
 PUT   /v1/blocklist
-POST  /v1/status-channel/announce
 POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "true")
 ```
 
@@ -67,7 +68,9 @@ POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "t
 
 `PUT /v1/blocklist` with `{guildIds: string[], userIds: string[]}` (Discord ids, at most 5000 each, duplicates removed, body up to 512 KiB) replaces the worker's in-memory blocklist and immediately leaves every blocked guild it is in: `200 {workerId, left: string[], failed: string[]}` (`failed` lists guilds it could not leave). Invalid input is `400 {error, code: "INVALID_BLOCKLIST"}` and leaves the current list unchanged.
 
-`POST /v1/status-channel/announce` with `{channelId: string, test: boolean, mentionRoleIds?: string[]}` makes the bot post its status embed (the "Bot started" message, or the super console test message when `test` is `true`) in that channel, pinging exactly those roles (0-10, default none; invalid lists are `400 INVALID_ROLE_IDS`). Discord-side failures are not HTTP errors: the answer is always `200 {workerId, ok: true}` or `200 {workerId, ok: false, error}` with `error` one of `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR` (see `SUPER_CONSOLE.md`). A malformed body is `400` with `INVALID_CHANNEL_ID` or `INVALID_BODY`.
+`GET /v1/guilds/:guildId/meta` lists what the dashboard "Log" tab pickers offer, as this bot sees the guild: `200 {workerId, guildId, channels: [{id, name, type: "text" | "announcement", parentName: string | null, position, canPost}], roles: [{id, name, color, mentionable, position}]}`. Channels are the standard text and announcement channels in Discord sidebar order (uncategorized first, then by category and position); `canPost` is true when this bot has View Channel, Send Messages and Embed Links there. Roles exclude `@everyone` and managed roles (bots, integrations, boosters) and are sorted by position, highest first; `color` is the Discord integer (0 = none). `404 NOT_IN_GUILD` when the bot is not a member, `503 NOT_READY` while it is not connected to Discord.
+
+`POST /v1/guilds/:guildId/status-channel/test` (no body) makes the bot post the test message with its own saved status setting for that guild (see "Bot status channel" in `DASHBOARD.md`). Discord-side failures are not HTTP errors: the answer is `200 {workerId, ok: true}` or `200 {workerId, ok: false, error}` with `error` one of `NOT_CONFIGURED` (no status channel saved for this guild), `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR`. `404 NOT_IN_GUILD` when the bot is not a member.
 
 The settings endpoint only accepts the existing Muse guild settings:
 
@@ -81,6 +84,11 @@ The settings endpoint only accepts the existing Muse guild settings:
 - turnDownVolumeWhenPeopleSpeak
 - turnDownVolumeWhenPeopleSpeakTarget
 - locale: language of the bot's messages in that guild, exactly `"en"` (default) or `"it"` (case-sensitive; any other value, including `"IT"`, is rejected with 400). `GET` always returns it. See `I18N.md`.
+
+- statusChannelId: the channel where this bot posts the "Bot started" message for that guild, a Discord id or `null` (disabled, the default). Shape errors are `400 INVALID_STATUS_CHANNEL`.
+- statusMentionRoleIds: the roles that message mentions, an array of 0-10 Discord role ids (duplicates removed; `[]` removes every mention). Shape errors are `400 INVALID_STATUS_ROLES`. Stored as a comma-separated column (`Setting.statusMentionRoleIds`), always exposed as an array; the conversion lives only in `src/control/settings-validation.ts`.
+
+The shape of every field is checked by `sanitizeGuildSettingsPatch` (orchestrator and worker). Before saving, the worker additionally checks the status fields against the guild itself, since it has the Discord client: `statusChannelId` must be a text or announcement channel of **that** guild (`400 INVALID_STATUS_CHANNEL` otherwise: another server's channel, a voice channel, a category, a thread), and every role must be a role of that guild that is neither `@everyone` (id equal to the guild id) nor managed (`400 INVALID_STATUS_ROLES`). Nothing is saved when a check fails.
 
 Example: `PATCH /v1/guilds/:guildId/settings` with `{"locale": "it"}`, or `"settings": {"locale": "it"}` in a multi-worker update.
 
@@ -98,6 +106,8 @@ GET   /v1/workers
 GET   /v1/guilds
 GET   /v1/guilds/:guildId/workers
 PATCH  /v1/guilds/:guildId/workers/settings
+GET    /v1/guilds/:guildId/meta
+POST   /v1/guilds/:guildId/status-channel/test
 GET    /v1/guilds/:guildId/groups
 POST   /v1/guilds/:guildId/groups
 PATCH  /v1/guilds/:guildId/groups/:groupId
@@ -106,19 +116,24 @@ GET    /v1/super/overview
 POST   /v1/super/guilds/:guildId/leave
 PUT    /v1/super/blocks/:kind/:subjectId
 DELETE /v1/super/blocks/:kind/:subjectId
-GET    /v1/super/status-channel
-PUT    /v1/super/status-channel
-POST   /v1/super/status-channel/test
 GET    /v1/blocks/users/:userId
 POST   /v1/playback        (worker control token, not the API token; see below)
-GET    /v1/worker/config   (worker control token, not the API token; see below)
 ```
 
-The `/v1/super/*` and `/v1/blocks/*` routes are the super console backend; their contract (actor headers, payloads, error codes, reconcile loop, bot status channel) is documented in `SUPER_CONSOLE.md`.
+The `/v1/super/*` and `/v1/blocks/*` routes are the super console backend; their contract (actor headers, payloads, error codes, reconcile loop) is documented in `SUPER_CONSOLE.md`.
 
 Errors are JSON `{"error": "<message>"}`. Newer routes also include a machine-readable `"code"` (for example `{"error": "you cannot block yourself", "code": "CANNOT_BLOCK_SELF"}`); clients should branch on `code` when present and on the status otherwise.
 
 `:guildId` must be a Discord snowflake (`^[1-9]\d{9,21}$`); other values are rejected with 400 before any worker is contacted. When `workerIds` is given in a settings update, only listed workers that are reachable and members of the guild are patched; the others are reported in `failed` with `WorkerNotInGuild`.
+
+A worker that refuses a settings patch is reported in `failed` as `{workerId, ok: false, error, code?}`; `code` is the worker's machine-readable 4xx code when the HTTP client exposes the answer (for example `INVALID_STATUS_CHANNEL`).
+
+### Guild meta and status test
+
+These routes serve the dashboard "Log" tab (bot status channel, see `DASHBOARD.md`). A worker is *present* in a guild when its `GET /v1/status` answered and lists the guild.
+
+- `GET /v1/guilds/:guildId/meta` asks every present worker for `GET /v1/guilds/:guildId/meta` and merges the answers: `200 {guildId, workerIds, sourceWorkerId, channels: [{id, name, type, parentName, position, postableBy: string[]}], roles: [...], failed: [{workerId, error}]}`. Channels and roles come from the first present worker (configuration order) that is ready and answered; `postableBy` lists, per channel, the workers that reported `canPost` (workers in `failed` did not answer, so their permissions are unknown). Worker answers are validated and malformed entries dropped. `404 NOT_IN_GUILD` when no worker is present, `503 META_UNAVAILABLE` when none answered.
+- `POST /v1/guilds/:guildId/status-channel/test` with an optional body `{workerIds: string[]}` (non-empty, configured ids; `400 INVALID_WORKER_IDS` / `UNKNOWN_WORKERS` otherwise) asks the present workers (all of them, or the listed ones) to post the test message with their own saved setting (10 second timeout each): `200 {guildId, results: [{workerId, ok: true} | {workerId, ok: false, error}]}` in configuration order. `error` is a worker code above, `DISCORD_ERROR` for an unexpected answer, or `UNREACHABLE` when the worker did not answer or a requested worker is not present. `404 NOT_IN_GUILD` when no selected worker is present.
 
 The orchestrator API token and every worker control token must be at least 32 characters (`openssl rand -hex 32` produces 64). Token, worker token and state paths are normalized before the `/run/secrets/` and `/state/` prefix checks.
 
@@ -135,21 +150,9 @@ The orchestrator identifies the caller only from its bearer token, which must ma
 
 Status codes are preserved end to end. Short, fixed 4xx messages from the worker are shown to the user unchanged. `503` means the bot is not ready. `504` means the outcome could not be confirmed (timeout, lost connection, malformed response or the 170-second worker deadline): the user is told to check `/queue` before retrying, and nothing is retried automatically.
 
-## Worker config
-
-`GET /v1/worker/config` is the read-only platform configuration for the workers:
-
-```text
-muse-0N  --GET /v1/worker/config, Bearer control_token_0N-->  orchestrator
-```
-
-- The caller is identified only by its bearer token, which must match exactly one configured worker (any worker, not only playback pilots); otherwise `401`. The orchestrator API token is refused with `403 {code: "WORKER_TOKEN_REQUIRED"}`, so the route never doubles as an admin entry point. Methods other than `GET` are `405`.
-- `200 {statusChannelId: string | null, mentionRoleIds: string[]}`: the bot status channel chosen in the super console (`SUPER_CONSOLE.md`), or `null` when disabled, and the roles its messages mention. Nothing else is exposed.
-- Workers call it in the background after becoming ready (5 second timeout, at most once per announcement) at `MUSE_ORCHESTRATOR_URL` (default `http://orchestrator:3100`); a failure is only logged.
-
 ### Control token reuse and rotation
 
-Each worker's control token authenticates both directions: the orchestrator calling the worker control API, and the worker calling the orchestrator playback relay and worker config route. It never grants access to the orchestrator administration API. Because the same secret is read by both containers at startup, rotate it by replacing `control_token_0N` and then restarting the orchestrator and `muse-0N` together; restarting only one side leaves them with mismatched tokens until the other restarts.
+Each worker's control token authenticates both directions: the orchestrator calling the worker control API, and the worker calling the orchestrator playback relay. It never grants access to the orchestrator administration API. Because the same secret is read by both containers at startup, rotate it by replacing `control_token_0N` and then restarting the orchestrator and `muse-0N` together; restarting only one side leaves them with mismatched tokens until the other restarts.
 
 Example multi-worker update request:
 
