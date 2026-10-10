@@ -103,30 +103,40 @@ describe('orchestrator super-admin client', () => {
   });
 });
 
-describe('orchestrator guild status log client', () => {
-  it('reads the guild meta and runs the status test without actor headers', async () => {
+describe('orchestrator status channel client', () => {
+  it('forwards the actor headers on the status channel routes', async () => {
     const client = new OrchestratorClient(config);
-    const meta = {guildId: '111111111111111111', channels: [], roles: []};
-    const results = {guildId: '111111111111111111', results: [{workerId: 'muse-01', ok: true}]};
-    gotMock.get.mockReturnValue(jsonResult(meta));
-    gotMock.post.mockReturnValue(jsonResult(results));
+    gotMock.get.mockReturnValue(jsonResult({statusChannelId: null, updatedAt: null, updatedBy: null}));
+    gotMock.put.mockReturnValue(jsonResult({statusChannelId: '666666666666666666'}));
+    gotMock.post.mockReturnValue(jsonResult({statusChannelId: '666666666666666666', results: []}));
 
-    await expect(client.guildMeta('111111111111111111')).resolves.toEqual(meta);
-    await expect(client.testGuildStatusChannel('111111111111111111', {workerIds: ['muse-01']})).resolves.toEqual(results);
+    await expect(client.superStatusChannel(actor)).resolves.toEqual({statusChannelId: null, updatedAt: null, updatedBy: null});
+    await client.superSetStatusChannel({guildId: '555555555555555551', channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']}, actor);
+    await client.superSetStatusChannel({channelId: null}, actor);
+    await expect(client.superTestStatusChannel(actor)).resolves.toEqual({statusChannelId: '666666666666666666', results: []});
 
-    expect(gotMock.get.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/guilds/111111111111111111/meta');
-    expect(gotMock.post.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/guilds/111111111111111111/status-channel/test');
-    expect(optionsOf(gotMock.get).json).toBeUndefined();
-    expect(optionsOf(gotMock.post).json).toEqual({workerIds: ['muse-01']});
-    for (const mock of [gotMock.get, gotMock.post]) {
-      expect(optionsOf(mock).headers).toEqual({authorization: 'Bearer not-a-real-token'});
+    expect(gotMock.get.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel');
+    expect(gotMock.put.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel');
+    expect(gotMock.post.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel/test');
+    expect(optionsOf(gotMock.put, 0).json).toEqual({guildId: '555555555555555551', channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']});
+    expect(optionsOf(gotMock.put, 1).json).toEqual({channelId: null});
+    expect(optionsOf(gotMock.post).json).toBeUndefined();
+
+    for (const mock of [gotMock.get, gotMock.put, gotMock.post]) {
+      expect(optionsOf(mock).headers).toEqual({
+        authorization: 'Bearer not-a-real-token',
+        'x-muse-actor-id': actor.userId,
+        'x-muse-actor-name': 'haxurus',
+      });
     }
   });
 
-  it('no longer exposes the super console status channel calls', () => {
-    const client = new OrchestratorClient(config) as unknown as Record<string, unknown>;
-    for (const name of ['superStatusChannel', 'superSetStatusChannel', 'superTestStatusChannel']) {
-      expect(client[name], name).toBeUndefined();
-    }
+  it('reads the channel and role pickers of a server with the actor headers', async () => {
+    const client = new OrchestratorClient(config);
+    gotMock.get.mockReturnValue(jsonResult({guildId: '555555555555555551', channels: [], roles: []}));
+
+    await expect(client.superGuildMeta('555555555555555551', actor)).resolves.toMatchObject({guildId: '555555555555555551'});
+    expect(gotMock.get.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/guilds/555555555555555551/meta');
+    expect(optionsOf(gotMock.get).headers).toMatchObject({'x-muse-actor-id': actor.userId});
   });
 });

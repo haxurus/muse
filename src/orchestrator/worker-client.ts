@@ -6,7 +6,8 @@ import type {
   WorkerGuildSettings,
   WorkerLeaveGuildResult,
   WorkerStatus,
-  WorkerStatusTestResult,
+  StatusAnnounceRequest,
+  WorkerStatusAnnounceResult,
 } from '../control/types.js';
 import type {Blocklist} from '../control/blocklist.js';
 import type {WorkerDefinition} from './config.js';
@@ -86,6 +87,14 @@ export default class WorkerClient {
     )).json<WorkerLeaveGuildResult>();
   }
 
+  /** Text/announcement channels and mentionable-candidate roles of a guild, as seen by this bot. */
+  async guildMeta(guildId: string): Promise<WorkerGuildMeta> {
+    return capResponseSize(got.get(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/meta`,
+      requestOptions(this.worker.token),
+    )).json<WorkerGuildMeta>();
+  }
+
   /** Replace the worker's in-memory blocklist; the worker leaves blocked guilds immediately. */
   async pushBlocklist(blocklist: Blocklist): Promise<WorkerBlocklistResult> {
     return capResponseSize(got.put(
@@ -99,23 +108,16 @@ export default class WorkerClient {
     )).json<WorkerBlocklistResult>();
   }
 
-  /** Text/announcement channels (with this bot's post permission) and mentionable-candidate roles of a guild. */
-  async guildMeta(guildId: string): Promise<WorkerGuildMeta> {
-    return capResponseSize(got.get(
-      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/meta`,
-      requestOptions(this.worker.token),
-    )).json<WorkerGuildMeta>();
-  }
-
-  /** Ask the worker to post the status test message with its saved setting for the guild. */
-  async testStatusChannel(guildId: string): Promise<WorkerStatusTestResult> {
+  /** Ask the worker to post a status message (online or test) in `channelId`, mentioning `mentionRoleIds`. */
+  async announceStatus(request: StatusAnnounceRequest): Promise<WorkerStatusAnnounceResult> {
     return capResponseSize(got.post(
-      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/status-channel/test`,
+      `${this.worker.baseUrl}/v1/status-channel/announce`,
       {
         ...requestOptions(this.worker.token),
         // Fetching the channel and sending the message takes a few Discord round trips.
         timeout: {request: 10_000},
+        json: request,
       },
-    )).json<WorkerStatusTestResult>();
+    )).json<WorkerStatusAnnounceResult>();
   }
 }

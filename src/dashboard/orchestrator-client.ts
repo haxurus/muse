@@ -87,6 +87,13 @@ export const actorName = (username: string): string => {
   return result === '' ? 'unknown' : result;
 };
 
+export type StatusChannelUpdate = {
+  /** Server of the channel; required by the orchestrator unless `channelId` is null. */
+  guildId?: string;
+  channelId: string | null;
+  mentionRoleIds?: string[];
+};
+
 export type GuildSettingsUpdate = {
   workerIds?: string[];
   settings: Record<string, unknown>;
@@ -267,36 +274,52 @@ export default class OrchestratorClient {
     return parseOptionalJson(body);
   }
 
-  async guildWorkers(guildId: string): Promise<OrchestratorGuildWorkers> {
+  async superStatusChannel(actor: SuperActor): Promise<unknown> {
     return call(async () => got.get(
-      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/workers`,
-      options(this.config.orchestratorToken),
-    ).json<OrchestratorGuildWorkers>());
+      `${this.config.orchestratorUrl}/v1/super/status-channel`,
+      actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
   }
 
-  /** Channel and role pickers for the "Log" tab (read-only). */
-  async guildMeta(guildId: string): Promise<unknown> {
+  /** Channel and role pickers of the super console status channel card (read-only). */
+  async superGuildMeta(guildId: string, actor: SuperActor): Promise<unknown> {
     return call(async () => got.get(
-      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/meta`,
+      `${this.config.orchestratorUrl}/v1/super/guilds/${encodeURIComponent(guildId)}/meta`,
       {
-        ...options(this.config.orchestratorToken),
-        // The orchestrator reads every bot's status, then asks the bots in the guild (3 s timeouts each).
+        ...actorOptions(this.config.orchestratorToken, actor),
+        // The orchestrator reads every bot's status, then asks the bots in the guild.
         timeout: {request: 10_000},
       },
     ).json<unknown>());
   }
 
-  /** Every selected bot of the guild posts the status test message with its saved setting. */
-  async testGuildStatusChannel(guildId: string, body: {workerIds?: string[]}): Promise<unknown> {
-    return call(async () => got.post(
-      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/status-channel/test`,
+  /** `channelId: null` disables the status channel; omitted `mentionRoleIds` keeps the current roles. */
+  async superSetStatusChannel(body: StatusChannelUpdate, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/super/status-channel`,
       {
-        ...options(this.config.orchestratorToken),
-        // Every bot fetches the channel and posts a message; the orchestrator waits up to 10 s per worker.
-        timeout: {request: 15_000},
+        ...actorOptions(this.config.orchestratorToken, actor),
         json: body,
       },
     ).json<unknown>());
+  }
+
+  async superTestStatusChannel(actor: SuperActor): Promise<unknown> {
+    return call(async () => got.post(
+      `${this.config.orchestratorUrl}/v1/super/status-channel/test`,
+      {
+        ...actorOptions(this.config.orchestratorToken, actor),
+        // Every bot fetches the channel and posts a message; the orchestrator waits up to 10 s per worker.
+        timeout: {request: 15_000},
+      },
+    ).json<unknown>());
+  }
+
+  async guildWorkers(guildId: string): Promise<OrchestratorGuildWorkers> {
+    return call(async () => got.get(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/workers`,
+      options(this.config.orchestratorToken),
+    ).json<OrchestratorGuildWorkers>());
   }
 
   async createGuildGroup(guildId: string, body: {name: string; workerIds: string[]}): Promise<unknown> {

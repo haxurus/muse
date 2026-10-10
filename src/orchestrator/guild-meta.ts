@@ -1,12 +1,7 @@
 import {type Except} from 'type-fest';
 import {HttpError} from '../control/http.js';
 import {isSnowflake} from '../control/snowflake.js';
-import {
-  isStatusAnnounceError,
-  type GuildMetaChannel,
-  type GuildMetaRole,
-  type StatusTestResult,
-} from '../control/types.js';
+import type {GuildMetaChannel, GuildMetaRole} from '../control/types.js';
 import {isPlainObject} from './durable-file.js';
 
 /** Outcome of one worker call, as produced by the orchestrator's `wrap`. */
@@ -15,7 +10,7 @@ export type WorkerCallResult<T> = {workerId: string; ok: true; value: T} | {work
 /** A picker channel with the workers (bots) that can post there. */
 export type MergedGuildChannel = Except<GuildMetaChannel, 'canPost'> & {postableBy: string[]};
 
-/** `GET /v1/guilds/:guildId/meta` on the orchestrator. */
+/** `GET /v1/super/guilds/:guildId/meta` on the orchestrator. */
 export type MergedGuildMeta = {
   guildId: string;
   /** Workers present in the guild that were asked, in configuration order. */
@@ -133,53 +128,4 @@ export const mergeGuildMeta = (
     roles: source.meta.roles,
     failed: parsed.filter(answer => answer.meta === undefined).map(answer => ({workerId: answer.workerId, error: answer.error})),
   };
-};
-
-/** One worker's test answer; `UNREACHABLE` when it did not answer, `DISCORD_ERROR` for anything unexpected. */
-export const statusTestResult = (result: WorkerCallResult<unknown>): StatusTestResult => {
-  if (!result.ok) {
-    return {workerId: result.workerId, ok: false, error: 'UNREACHABLE'};
-  }
-
-  const answer = result.value;
-  if (isPlainObject(answer) && answer.ok === true) {
-    return {workerId: result.workerId, ok: true};
-  }
-
-  const error = isPlainObject(answer) ? answer.error : undefined;
-  return {workerId: result.workerId, ok: false, error: isStatusAnnounceError(error) ? error : 'DISCORD_ERROR'};
-};
-
-const ERROR_CODE = /^[A-Z][A-Z_]{1,63}$/u;
-
-/**
- * Machine-readable `code` of a worker 4xx answer (for example `INVALID_STATUS_CHANNEL` from a settings
- * patch), when the HTTP client error carries the response; undefined otherwise.
- */
-export const workerErrorCode = (error: unknown): string | undefined => {
-  const response = typeof error === 'object' && error !== null ? (error as {response?: unknown}).response : undefined;
-  if (typeof response !== 'object' || response === null) {
-    return undefined;
-  }
-
-  const {statusCode, body} = response as {statusCode?: unknown; body?: unknown};
-  if (typeof statusCode !== 'number' || statusCode < 400 || statusCode >= 500) {
-    return undefined;
-  }
-
-  let parsed: unknown = body;
-  try {
-    if (Buffer.isBuffer(parsed)) {
-      parsed = parsed.toString('utf8');
-    }
-
-    if (typeof parsed === 'string') {
-      parsed = JSON.parse(parsed) as unknown;
-    }
-  } catch {
-    return undefined;
-  }
-
-  const code = isPlainObject(parsed) ? parsed.code : undefined;
-  return typeof code === 'string' && ERROR_CODE.test(code) ? code : undefined;
 };

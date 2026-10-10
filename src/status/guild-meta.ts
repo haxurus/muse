@@ -1,6 +1,4 @@
 import {ChannelType, type Guild, type GuildBasedChannel, type NewsChannel, type TextChannel} from 'discord.js';
-import {HttpError} from '../control/http.js';
-import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {GuildMetaChannel, GuildMetaRole} from '../control/types.js';
 import {STATUS_CHANNEL_PERMISSIONS} from './announce.js';
 
@@ -19,29 +17,7 @@ const compareChannels = (left: StatusChannel, right: StatusChannel): number =>
   || left.rawPosition - right.rawPosition
   || left.id.localeCompare(right.id);
 
-/**
- * Guild-membership checks of the status settings, done by the worker before saving (the shape was
- * already validated by `sanitizeGuildSettingsPatch`): the channel must be a text or announcement
- * channel of this guild; every role must be a role of this guild, neither @everyone nor managed.
- */
-export const assertStatusSettingsForGuild = (guild: Guild, patch: GuildSettingsPatch): void => {
-  const {statusChannelId, statusMentionRoleIds} = patch;
-  if (typeof statusChannelId === 'string') {
-    const channel = guild.channels.cache.get(statusChannelId);
-    if (!channel || !isStatusChannel(channel)) {
-      throw new HttpError(400, 'statusChannelId must be a text or announcement channel of this server', 'INVALID_STATUS_CHANNEL');
-    }
-  }
-
-  for (const roleId of statusMentionRoleIds ?? []) {
-    const role = guild.roles.cache.get(roleId);
-    if (!role || role.id === guild.id || role.managed) {
-      throw new HttpError(400, 'statusMentionRoleIds must be roles of this server (not @everyone, not managed roles)', 'INVALID_STATUS_ROLES');
-    }
-  }
-};
-
-/** Channels and roles the dashboard pickers offer for this guild, seen by this bot. */
+/** Channels and roles the super console pickers offer for this guild, seen by this bot. */
 export const buildGuildMeta = (guild: Guild): {channels: GuildMetaChannel[]; roles: GuildMetaRole[]} => {
   const {me} = guild.members;
   const channels = [...guild.channels.cache.values()]

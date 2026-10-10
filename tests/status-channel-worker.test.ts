@@ -3,14 +3,15 @@ import type {AddressInfo} from 'node:net';
 import {ChannelType, Collection, PermissionFlagsBits} from 'discord.js';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-// Worker routes read and write settings through these helpers (Prisma); the tests drive them directly.
-const settingsMocks = vi.hoisted(() => ({
-  getGuildSettingsView: vi.fn(),
-  updateGuildSettings: vi.fn(),
-  listStatusChannelTargets: vi.fn(),
+// vi.mock factories are hoisted above every declaration, so the Italian guild id is inlined.
+vi.mock('../src/utils/get-guild-settings.js', () => ({
+  getGuildSettings: vi.fn(async (guildId: string) => ({guildId, locale: guildId === '222222222222222222' ? 'it' : 'en'})),
 }));
 
-vi.mock('../src/control/guild-settings.js', () => settingsMocks);
+vi.mock('../src/control/guild-settings.js', () => ({
+  sanitizeGuildSettingsPatch: vi.fn((patch: unknown) => patch),
+  updateGuildSettings: vi.fn(async (guildId: string) => ({guildId})),
+}));
 
 import WorkerControlServer from '../src/control/worker-server.js';
 import {
@@ -20,30 +21,20 @@ import {
   postStatusMessage,
   roleMentions,
   statusFooter,
-  type StatusMessageInput,
 } from '../src/status/announce.js';
 import StatusAnnouncer, {
   STATUS_ANNOUNCE_INTERVAL_MS,
-  STATUS_GUILD_DELAY_MS,
+  fetchWorkerPlatformConfig,
   type StatusAnnouncerDependencies,
 } from '../src/status/startup-announcer.js';
 
 const token = 'c'.repeat(32);
 const botId = '666666666666666666';
-const guildA = '111111111111111111';
-const guildB = '222222222222222222';
-const foreignGuild = '333333333333333333';
-const categoryId = '444444444444444440';
-const textChannel = '444444444444444441';
-const newsChannel = '444444444444444442';
-const voiceChannel = '444444444444444443';
-const lockedChannel = '444444444444444444';
-const topChannel = '444444444444444445';
-const foreignChannel = '888888888888888881';
-const roleStaff = '555555555555555551';
-const roleSilent = '555555555555555552';
-const roleManaged = '555555555555555553';
-const foreignRole = '999999999999999991';
+const englishGuild = '111111111111111111';
+const italianGuild = '222222222222222222';
+const channelId = '987654321098765432';
+const roleA = '555555555555555551';
+const roleB = '555555555555555552';
 
 type EmbedJson = {
   title?: string;
@@ -60,100 +51,29 @@ type SentMessage = {
   allowedMentions: unknown;
 };
 
-type FakeChannel = {
-  id: string;
-  name: string;
-  type: ChannelType;
-  rawPosition: number;
-  parent: {id: string; name: string; rawPosition: number} | null;
-  parentId: string | null;
-  guild: FakeGuild;
-  permissionsFor: ReturnType<typeof vi.fn>;
-  send: ReturnType<typeof vi.fn>;
-};
-
-type FakeGuild = {
-  id: string;
-  members: {me: {id: string} | null};
-  channels: {cache: Collection<string, FakeChannel>};
-  roles: {cache: Collection<string, {id: string; name: string; color: number; mentionable: boolean; managed: boolean; position: number}>};
-};
-
-const makeGuild = (id: string) => {
-  const guild: FakeGuild = {
-    id,
-    members: {me: {id: botId}},
-    channels: {cache: new Collection()},
-    roles: {cache: new Collection()},
-  };
-  const category = {id: categoryId, name: 'Logs', rawPosition: 2};
-  const has = new Map<string, boolean>();
-  const channel = (channelId: string, name: string, type: ChannelType, rawPosition: number, parent: typeof category | null): FakeChannel => ({
+const makeChannel = (overrides: Record<string, unknown> = {}) => {
+  const has = vi.fn(() => true);
+  const channel = {
     id: channelId,
-    name,
-    type,
-    rawPosition,
-    parent,
-    parentId: parent?.id ?? null,
-    guild,
-    permissionsFor: vi.fn(() => ({has: vi.fn(() => has.get(channelId) ?? true)})),
+    type: ChannelType.GuildText,
+    guild: {id: englishGuild, members: {me: {id: botId}}},
+    permissionsFor: vi.fn(() => ({has})),
     send: vi.fn(async (_message: SentMessage) => ({id: 'message-id'})),
-  });
-
-  for (const entry of [
-    channel(lockedChannel, 'locked', ChannelType.GuildText, 1, category),
-    channel(textChannel, 'bot-log', ChannelType.GuildText, 0, category),
-    channel(newsChannel, 'news', ChannelType.GuildAnnouncement, 3, null),
-    channel(voiceChannel, 'Voice', ChannelType.GuildVoice, 4, null),
-    channel(topChannel, 'general', ChannelType.GuildText, 0, null),
-  ]) {
-    guild.channels.cache.set(entry.id, entry);
-  }
-
-  has.set(lockedChannel, false);
-  for (const role of [
-    {id, name: '@everyone', color: 0, mentionable: true, managed: false, position: 0},
-    {id: roleSilent, name: 'Silent', color: 0, mentionable: false, managed: false, position: 1},
-    {id: roleManaged, name: 'Muse One', color: 0, mentionable: false, managed: true, position: 2},
-    {id: roleStaff, name: 'Staff', color: 0x3c_cf_8e, mentionable: true, managed: false, position: 5},
-  ]) {
-    guild.roles.cache.set(role.id, role);
-  }
-
-  return guild;
-};
-
-const makeClient = (guilds: FakeGuild[], ready = true) => {
-  const channels = new Map<string, FakeChannel>();
-  for (const guild of guilds) {
-    for (const channel of guild.channels.cache.values()) {
-      // Every fake guild reuses the same channel ids; the first guild (the one under test) owns them.
-      if (!channels.has(channel.id)) {
-        channels.set(channel.id, channel);
-      }
-    }
-  }
-
-  return {
-    isReady: () => ready,
-    user: {
-      id: botId,
-      username: 'Muse One',
-      tag: 'Muse One#0420',
-      displayAvatarURL: () => `https://cdn.discordapp.com/avatars/${botId}/a.png`,
-    },
-    guilds: {cache: new Collection(guilds.map(guild => [guild.id, guild]))},
-    channels: {fetch: vi.fn(async (channelId: string) => channels.get(channelId) ?? null)},
+    ...overrides,
   };
+  return {channel, has};
 };
 
-const settingsView = (guildId: string, overrides: Record<string, unknown> = {}) => ({
-  guildId,
-  locale: 'en',
-  defaultVolume: 100,
-  statusChannelId: null,
-  statusMentionRoleIds: [],
-  ...overrides,
+const makeClient = (channel: unknown, ready = true) => ({
+  isReady: () => ready,
+  user: {
+    id: botId,
+    username: 'Muse One',
+    tag: 'Muse One#0420',
+    displayAvatarURL: () => `https://cdn.discordapp.com/avatars/${botId}/a.png`,
+  },
+  guilds: {cache: new Collection([[englishGuild, {id: englishGuild}], [italianGuild, {id: italianGuild}]])},
+  channels: {fetch: vi.fn(async () => channel)},
 });
 
 const sent = (send: {mock: {calls: unknown[][]}}, index = 0): SentMessage => send.mock.calls[index][0] as SentMessage;
@@ -165,14 +85,12 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.stubEnv('MUSE_DASHBOARD_PUBLIC_URL', 'https://music.example.test/');
-  settingsMocks.getGuildSettingsView.mockReset().mockImplementation(async (guildId: string) => settingsView(guildId));
-  settingsMocks.updateGuildSettings.mockReset().mockImplementation(async (guildId: string, patch: Record<string, unknown>) => settingsView(guildId, patch));
-  settingsMocks.listStatusChannelTargets.mockReset().mockResolvedValue([]);
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   for (const server of servers.splice(0)) {
     await server.close();
   }
@@ -186,269 +104,196 @@ const startWorker = async (client: ReturnType<typeof makeClient>) => {
   servers.push(server);
   const {port} = (server as unknown as {server: Server}).server.address() as AddressInfo;
 
-  return async (method: string, path: string, body?: unknown, auth = true) => {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method,
-      headers: {
-        ...(auth ? {authorization: `Bearer ${token}`} : {}),
-        ...(body === undefined ? {} : {'content-type': 'application/json'}),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
+  return async (body: unknown, auth = true) => {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/status-channel/announce`, {
+      method: 'POST',
+      headers: {...(auth ? {authorization: `Bearer ${token}`} : {}), 'content-type': 'application/json'},
+      body: JSON.stringify(body),
     });
-    return {status: response.status, body: await response.json() as Record<string, any>};
+    return {status: response.status, body: await response.json() as Record<string, unknown>};
   };
 };
 
-describe('worker settings route: status channel guild checks', () => {
-  const patch = async (body: unknown) => {
-    const guild = makeGuild(guildA);
-    const other = makeGuild(foreignGuild);
-    const call = await startWorker(makeClient([guild, other]));
-    return call('PATCH', `/v1/guilds/${guildA}/settings`, body);
-  };
-
-  it.each([
-    ['a channel of another server', {statusChannelId: foreignChannel}, 'INVALID_STATUS_CHANNEL'],
-    ['a voice channel', {statusChannelId: voiceChannel}, 'INVALID_STATUS_CHANNEL'],
-    ['a category', {statusChannelId: categoryId}, 'INVALID_STATUS_CHANNEL'],
-    ['a malformed channel id', {statusChannelId: 'general'}, 'INVALID_STATUS_CHANNEL'],
-    ['the @everyone role', {statusMentionRoleIds: [guildA]}, 'INVALID_STATUS_ROLES'],
-    ['a managed role', {statusMentionRoleIds: [roleStaff, roleManaged]}, 'INVALID_STATUS_ROLES'],
-    ['a role of another server', {statusMentionRoleIds: [foreignRole]}, 'INVALID_STATUS_ROLES'],
-    ['more than 10 roles', {statusMentionRoleIds: Array.from({length: 11}, (_, index) => `5555555555555555${String(index).padStart(2, '0')}`)}, 'INVALID_STATUS_ROLES'],
-  ])('rejects %s with 400 before saving', async (_label, body, code) => {
-    const result = await patch(body);
-    expect(result.status).toBe(400);
-    expect(result.body.code).toBe(code);
-    expect(settingsMocks.updateGuildSettings).not.toHaveBeenCalled();
-  });
-
-  it('saves a text or announcement channel and deduplicated roles of the guild', async () => {
-    const result = await patch({statusChannelId: textChannel, statusMentionRoleIds: [roleStaff, roleSilent, roleStaff]});
-    expect(result.status).toBe(200);
-    expect(settingsMocks.updateGuildSettings).toHaveBeenCalledWith(guildA, {statusChannelId: textChannel, statusMentionRoleIds: [roleStaff, roleSilent]});
-    expect(result.body).toMatchObject({statusChannelId: textChannel, statusMentionRoleIds: [roleStaff, roleSilent]});
-
-    expect((await patch({statusChannelId: newsChannel})).status).toBe(200);
-  });
-
-  it('clears the setting with null and []', async () => {
-    const result = await patch({statusChannelId: null, statusMentionRoleIds: []});
-    expect(result.status).toBe(200);
-    expect(settingsMocks.updateGuildSettings).toHaveBeenCalledWith(guildA, {statusChannelId: null, statusMentionRoleIds: []});
-  });
-
-  it('returns the settings with the roles as a list and refuses guilds the bot is not in', async () => {
-    settingsMocks.getGuildSettingsView.mockResolvedValueOnce(settingsView(guildA, {statusChannelId: textChannel, statusMentionRoleIds: [roleStaff]}));
-    const call = await startWorker(makeClient([makeGuild(guildA)]));
-    expect(await call('GET', `/v1/guilds/${guildA}/settings`)).toEqual({
-      status: 200,
-      body: settingsView(guildA, {statusChannelId: textChannel, statusMentionRoleIds: [roleStaff]}),
+describe('worker status announce route', () => {
+  it('requires the control token and a valid body', async () => {
+    const {channel} = makeChannel();
+    const client = makeClient(channel);
+    const announce = await startWorker(client);
+    expect((await announce({channelId, test: true}, false)).status).toBe(401);
+    expect(await announce({channelId: 'abc', test: true})).toEqual({
+      status: 400,
+      body: {error: 'channelId must be a Discord channel id', code: 'INVALID_CHANNEL_ID'},
     });
-    expect(await call('PATCH', `/v1/guilds/${guildB}/settings`, {statusChannelId: textChannel})).toEqual({
-      status: 404,
-      body: {error: 'worker is not a member of that guild', code: 'NOT_IN_GUILD'},
-    });
-    expect(settingsMocks.updateGuildSettings).not.toHaveBeenCalled();
-  });
-});
-
-describe('worker guild meta route', () => {
-  it('lists postable channels in sidebar order and mentionable-candidate roles', async () => {
-    const call = await startWorker(makeClient([makeGuild(guildA), makeGuild(guildB)]));
-    const result = await call('GET', `/v1/guilds/${guildA}/meta`);
-    expect(result.status).toBe(200);
-    expect(result.body).toEqual({
-      workerId: 'muse-01',
-      guildId: guildA,
-      channels: [
-        {id: topChannel, name: 'general', type: 'text', parentName: null, position: 0, canPost: true},
-        {id: newsChannel, name: 'news', type: 'announcement', parentName: null, position: 3, canPost: true},
-        {id: textChannel, name: 'bot-log', type: 'text', parentName: 'Logs', position: 0, canPost: true},
-        {id: lockedChannel, name: 'locked', type: 'text', parentName: 'Logs', position: 1, canPost: false},
-      ],
-      roles: [
-        {id: roleStaff, name: 'Staff', color: 0x3c_cf_8e, mentionable: true, position: 5},
-        {id: roleSilent, name: 'Silent', color: 0, mentionable: false, position: 1},
-      ],
-    });
-  });
-
-  it('checks the post permissions of this bot', async () => {
-    const guild = makeGuild(guildA);
-    const call = await startWorker(makeClient([guild]));
-    await call('GET', `/v1/guilds/${guildA}/meta`);
-    const channel = guild.channels.cache.get(textChannel)!;
-    expect(channel.permissionsFor).toHaveBeenCalledWith(guild.members.me);
-    const [{value: permissions}] = channel.permissionsFor.mock.results as Array<{value: {has: ReturnType<typeof vi.fn>}}>;
-    expect(permissions.has).toHaveBeenCalledWith(STATUS_CHANNEL_PERMISSIONS);
-  });
-
-  it('requires the control token, a guild of this bot and a ready client', async () => {
-    const call = await startWorker(makeClient([makeGuild(guildA)]));
-    expect((await call('GET', `/v1/guilds/${guildA}/meta`, undefined, false)).status).toBe(401);
-    expect((await call('GET', `/v1/guilds/${guildB}/meta`)).body).toEqual({error: 'worker is not a member of that guild', code: 'NOT_IN_GUILD'});
-    expect((await call('GET', '/v1/guilds/nope/meta')).status).toBe(400);
-
-    const offline = await startWorker(makeClient([makeGuild(guildA)], false));
-    expect(await offline('GET', `/v1/guilds/${guildA}/meta`)).toEqual({status: 503, body: {error: 'worker is not connected to Discord', code: 'NOT_READY'}});
-  });
-});
-
-describe('worker status test route', () => {
-  const testPath = `/v1/guilds/${guildA}/status-channel/test`;
-
-  it('reports NOT_CONFIGURED when this bot has no status channel for the guild', async () => {
-    const guild = makeGuild(guildA);
-    const client = makeClient([guild]);
-    const call = await startWorker(client);
-    expect(await call('POST', testPath)).toEqual({status: 200, body: {workerId: 'muse-01', ok: false, error: 'NOT_CONFIGURED'}});
+    expect((await announce({channelId})).body.code).toBe('INVALID_BODY');
+    expect((await announce([channelId])).body.code).toBe('INVALID_BODY');
+    expect((await announce({guildId: 'nope', channelId, test: true})).body.code).toBe('INVALID_GUILD_ID');
+    expect((await announce({channelId, test: true, mentionRoleIds: ['@everyone']})).body.code).toBe('INVALID_ROLE_IDS');
+    expect((await announce({channelId, test: true, mentionRoleIds: roleA})).body.code).toBe('INVALID_ROLE_IDS');
+    const tooMany = Array.from({length: 11}, (_, index) => `5555555555555555${String(index).padStart(2, '0')}`);
+    expect((await announce({channelId, test: true, mentionRoleIds: tooMany})).body.code).toBe('INVALID_ROLE_IDS');
     expect(client.channels.fetch).not.toHaveBeenCalled();
   });
 
-  it('posts the violet test message with the saved roles in the guild language', async () => {
-    settingsMocks.getGuildSettingsView.mockResolvedValue(settingsView(guildA, {locale: 'it', statusChannelId: textChannel, statusMentionRoleIds: [roleStaff, roleSilent]}));
-    const guild = makeGuild(guildA);
-    const call = await startWorker(makeClient([guild, makeGuild(guildB)]));
+  it('posts the "Bot started" embed and pings exactly the configured roles', async () => {
+    const {channel, has} = makeChannel();
+    const client = makeClient(channel);
+    const announce = await startWorker(client);
 
-    expect(await call('POST', testPath)).toEqual({status: 200, body: {workerId: 'muse-01', ok: true}});
-    const channel = guild.channels.cache.get(textChannel)!;
+    const result = await announce({channelId, test: false, mentionRoleIds: [roleA, roleB, roleA]});
+    expect(result).toEqual({status: 200, body: {workerId: 'muse-01', ok: true}});
+    expect(client.channels.fetch).toHaveBeenCalledWith(channelId);
+    expect(has).toHaveBeenCalledWith(STATUS_CHANNEL_PERMISSIONS);
+    expect(STATUS_CHANNEL_PERMISSIONS).toEqual([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks]);
+    expect(channel.send).toHaveBeenCalledOnce();
+
     const message = sent(channel.send);
-    expect(message.content).toBe(`<@&${roleStaff}> <@&${roleSilent}>`);
-    expect(message.allowedMentions).toEqual({parse: [], roles: [roleStaff, roleSilent]});
-    const embed = sentEmbed(channel.send);
-    expect(embed).toMatchObject({title: 'Messaggio di prova', description: 'Prova del canale di stato inviata da Muse One#0420.', color: STATUS_TEST_COLOR});
-    expect(embed.fields?.map(field => field.name)).toEqual(['Autore azione', 'Dettagli']);
-    expect(embed.fields?.[1].value).toContain('**Guild Count:** 2');
-    expect(embed.footer).toEqual({text: 'music.example.test'});
-  });
+    expect(message.content).toBe(`<@&${roleA}> <@&${roleB}>`);
+    expect(message.allowedMentions).toEqual({parse: [], roles: [roleA, roleB]});
+    expect(message.embeds).toHaveLength(1);
 
-  it('reports missing permissions, foreign channels and a disconnected bot', async () => {
-    settingsMocks.getGuildSettingsView.mockResolvedValue(settingsView(guildA, {statusChannelId: lockedChannel}));
-    const guild = makeGuild(guildA);
-    const call = await startWorker(makeClient([guild, makeGuild(foreignGuild)]));
-    expect((await call('POST', testPath)).body).toEqual({workerId: 'muse-01', ok: false, error: 'MISSING_PERMISSIONS'});
-    expect(guild.channels.cache.get(lockedChannel)!.send).not.toHaveBeenCalled();
-    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(expect.stringContaining('MISSING_PERMISSIONS'));
-
-    // A stored id that points to another server is never used.
-    settingsMocks.getGuildSettingsView.mockResolvedValue(settingsView(guildA, {statusChannelId: foreignChannel}));
-    expect((await call('POST', testPath)).body).toEqual({workerId: 'muse-01', ok: false, error: 'CHANNEL_NOT_FOUND'});
-
-    const offline = await startWorker(makeClient([makeGuild(guildA)], false));
-    expect((await offline('POST', testPath)).body).toEqual({workerId: 'muse-01', ok: false, error: 'NOT_READY'});
-    expect((await call('POST', `/v1/guilds/${guildB}/status-channel/test`)).status).toBe(404);
-    expect((await call('POST', testPath, undefined, false)).status).toBe(401);
-  });
-
-  it('no longer serves the platform-wide announce route', async () => {
-    const call = await startWorker(makeClient([makeGuild(guildA)]));
-    expect((await call('POST', '/v1/status-channel/announce', {channelId: textChannel, test: true})).status).toBe(404);
-  });
-});
-
-describe('status message', () => {
-  const input = (overrides: Partial<StatusMessageInput> = {}): StatusMessageInput => ({
-    guildId: guildA,
-    channelId: textChannel,
-    test: false,
-    mentionRoleIds: [],
-    locale: 'en',
-    ...overrides,
-  });
-
-  it('posts the green "Bot started" embed and pings exactly the configured roles', async () => {
-    const guild = makeGuild(guildA);
-    const client = makeClient([guild]);
-    await expect(postStatusMessage(client as never, input({mentionRoleIds: [roleStaff, roleSilent, roleStaff]}))).resolves.toEqual({ok: true});
-
-    const channel = guild.channels.cache.get(textChannel)!;
-    const message = sent(channel.send);
-    expect(message.content).toBe(`<@&${roleStaff}> <@&${roleSilent}>`);
-    expect(message.allowedMentions).toEqual({parse: [], roles: [roleStaff, roleSilent]});
     const embed = sentEmbed(channel.send);
     expect(embed.title).toBe('Bot started');
     expect(embed.description).toBe('Bot connected as Muse One#0420.');
     expect(embed.color).toBe(STATUS_ONLINE_COLOR);
-    expect(STATUS_ONLINE_COLOR).toBe(0x3c_cf_8e);
+    expect(STATUS_ONLINE_COLOR).toBe(0x3ccf8e);
     expect(embed.fields).toEqual([
       {name: 'Action author', value: `**Muse One** · <@${botId}> · \`${botId}\``},
-      {name: 'Details', value: `**Guild Count:** 1\n**Bot:** Muse One · <@${botId}> · \`${botId}\``},
+      {name: 'Details', value: `**Guild Count:** 2\n**Bot:** Muse One · <@${botId}> · \`${botId}\``},
     ]);
     expect(embed.footer).toEqual({text: 'music.example.test'});
     expect(Math.abs(Date.parse(embed.timestamp!) - Date.now())).toBeLessThan(10_000);
-    expect(STATUS_CHANNEL_PERMISSIONS).toEqual([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks]);
   });
 
-  it('sends no content and allows no mentions without roles', async () => {
-    const guild = makeGuild(guildA);
-    await postStatusMessage(makeClient([guild]) as never, input());
-    const message = sent(guild.channels.cache.get(textChannel)!.send);
+  it('sends no content and allows no mentions when no role is configured', async () => {
+    const {channel} = makeChannel();
+    const announce = await startWorker(makeClient(channel));
+    await announce({channelId, test: false});
+    const message = sent(channel.send);
     expect(message.content).toBeUndefined();
     expect(message.allowedMentions).toEqual({parse: [], roles: []});
   });
 
-  it('maps every failure to a short code and never throws', async () => {
-    const guild = makeGuild(guildA);
-    const client = makeClient([guild, makeGuild(foreignGuild)]);
-    await expect(postStatusMessage(makeClient([guild], false) as never, input())).resolves.toEqual({ok: false, error: 'NOT_READY'});
-    await expect(postStatusMessage(client as never, input({channelId: '123456789012345678'}))).resolves.toEqual({ok: false, error: 'CHANNEL_NOT_FOUND'});
-    await expect(postStatusMessage(client as never, input({channelId: voiceChannel}))).resolves.toEqual({ok: false, error: 'INVALID_CHANNEL'});
-    await expect(postStatusMessage(client as never, input({channelId: foreignChannel}))).resolves.toEqual({ok: false, error: 'CHANNEL_NOT_FOUND'});
-    await expect(postStatusMessage(client as never, input({channelId: lockedChannel}))).resolves.toEqual({ok: false, error: 'MISSING_PERMISSIONS'});
-    await expect(postStatusMessage(client as never, input({channelId: newsChannel}))).resolves.toEqual({ok: true});
+  it('uses the guild locale of the channel and the violet test layout', async () => {
+    const {channel} = makeChannel({guild: {id: italianGuild, members: {me: {id: botId}}}});
+    const announce = await startWorker(makeClient(channel));
 
-    client.channels.fetch.mockRejectedValueOnce({code: 10_003});
-    await expect(postStatusMessage(client as never, input())).resolves.toEqual({ok: false, error: 'CHANNEL_NOT_FOUND'});
-    client.channels.fetch.mockRejectedValueOnce({code: 50_001});
-    await expect(postStatusMessage(client as never, input())).resolves.toEqual({ok: false, error: 'MISSING_PERMISSIONS'});
-    guild.channels.cache.get(textChannel)!.send.mockRejectedValueOnce({code: 50_013});
-    await expect(postStatusMessage(client as never, input())).resolves.toEqual({ok: false, error: 'MISSING_PERMISSIONS'});
-    guild.channels.cache.get(textChannel)!.send.mockRejectedValueOnce(new Error('socket hang up'));
-    await expect(postStatusMessage(client as never, input())).resolves.toEqual({ok: false, error: 'DISCORD_ERROR'});
+    expect((await announce({channelId, test: false, mentionRoleIds: [roleA]})).body).toEqual({workerId: 'muse-01', ok: true});
+    const online = sentEmbed(channel.send);
+    expect(online.title).toBe('Bot avviato');
+    expect(online.description).toBe('Bot connesso come Muse One#0420.');
+    expect(online.fields?.map(field => field.name)).toEqual(['Autore azione', 'Dettagli']);
+    expect(online.fields?.[1].value).toContain('**Guild Count:** 2');
+
+    await announce({channelId, test: true, mentionRoleIds: [roleA]});
+    const test = sentEmbed(channel.send, 1);
+    expect(test.title).toBe('Messaggio di prova');
+    expect(test.description).toBe('Prova del canale di stato inviata da Muse One#0420.');
+    expect(test.color).toBe(STATUS_TEST_COLOR);
+    expect(STATUS_TEST_COLOR).toBe(0xa78bfa);
+    expect(test.footer).toEqual({text: 'music.example.test'});
+    // The test message pings the roles too, so the admin can check the mentions.
+    expect(sent(channel.send, 1).content).toBe(`<@&${roleA}>`);
+    expect(sent(channel.send, 1).allowedMentions).toEqual({parse: [], roles: [roleA]});
   });
 
-  it('uses the dashboard hostname as footer and builds role mentions only', () => {
+  it('uses the English test title by default', async () => {
+    const {channel} = makeChannel();
+    const announce = await startWorker(makeClient(channel));
+    await announce({channelId, test: true});
+    expect(sentEmbed(channel.send)).toMatchObject({title: 'Test message', description: 'Status channel test sent by Muse One#0420.', color: STATUS_TEST_COLOR});
+  });
+
+  it('reports missing permissions without posting', async () => {
+    const {channel, has} = makeChannel();
+    has.mockReturnValue(false);
+    const announce = await startWorker(makeClient(channel));
+
+    expect(await announce({channelId, test: true})).toEqual({status: 200, body: {workerId: 'muse-01', ok: false, error: 'MISSING_PERMISSIONS'}});
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(expect.stringContaining('MISSING_PERMISSIONS'));
+  });
+});
+
+describe('status message helpers', () => {
+  it('uses the dashboard hostname as footer and falls back to Muse', () => {
     expect(statusFooter('https://music.example.test/it')).toBe('music.example.test');
     expect(statusFooter(undefined)).toBe('Muse');
     expect(statusFooter('')).toBe('Muse');
     expect(statusFooter('not a url')).toBe('Muse');
+  });
+
+  it('builds role mentions only', () => {
     expect(roleMentions([])).toBeUndefined();
-    expect(roleMentions([roleStaff, roleSilent])).toBe(`<@&${roleStaff}> <@&${roleSilent}>`);
+    expect(roleMentions([roleA, roleB])).toBe(`<@&${roleA}> <@&${roleB}>`);
+  });
+});
+
+describe('postStatusMessage error codes', () => {
+  const input = {guildId: null, channelId, workerId: 'muse-01', test: false, mentionRoleIds: []};
+  const english = async () => 'en' as const;
+
+  it('reports a bot that is not connected', async () => {
+    const {channel} = makeChannel();
+    const client = makeClient(channel, false);
+    await expect(postStatusMessage(client as never, input, english)).resolves.toEqual({ok: false, error: 'NOT_READY'});
+    expect(client.channels.fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unknown channel', {code: 10_003}, 'CHANNEL_NOT_FOUND'],
+    ['a channel the bot cannot see', {code: 50_001}, 'MISSING_PERMISSIONS'],
+    ['any other Discord failure', new Error('socket hang up'), 'DISCORD_ERROR'],
+  ])('maps a fetch failure for %s', async (_label, failure, error) => {
+    const client = makeClient(null);
+    client.channels.fetch.mockRejectedValueOnce(failure);
+    await expect(postStatusMessage(client as never, input, english)).resolves.toEqual({ok: false, error});
+  });
+
+  it('rejects missing, non-text and DM channels', async () => {
+    await expect(postStatusMessage(makeClient(null) as never, input, english)).resolves.toEqual({ok: false, error: 'CHANNEL_NOT_FOUND'});
+    for (const type of [ChannelType.GuildVoice, ChannelType.GuildCategory, ChannelType.DM, ChannelType.PublicThread]) {
+      const {channel} = makeChannel({type});
+      await expect(postStatusMessage(makeClient(channel) as never, input, english)).resolves.toEqual({ok: false, error: 'INVALID_CHANNEL'});
+      expect(channel.send).not.toHaveBeenCalled();
+    }
+  });
+
+  it('never posts in a channel of another server than the configured one', async () => {
+    const {channel} = makeChannel();
+    await expect(postStatusMessage(makeClient(channel) as never, {...input, guildId: italianGuild}, english))
+      .resolves.toEqual({ok: false, error: 'CHANNEL_NOT_FOUND'});
+    expect(channel.send).not.toHaveBeenCalled();
+
+    await expect(postStatusMessage(makeClient(channel) as never, {...input, guildId: englishGuild}, english)).resolves.toEqual({ok: true});
+    expect(channel.send).toHaveBeenCalledOnce();
+  });
+
+  it('accepts announcement channels and maps send failures', async () => {
+    const {channel} = makeChannel({type: ChannelType.GuildAnnouncement});
+    await expect(postStatusMessage(makeClient(channel) as never, input, english)).resolves.toEqual({ok: true});
+
+    channel.send.mockRejectedValueOnce({code: 50_013});
+    await expect(postStatusMessage(makeClient(channel) as never, input, english)).resolves.toEqual({ok: false, error: 'MISSING_PERMISSIONS'});
   });
 });
 
 describe('startup status announcer', () => {
-  const target = (guildId: string, overrides: Record<string, unknown> = {}) => ({
-    guildId,
-    channelId: textChannel,
-    mentionRoleIds: [] as string[],
-    locale: 'en',
-    ...overrides,
-  });
+  const config = {WORKER_ID: 'muse-01', CONTROL_TOKEN: token};
+  /** A Discord client stub that is a member of exactly these guilds. */
+  const memberOf = (...guildIds: string[]) => ({guilds: {cache: new Collection(guildIds.map(id => [id, {id}]))}});
 
-  const setup = (overrides: Partial<StatusAnnouncerDependencies> = {}, guildIds = [guildA, guildB]) => {
+  const setup = (overrides: Partial<StatusAnnouncerDependencies> = {}) => {
     let now = 1_000_000;
-    const order: string[] = [];
     const dependencies = {
-      listTargets: vi.fn(async () => [target(guildA, {mentionRoleIds: [roleStaff], locale: 'it'}), target(guildB)]),
-      post: vi.fn(async (_client: unknown, input: StatusMessageInput) => {
-        order.push(`post:${input.guildId}`);
-        return {ok: true as const};
-      }),
+      fetchConfig: vi.fn(async () => ({statusGuildId: englishGuild as string | null, statusChannelId: channelId as string | null, mentionRoleIds: [roleA]})),
+      post: vi.fn(async () => ({ok: true as const})),
       now: () => now,
-      delay: vi.fn(async (ms: number) => {
-        order.push(`delay:${ms}`);
-      }),
       ...overrides,
     };
-    const client = {guilds: {cache: new Collection(guildIds.map(id => [id, {id}]))}};
-    const announcer = new StatusAnnouncer(client as never, {WORKER_ID: 'muse-01'}, dependencies);
+    const announcer = new StatusAnnouncer(memberOf(englishGuild) as never, config, dependencies);
     return {
       announcer,
-      client,
       dependencies,
-      order,
       advance: (ms: number) => {
         now += ms;
       },
@@ -456,96 +301,113 @@ describe('startup status announcer', () => {
   };
 
   it('does nothing outside a managed worker', async () => {
-    const listTargets = vi.fn(async () => [target(guildA)]);
-    const announcer = new StatusAnnouncer({} as never, {WORKER_ID: ''}, {listTargets});
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'skipped'});
-    expect(listTargets).not.toHaveBeenCalled();
+    const fetchConfig = vi.fn(async () => ({statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: []}));
+    const announcer = new StatusAnnouncer(memberOf(englishGuild) as never, {WORKER_ID: '', CONTROL_TOKEN: ''}, {fetchConfig});
+    await expect(announcer.announceOnline()).resolves.toBe('skipped');
+    expect(fetchConfig).not.toHaveBeenCalled();
   });
 
-  it('posts in every configured guild, one at a time, with its locale and roles', async () => {
-    const {announcer, client, dependencies, order} = setup();
-    await expect(announcer.announceOnline()).resolves.toEqual({outcome: 'done', posted: [guildA, guildB], failed: []});
-    expect(dependencies.post.mock.calls).toEqual([
-      [client, {guildId: guildA, channelId: textChannel, test: false, mentionRoleIds: [roleStaff], locale: 'it'}],
-      [client, {guildId: guildB, channelId: textChannel, test: false, mentionRoleIds: [], locale: 'en'}],
-    ]);
-    expect(order).toEqual([`post:${guildA}`, `delay:${STATUS_GUILD_DELAY_MS}`, `post:${guildB}`]);
+  it('posts the online message with the configured roles, control token and worker id', async () => {
+    const {announcer, dependencies} = setup();
+    await expect(announcer.announceOnline()).resolves.toBe('posted');
+    expect(dependencies.fetchConfig).toHaveBeenCalledWith(token);
+    expect(dependencies.post).toHaveBeenCalledWith(
+      memberOf(englishGuild),
+      {guildId: englishGuild, channelId, workerId: 'muse-01', test: false, mentionRoleIds: [roleA]},
+    );
   });
 
-  it('skips guilds this bot has left and unknown locales fall back to English', async () => {
-    const {announcer, dependencies} = setup({
-      listTargets: vi.fn(async () => [target(foreignGuild), target(guildA, {locale: 'fr'})]),
-    });
-    await expect(announcer.announceOnline()).resolves.toMatchObject({posted: [guildA]});
-    expect(dependencies.post).toHaveBeenCalledOnce();
-    expect(dependencies.post.mock.calls[0][1]).toMatchObject({guildId: guildA, locale: 'en'});
-  });
-
-  it('stays quiet without configured guilds and retries on the next reconnect', async () => {
-    const listTargets = vi.fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([target(guildA)]);
-    const {announcer, dependencies} = setup({listTargets});
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'skipped'});
+  it('stays silent when this bot is not in the configured server', async () => {
+    const dependencies = {
+      fetchConfig: vi.fn(async () => ({statusGuildId: italianGuild, statusChannelId: channelId, mentionRoleIds: []})),
+      post: vi.fn(async () => ({ok: true as const})),
+      now: () => 1,
+    };
+    const announcer = new StatusAnnouncer(memberOf(englishGuild) as never, config, dependencies);
+    await expect(announcer.announceOnline()).resolves.toBe('skipped');
     expect(dependencies.post).not.toHaveBeenCalled();
-    // Nothing was posted, so the rate limit did not start.
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'done', posted: [guildA]});
+    expect(vi.mocked(console.warn)).not.toHaveBeenCalled();
   });
 
-  it('logs a failed guild concisely and keeps going', async () => {
-    const post = vi.fn()
-      .mockResolvedValueOnce({ok: false, error: 'MISSING_PERMISSIONS'})
-      .mockRejectedValueOnce(new TypeError('boom'))
-      .mockResolvedValueOnce({ok: true});
-    const {announcer} = setup({
-      post,
-      listTargets: vi.fn(async () => [target(guildA), target(guildB), target(guildA, {channelId: newsChannel})]),
-    });
-    await expect(announcer.announceOnline()).resolves.toEqual({
-      outcome: 'done',
-      posted: [guildA],
-      failed: [{guildId: guildA, error: 'MISSING_PERMISSIONS'}, {guildId: guildB, error: 'TypeError'}],
-    });
-    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(`Status channel: online message not posted in guild ${guildA} (MISSING_PERMISSIONS)`);
-    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(`Status channel: online message not posted in guild ${guildB} (TypeError)`);
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith('Status channel: online message posted in 1/3 guilds');
+  it('still posts a setting saved before the server was stored', async () => {
+    const {announcer, dependencies} = setup({fetchConfig: vi.fn(async () => ({statusGuildId: null, statusChannelId: channelId, mentionRoleIds: []}))});
+    await expect(announcer.announceOnline()).resolves.toBe('posted');
+    expect(dependencies.post).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({guildId: null, channelId}));
   });
 
-  it('only logs a settings read failure and retries on the next reconnect', async () => {
-    const listTargets = vi.fn()
-      .mockRejectedValueOnce(Object.assign(new Error('database is locked'), {name: 'PrismaClientUnknownRequestError'}))
-      .mockResolvedValueOnce([target(guildA)]);
-    const {announcer, dependencies} = setup({listTargets});
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'failed'});
-    expect(vi.mocked(console.warn)).toHaveBeenCalledWith('Status channel: could not read the status channel settings (PrismaClientUnknownRequestError)');
+  it('stays quiet when no status channel is configured', async () => {
+    const {announcer, dependencies} = setup({fetchConfig: vi.fn(async () => ({statusGuildId: null, statusChannelId: null, mentionRoleIds: [roleA]}))});
+    await expect(announcer.announceOnline()).resolves.toBe('skipped');
     expect(dependencies.post).not.toHaveBeenCalled();
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'done'});
+  });
+
+  it('only logs an orchestrator failure and retries on the next reconnect', async () => {
+    const fetchConfig = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('timed out'), {name: 'TimeoutError'}))
+      .mockResolvedValueOnce({statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: []});
+    const {announcer, dependencies} = setup({fetchConfig});
+    await expect(announcer.announceOnline()).resolves.toBe('failed');
+    expect(vi.mocked(console.warn)).toHaveBeenCalledWith('Status channel: could not read the worker config from the orchestrator (TimeoutError)');
+    expect(dependencies.post).not.toHaveBeenCalled();
+
+    await expect(announcer.announceOnline()).resolves.toBe('posted');
   });
 
   it('announces at most once every 5 minutes, failed posts included', async () => {
     const post = vi.fn().mockResolvedValueOnce({ok: false, error: 'MISSING_PERMISSIONS'}).mockResolvedValue({ok: true});
-    const {announcer, advance} = setup({post, listTargets: vi.fn(async () => [target(guildA)])});
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'done', posted: []});
+    const {announcer, advance} = setup({post});
+    await expect(announcer.announceOnline()).resolves.toBe('failed');
+    expect(vi.mocked(console.warn)).toHaveBeenCalledWith(`Status channel: online message not posted in ${channelId} (MISSING_PERMISSIONS)`);
 
     advance(STATUS_ANNOUNCE_INTERVAL_MS - 1);
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'skipped'});
+    await expect(announcer.announceOnline()).resolves.toBe('skipped');
     expect(post).toHaveBeenCalledTimes(1);
 
     advance(1);
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'done', posted: [guildA]});
+    await expect(announcer.announceOnline()).resolves.toBe('posted');
     expect(post).toHaveBeenCalledTimes(2);
   });
 
   it('never runs two announcements at once', async () => {
-    let release: (value: Array<ReturnType<typeof target>>) => void = () => undefined;
-    const listTargets = vi.fn(async () => new Promise<Array<ReturnType<typeof target>>>(resolve => {
+    type Answer = {statusGuildId: string; statusChannelId: string; mentionRoleIds: string[]};
+    let release: (value: Answer) => void = () => undefined;
+    const fetchConfig = vi.fn(async () => new Promise<Answer>(resolve => {
       release = resolve;
     }));
-    const {announcer, dependencies} = setup({listTargets});
+    const {announcer, dependencies} = setup({fetchConfig});
     const first = announcer.announceOnline();
-    await expect(announcer.announceOnline()).resolves.toMatchObject({outcome: 'skipped'});
-    release([target(guildA)]);
-    await expect(first).resolves.toMatchObject({outcome: 'done', posted: [guildA]});
+    await expect(announcer.announceOnline()).resolves.toBe('skipped');
+    release({statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: []});
+    await expect(first).resolves.toBe('posted');
     expect(dependencies.post).toHaveBeenCalledOnce();
+  });
+});
+
+describe('worker config client', () => {
+  it('calls MUSE_ORCHESTRATOR_URL with the control token and validates the answer', async () => {
+    vi.stubEnv('MUSE_ORCHESTRATOR_URL', 'https://orchestrator.internal:9443/base/');
+    const answer = {statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: [roleA]};
+    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify(answer), {status: 200}));
+    vi.stubGlobal('fetch', fetcher);
+
+    await expect(fetchWorkerPlatformConfig(token)).resolves.toEqual(answer);
+    expect(fetcher.mock.calls[0][0]).toBe('https://orchestrator.internal:9443/base/v1/worker/config');
+    expect(fetcher.mock.calls[0][1]).toMatchObject({
+      method: 'GET',
+      redirect: 'error',
+      headers: {authorization: `Bearer ${token}`},
+    });
+
+    // An orchestrator without server or role mentions means any server and no mentions.
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusChannelId: channelId}), {status: 200}));
+    await expect(fetchWorkerPlatformConfig(token)).resolves.toEqual({statusGuildId: null, statusChannelId: channelId, mentionRoleIds: []});
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusGuildId: 'nope', statusChannelId: channelId, mentionRoleIds: []}), {status: 200}));
+    await expect(fetchWorkerPlatformConfig(token)).rejects.toThrow('Invalid worker config');
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusChannelId: 'nope', mentionRoleIds: []}), {status: 200}));
+    await expect(fetchWorkerPlatformConfig(token)).rejects.toThrow('Invalid worker config');
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusChannelId: channelId, mentionRoleIds: ['@everyone']}), {status: 200}));
+    await expect(fetchWorkerPlatformConfig(token)).rejects.toThrow('Invalid worker config');
+    fetcher.mockResolvedValueOnce(new Response('{}', {status: 503}));
+    await expect(fetchWorkerPlatformConfig(token)).rejects.toThrow('Orchestrator answered 503');
   });
 });

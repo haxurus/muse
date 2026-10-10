@@ -169,6 +169,34 @@
               <div class="table-list" id="super-workers"></div>
             </section>
 
+            <section class="card" id="status-channel-card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.statusChannel.kicker"></span>
+                  <h2 data-i18n="super.statusChannel.title"></h2>
+                  <p data-i18n="super.statusChannel.text"></p>
+                </div>
+              </div>
+              <div class="status-picker">
+                <label class="field"><span data-i18n="super.statusChannel.guild"></span><select id="status-guild"></select></label>
+                <label class="field"><span data-i18n="super.statusChannel.channel"></span><select id="status-channel" disabled></select></label>
+                <p class="status-warning" id="status-channel-warning" hidden></p>
+                <label class="field"><span data-i18n="super.statusChannel.roles"></span><select id="status-role-add" disabled></select></label>
+                <div class="chip-list status-role-list" id="status-role-list"></div>
+                <p class="status-channel-hint" id="status-no-roles" data-i18n="super.statusChannel.noRoles"></p>
+                <p class="status-warning" id="status-role-warning" hidden></p>
+                <p class="status-channel-hint" data-i18n="super.statusChannel.rolesHint"></p>
+              </div>
+              <div class="status-channel-actions">
+                <button class="button button-primary" type="button" id="status-channel-save" data-i18n="super.statusChannel.save"></button>
+                <button class="button button-secondary" type="button" id="status-channel-test" data-i18n="super.statusChannel.test"></button>
+                <button class="button button-ghost" type="button" id="status-channel-disable" data-i18n="super.statusChannel.disable"></button>
+              </div>
+              <p class="form-message" id="status-channel-message"></p>
+              <div class="status-channel-current" id="status-channel-current"></div>
+              <div class="table-list" id="status-channel-results"></div>
+            </section>
+
             <section class="card">
               <div class="card-head">
                 <div>
@@ -260,10 +288,6 @@
         <button type="button" data-tab="groups">
           <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.6 2.7 2.2 3 4.6"/></svg>
           <span data-i18n="guild.tabs.groups"></span>
-        </button>
-        <button type="button" data-tab="log">
-          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6h14M5 11h14M5 16h8"/><circle cx="18" cy="17.5" r="2.5"/></svg>
-          <span data-i18n="guild.tabs.log"></span>
         </button>
       </nav>
       <div class="sidebar-foot">
@@ -384,56 +408,6 @@
             </div>
             <p class="form-message" id="group-message"></p>
           </section>
-        </div>
-
-        <!-- Status log ("Bot started" message): one setting for every bot of this server -->
-        <div class="tab-stack" id="tab-log" hidden>
-          <div class="log-layout">
-            <section class="panel">
-              <div class="panel-title">
-                <div>
-                  <p class="eyebrow" data-i18n="log.eyebrow"></p>
-                  <h2 data-i18n="log.title"></h2>
-                  <p class="muted" data-i18n="log.text"></p>
-                </div>
-                <span class="tag" id="log-state"></span>
-              </div>
-              <div class="notice notice-error" id="log-message" role="alert" hidden></div>
-              <div class="notice notice-warn" id="log-mixed" hidden data-i18n="log.mixedHint"></div>
-              <div class="log-form">
-                <label class="field"><span data-i18n="log.channel"></span><select id="log-channel" disabled></select></label>
-                <p class="log-warning" id="log-channel-warning" hidden></p>
-                <label class="field"><span data-i18n="log.roles"></span><select id="log-role-add" disabled></select></label>
-                <div class="chip-list log-role-list" id="log-role-list"></div>
-                <p class="log-hint" id="log-no-roles" data-i18n="log.noRoles"></p>
-                <p class="log-warning" id="log-role-warning" hidden></p>
-                <p class="log-hint" data-i18n="log.rolesHint"></p>
-              </div>
-              <div class="apply-row">
-                <div>
-                  <strong id="log-summary"></strong>
-                  <p class="form-message" id="log-form-message"></p>
-                </div>
-                <div class="panel-actions">
-                  <button class="button button-ghost" type="button" id="log-disable" data-i18n="log.disable"></button>
-                  <button class="button button-secondary" type="button" id="log-test" data-i18n="log.test"></button>
-                  <button class="button button-primary" type="button" id="log-save" data-i18n="log.save"></button>
-                </div>
-              </div>
-              <div class="table-list log-results" id="log-results"></div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <div>
-                  <p class="eyebrow" data-i18n="log.previewEyebrow"></p>
-                  <h2 data-i18n="log.previewTitle"></h2>
-                  <p class="muted" data-i18n="log.previewText"></p>
-                </div>
-              </div>
-              <div class="discord-preview" id="log-preview"></div>
-            </section>
-          </div>
         </div>
       </div>
     </main>
