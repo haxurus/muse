@@ -128,7 +128,7 @@ sudoedit /srv/docker/muse/secrets/spotify_client_secret
 
 Spotify is optional. If disabled, keep both Spotify files empty.
 
-A server that sets a bot status channel in the dashboard "Log" tab needs every Muse bot in that server to have the **View Channel**, **Send Messages** and **Embed Links** permissions in the chosen channel; mentioned roles must be mentionable, or the bots need "Mention @everyone, @here and All Roles". The setting is stored per server in each worker's SQLite database (`data/bot-0N/db.sqlite`), covered by the usual worker database backups.
+If you set a bot status channel in the super console, every bot must be in that channel's server with the **View Channel**, **Send Messages** and **Embed Links** permissions in that channel; mentioned roles must be mentionable, or the bots need "Mention @everyone, @here and All Roles" (the setting is stored in `data/orchestrator/platform-settings.json`, covered by the orchestrator state backups).
 
 ### YouTube PO tokens (automatic)
 

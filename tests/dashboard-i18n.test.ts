@@ -426,58 +426,37 @@ describe('dashboard client', () => {
   });
 });
 
-describe('status log tab copy', () => {
-  it('has the guild "Log" tab in both languages, with every status error code', async () => {
+describe('status channel copy', () => {
+  it('has the status channel card in both languages, with every worker error code', async () => {
     const italian = await readDictionary('it');
     const english = await readDictionary('en');
-    const logKeys = (dictionary: unknown) => keyPaths(leaf(dictionary, 'log')).sort();
-    expect(logKeys(english)).toEqual(logKeys(italian));
+    const statusKeys = (dictionary: unknown) => keyPaths(leaf(dictionary, 'super.statusChannel')).sort();
+    expect(statusKeys(english)).toEqual(statusKeys(italian));
 
-    expect(leaf(italian, 'guild.tabs.log')).toBe('Canale di log');
-    expect(leaf(english, 'guild.tabs.log')).toBe('Status log');
-    expect(leaf(italian, 'log.eyebrow')).toBe('DESTINAZIONE');
-    expect(leaf(english, 'log.eyebrow')).toBe('DESTINATION');
-    expect(leaf(italian, 'log.test')).toBe('Invia messaggio di prova');
-    expect(leaf(italian, 'log.disable')).toBe('Disattiva');
-    expect(leaf(italian, 'log.mixed')).toBe('Valori diversi tra i bot');
-    expect(leaf(italian, 'log.roleNotMentionable')).toContain('il ping non arriverà se il ruolo non è menzionabile');
-    expect(leaf(english, 'log.roleNotMentionable')).toContain('Mention @everyone, @here and All Roles');
+    expect(leaf(italian, 'super.statusChannel.kicker')).toBe('STATO');
+    expect(leaf(english, 'super.statusChannel.kicker')).toBe('STATUS');
+    expect(leaf(italian, 'super.statusChannel.title')).toBe('Canale di log dei bot');
+    expect(leaf(english, 'super.statusChannel.title')).toBe('Bot status channel');
     for (const dictionary of [italian, english]) {
-      for (const code of [
-        'NOT_CONFIGURED',
-        'NOT_READY',
-        'CHANNEL_NOT_FOUND',
-        'INVALID_CHANNEL',
-        'MISSING_PERMISSIONS',
-        'DISCORD_ERROR',
-        'UNREACHABLE',
-        'INVALID_STATUS_CHANNEL',
-        'INVALID_STATUS_ROLES',
-      ]) {
-        expect(typeof leaf(dictionary, `log.errors.${code}`), code).toBe('string');
+      for (const code of ['CHANNEL_NOT_FOUND', 'MISSING_PERMISSIONS', 'INVALID_CHANNEL', 'NOT_READY', 'UNREACHABLE', 'DISCORD_ERROR']) {
+        expect(typeof leaf(dictionary, `super.statusChannel.errors.${code}`), code).toBe('string');
       }
-
-      // The platform-wide super console card is gone.
-      expect(leaf(dictionary, 'super.statusChannel')).toBeUndefined();
     }
 
+    expect(leaf(english, 'super.statusChannel.hint')).toContain('Copy Channel ID');
+    expect(leaf(english, 'super.statusChannel.hint')).toContain('Embed Links');
+    expect(leaf(italian, 'super.statusChannel.hint')).toContain('Modalità sviluppatore');
+    expect(leaf(english, 'super.statusChannel.rolesHint')).toContain('Copy Role ID');
+    expect(leaf(english, 'super.statusChannel.rolesHint')).toContain('Mention @everyone, @here and All Roles');
+    expect(leaf(italian, 'super.statusChannel.rolesHint')).toContain('Copia ID ruolo');
+
     const markup = await readFile(new URL('../dashboard/index.html', import.meta.url), 'utf8');
-    expect(markup).toContain('data-tab="log"');
-    for (const id of ['tab-log', 'log-channel', 'log-role-add', 'log-role-list', 'log-save', 'log-disable', 'log-test', 'log-results', 'log-preview']) {
+    for (const id of ['status-channel-form', 'status-channel-disable', 'status-channel-test', 'status-channel-current', 'status-channel-results', 'status-role-form', 'status-role-list']) {
       expect(markup).toContain(`id="${id}"`);
     }
 
-    for (const id of ['status-channel-card', 'status-channel-form', 'status-role-form']) {
-      expect(markup).not.toContain(`id="${id}"`);
-    }
-
     const client = await readFile(new URL('../dashboard/dashboard.js', import.meta.url), 'utf8');
-    expect(client).toContain('/meta`');
-    expect(client).toContain('/status-channel/test`');
-    expect(client).not.toContain('/api/super/status-channel');
-    // The status fields live only in the Log tab, never in the generic settings form.
-    const settingsList = client.slice(client.indexOf('const SETTINGS = ['), client.indexOf('];', client.indexOf('const SETTINGS = [')));
-    expect(settingsList).not.toContain('statusChannelId');
-    expect(settingsList).not.toContain('statusMentionRoleIds');
+    expect(client).toContain('\'/api/super/status-channel\'');
+    expect(client).toContain('\'/api/super/status-channel/test\'');
   });
 });

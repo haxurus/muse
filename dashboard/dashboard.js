@@ -439,11 +439,8 @@ const setTab = tab => {
   $('tab-overview').hidden = tab !== 'overview';
   $('tab-settings').hidden = tab !== 'settings';
   $('tab-groups').hidden = tab !== 'groups';
-  $('tab-log').hidden = tab !== 'log';
-  // The Log tab always applies to every bot of the server, so the bot selection is hidden there too.
-  $('selection-panel').hidden = tab === 'overview' || tab === 'log';
+  $('selection-panel').hidden = tab === 'overview';
   $('workspace-kicker').textContent = t(`guild.tabs.${tab}`).toUpperCase();
-  if (tab === 'log') void loadMeta();
 };
 
 const renderSidebar = guild => {
@@ -876,370 +873,6 @@ const saveGroup = async () => {
   }
 };
 
-/* Status log: the "Bot avviato" message, one setting for every bot of the server */
-
-const MAX_STATUS_ROLES = 10;
-
-let guildMeta = null;
-let metaGuildId = null;
-let metaRequest = 0;
-let logDraft = {channelId: '', roleIds: []};
-let logDirty = false;
-let logBusy = false;
-
-const workerSettings = worker => ((worker && worker.value) || {}).settings || {};
-
-const savedChannelOf = worker => {
-  const value = workerSettings(worker).statusChannelId;
-  return typeof value === 'string' && SNOWFLAKE.test(value) ? value : null;
-};
-
-const savedRolesOf = worker => list(workerSettings(worker).statusMentionRoleIds)
-  .filter(roleId => typeof roleId === 'string' && SNOWFLAKE.test(roleId));
-
-/** The status setting shared by the online bots; `mixed*` when they disagree ("valori diversi tra i bot"). */
-const savedStatus = () => {
-  const workers = onlineWorkers();
-  const channels = workers.map(savedChannelOf);
-  const roleKeys = workers.map(worker => [...savedRolesOf(worker)].sort().join(','));
-  const mixedChannel = new Set(channels).size > 1;
-  const mixedRoles = new Set(roleKeys).size > 1;
-  return {
-    workers,
-    mixedChannel,
-    mixedRoles,
-    channelId: mixedChannel || workers.length === 0 ? null : channels[0],
-    roleIds: mixedRoles || workers.length === 0 ? [] : savedRolesOf(workers[0]),
-    anyConfigured: channels.some(channelId => channelId !== null),
-  };
-};
-
-const metaChannels = () => (guildMeta ? list(guildMeta.channels) : []);
-const metaRoles = () => (guildMeta ? list(guildMeta.roles) : []);
-const findChannel = channelId => metaChannels().find(channel => channel.id === channelId);
-const findRole = roleId => metaRoles().find(role => role.id === roleId);
-
-/** Online bots that reported they cannot post in the channel (bots that did not answer are unknown, not listed). */
-const botsLackingPost = channel => {
-  if (!guildMeta || !channel) return [];
-  const asked = new Set(list(guildMeta.workerIds));
-  const failed = new Set(list(guildMeta.failed).map(entry => entry && entry.workerId));
-  const postable = new Set(list(channel.postableBy));
-  return onlineWorkers()
-    .filter(worker => asked.has(worker.workerId) && !failed.has(worker.workerId) && !postable.has(worker.workerId))
-    .map(worker => workerName(worker));
-};
-
-const roleColor = role => {
-  const color = role ? Number(role.color) : 0;
-  return Number.isInteger(color) && color > 0 && color <= 0xffffff ? `#${color.toString(16).padStart(6, '0')}` : '';
-};
-
-const statusErrorLabel = code => {
-  const label = lookup(`log.errors.${code}`);
-  return typeof label === 'string' ? label : String(code || '—');
-};
-
-const channelLabel = channel => `#${channel.name}${channel.type === 'announcement' ? ` (${t('log.announcement')})` : ''}`;
-
-const renderLogChannels = saved => {
-  const select = $('log-channel');
-  const placeholder = el('option', '', saved.mixedChannel && !logDirty ? t('log.mixedChoose') : t('log.chooseChannel'));
-  placeholder.value = '';
-  const nodes = [placeholder];
-
-  if (logDraft.channelId && !findChannel(logDraft.channelId)) {
-    const missing = el('option', '', t('log.unknownChannel', {id: logDraft.channelId}));
-    missing.value = logDraft.channelId;
-    nodes.push(missing);
-  }
-
-  // The orchestrator sends the channels in Discord sidebar order: group them by category.
-  const groups = new Map();
-  for (const channel of metaChannels()) {
-    const parent = typeof channel.parentName === 'string' ? channel.parentName : '';
-    if (!groups.has(parent)) groups.set(parent, []);
-    groups.get(parent).push(channel);
-  }
-
-  for (const [parent, channels] of groups) {
-    const options = channels.map(channel => {
-      const lacking = botsLackingPost(channel);
-      const label = lacking.length > 0
-        ? `${channelLabel(channel)} · ⚠ ${t('log.cannotPostShort', {names: lacking.join(', ')})}`
-        : channelLabel(channel);
-      const option = el('option', '', label);
-      option.value = channel.id;
-      return option;
-    });
-
-    if (parent === '') {
-      nodes.push(...options);
-    } else {
-      const group = document.createElement('optgroup');
-      group.label = parent;
-      group.append(...options);
-      nodes.push(group);
-    }
-  }
-
-  select.replaceChildren(...nodes);
-  select.value = logDraft.channelId || '';
-  select.disabled = logBusy || !guildMeta || saved.workers.length === 0;
-
-  const lacking = botsLackingPost(findChannel(logDraft.channelId));
-  const warning = $('log-channel-warning');
-  warning.textContent = lacking.length > 0 ? t('log.cannotPost', {names: lacking.join(', ')}) : '';
-  warning.hidden = lacking.length === 0;
-};
-
-const renderLogRoles = saved => {
-  const full = logDraft.roleIds.length >= MAX_STATUS_ROLES;
-  const select = $('log-role-add');
-  const first = el('option', '', full ? t('log.maxRoles') : t('log.addRole'));
-  first.value = '';
-  const options = metaRoles().map(role => {
-    const option = el('option', '', `@${role.name}`);
-    option.value = role.id;
-    option.disabled = logDraft.roleIds.includes(role.id);
-    return option;
-  });
-  select.replaceChildren(first, ...options);
-  select.value = '';
-  select.disabled = logBusy || !guildMeta || full || saved.workers.length === 0;
-
-  $('log-role-list').replaceChildren(...logDraft.roleIds.map(roleId => {
-    const role = findRole(roleId);
-    const name = role ? `@${role.name}` : `@${roleId} · ${t('log.unknownRole')}`;
-    const chip = el('span', 'chip log-role-chip');
-    const dot = el('span', 'role-dot');
-    const color = roleColor(role);
-    // CSSOM property, not a style attribute: allowed by the style-src 'self' policy.
-    if (color) dot.style.backgroundColor = color;
-    const remove = el('button', '', '×');
-    remove.type = 'button';
-    remove.disabled = logBusy;
-    remove.setAttribute('aria-label', t('log.removeRole', {name}));
-    remove.addEventListener('click', () => {
-      logDraft = {...logDraft, roleIds: logDraft.roleIds.filter(id => id !== roleId)};
-      logDirty = true;
-      renderLog();
-    });
-    chip.append(dot, el('span', '', name), remove);
-    return chip;
-  }));
-  $('log-no-roles').hidden = logDraft.roleIds.length > 0;
-
-  const silent = logDraft.roleIds.map(findRole).filter(role => role && !role.mentionable).map(role => `@${role.name}`);
-  const warning = $('log-role-warning');
-  warning.textContent = silent.length > 0 ? t('log.roleNotMentionable', {names: silent.join(', ')}) : '';
-  warning.hidden = silent.length === 0;
-};
-
-/** Static mock of the Discord message (Sentinel embed style); the real one is in the bot language of the server. */
-const renderLogPreview = () => {
-  const first = onlineWorkers()[0];
-  const status = first && first.value && first.value.status ? first.value.status : {};
-  const bot = status.bot || null;
-  const botName = bot ? bot.username : t('log.previewBot');
-  const botId = bot ? bot.id : '000000000000000000';
-  const time = new Intl.DateTimeFormat(INTL_LOCALE, {timeStyle: 'short'}).format(new Date());
-
-  const head = el('div', 'discord-head');
-  head.append(el('strong', '', botName), el('span', 'discord-badge', 'BOT'), el('span', 'discord-time', `${t('log.previewToday')} ${time}`));
-
-  const body = el('div', 'discord-body');
-  body.append(head);
-
-  const mentions = logDraft.roleIds.map(findRole).filter(Boolean);
-  if (mentions.length > 0) {
-    const line = el('div', 'discord-mentions');
-    line.append(...mentions.map(role => el('span', 'discord-mention', `@${role.name}`)));
-    body.append(line);
-  }
-
-  const field = (name, value) => {
-    const node = el('div', 'discord-field');
-    node.append(el('strong', '', name), el('span', '', value));
-    return node;
-  };
-
-  const identityLine = `${botName} · @${botName} · ${botId}`;
-  const embed = el('div', 'discord-embed');
-  embed.append(
-    el('strong', 'discord-embed-title', t('log.previewEmbedTitle')),
-    el('p', '', t('log.previewDescription', {name: botName})),
-    field(t('log.previewAuthor'), identityLine),
-    field(t('log.previewDetails'), `Guild Count: ${list(status.guilds).length || 1}\nBot: ${identityLine}`),
-    el('small', 'discord-footer', `${window.location.hostname} · ${t('log.previewToday')} ${time}`),
-  );
-  body.append(embed);
-
-  const message = el('div', 'discord-message');
-  message.append(picture(bot ? bot.avatarUrl : null, botName, 'avatar-fallback', 'round'), body);
-  $('log-preview').replaceChildren(message);
-};
-
-const renderLog = () => {
-  if (!guildDetails) return;
-  const saved = savedStatus();
-  if (!logDirty) logDraft = {channelId: saved.channelId || '', roleIds: [...saved.roleIds]};
-
-  const online = saved.workers.length;
-  const mixed = saved.mixedChannel || saved.mixedRoles;
-  $('log-summary').textContent = online === 0 ? t('log.noBots') : t('log.summary', {count: online});
-  $('log-mixed').hidden = !mixed;
-
-  const stateTag = $('log-state');
-  if (mixed) {
-    stateTag.className = 'tag tag-warn';
-    stateTag.textContent = t('log.mixed');
-  } else if (saved.channelId) {
-    const channel = findChannel(saved.channelId);
-    stateTag.className = 'tag tag-ok';
-    stateTag.textContent = t('log.stateOn', {channel: channel ? channel.name : saved.channelId});
-  } else {
-    stateTag.className = 'tag';
-    stateTag.textContent = t('log.stateOff');
-  }
-
-  renderLogChannels(saved);
-  renderLogRoles(saved);
-  renderLogPreview();
-  $('log-save').disabled = logBusy || online === 0 || !guildMeta;
-  $('log-disable').disabled = logBusy || online === 0 || !saved.anyConfigured;
-  $('log-test').disabled = logBusy || online === 0 || !saved.anyConfigured;
-};
-
-const setLogBusy = busy => {
-  logBusy = busy;
-  renderLog();
-};
-
-/** Channels and roles of the server for the pickers; loaded when the Log tab opens. */
-const loadMeta = async (force = false) => {
-  const guildId = selectedGuildId;
-  if (!guildId) return;
-  if (!force && metaGuildId === guildId && guildMeta) {
-    renderLog();
-    return;
-  }
-
-  const request = ++metaRequest;
-  showNotice($('log-message'), '');
-  setMessage($('log-form-message'), t('log.loading'));
-  try {
-    const meta = await api(`/api/guilds/${encodeURIComponent(guildId)}/meta`);
-    if (request !== metaRequest || selectedGuildId !== guildId) return;
-    guildMeta = meta && typeof meta === 'object' ? meta : null;
-    metaGuildId = guildId;
-    setMessage($('log-form-message'), '');
-  } catch (error) {
-    if (request !== metaRequest || selectedGuildId !== guildId) return;
-    guildMeta = null;
-    metaGuildId = null;
-    setMessage($('log-form-message'), '');
-    handleFailure(error, message => showNotice($('log-message'), `${t('log.metaFailed')} ${message}`));
-  }
-
-  renderLog();
-};
-
-/** Saves the status settings on every online bot of the server (same plumbing as the Settings tab). */
-const applyStatusSettings = async (settings, successMessage) => {
-  const guildId = selectedGuildId;
-  const workerIds = onlineWorkers().map(worker => worker.workerId);
-  if (!guildId || workerIds.length === 0) return;
-  setMessage($('log-form-message'), '');
-  showNotice($('log-message'), '');
-  setLogBusy(true);
-  try {
-    const result = await api(`/api/guilds/${encodeURIComponent(guildId)}`, mutation('PATCH', {workerIds, settings}));
-    const failed = list(result.failed).filter(entry => entry && typeof entry.workerId === 'string');
-    logDirty = false;
-    $('log-results').replaceChildren();
-    await loadGuild(guildId, {keepSelection: [...selectedWorkers], keepTab: true});
-    if (selectedGuildId !== guildId) return;
-    if (failed.length === 0) {
-      toast(successMessage);
-    } else {
-      const names = failed.map(entry => `${workerDisplayName(entry.workerId)} (${statusErrorLabel(entry.code || entry.error)})`);
-      setMessage($('log-form-message'), t('log.partial', {names: names.join(', ')}), 'error');
-    }
-  } catch (error) {
-    handleFailure(error, message => setMessage($('log-form-message'), message, 'error'));
-  } finally {
-    setLogBusy(false);
-  }
-};
-
-const saveLog = async () => {
-  if (!logDraft.channelId) {
-    setMessage($('log-form-message'), t('log.channelRequired'), 'error');
-    $('log-channel').focus();
-    return;
-  }
-
-  await applyStatusSettings({statusChannelId: logDraft.channelId, statusMentionRoleIds: [...logDraft.roleIds]}, t('log.saved'));
-};
-
-const disableLog = async () => {
-  if (!window.confirm(t('log.confirmDisable'))) return;
-  await applyStatusSettings({statusChannelId: null}, t('log.disabled'));
-};
-
-const renderLogResults = results => {
-  $('log-results').replaceChildren(...results.map(result => {
-    const row = el('div', 'status-result');
-    const copy = el('div');
-    copy.append(el('strong', '', workerDisplayName(result.workerId)), el('span', 'mono', result.workerId));
-    row.append(copy, result.ok === true ? tag(t('log.posted'), 'ok') : tag(statusErrorLabel(result.error), 'danger'));
-    return row;
-  }));
-};
-
-/** Every online bot posts the test message with its saved setting; one result row per bot. */
-const testLog = async () => {
-  const guildId = selectedGuildId;
-  const workerIds = onlineWorkers().map(worker => worker.workerId);
-  if (!guildId || workerIds.length === 0) return;
-  showNotice($('log-message'), '');
-  setMessage($('log-form-message'), logDirty ? t('log.unsaved') : '');
-  toast(t('log.testing'));
-  setLogBusy(true);
-  try {
-    const result = await api(`/api/guilds/${encodeURIComponent(guildId)}/status-channel/test`, mutation('POST', {workerIds}));
-    if (selectedGuildId !== guildId) return;
-    const results = list(result.results).filter(item => item && typeof item.workerId === 'string');
-    renderLogResults(results);
-    const ok = results.filter(item => item.ok === true).length;
-    const failed = results.length - ok;
-    if (failed > 0) {
-      setMessage($('log-form-message'), t('log.testPartial', {ok, failed}), 'error');
-    } else {
-      toast(t('log.testOk', {count: ok}));
-    }
-  } catch (error) {
-    handleFailure(error, message => setMessage($('log-form-message'), message, 'error'));
-  } finally {
-    setLogBusy(false);
-  }
-};
-
-const resetLog = () => {
-  guildMeta = null;
-  metaGuildId = null;
-  metaRequest += 1;
-  logDraft = {channelId: '', roleIds: []};
-  logDirty = false;
-  logBusy = false;
-  $('log-results').replaceChildren();
-  $('log-role-list').replaceChildren();
-  $('log-preview').replaceChildren();
-  setMessage($('log-form-message'), '');
-  showNotice($('log-message'), '');
-};
-
 /* Loading a guild */
 
 /**
@@ -1263,7 +896,6 @@ const loadGuild = async (guildId, options = {}) => {
   renderOverview();
   renderWorkerSelection();
   renderGroups();
-  renderLog();
   setWorkerSelection(options.keepSelection || []);
   if (!options.keepTab) setTab('overview');
 
@@ -1287,7 +919,6 @@ const openGuild = async guildId => {
   $('overview-bots').replaceChildren();
   $('worker-grid').replaceChildren();
   $('group-list').replaceChildren();
-  resetLog();
   selectedWorkers.clear();
   setTab('overview');
 
@@ -1469,6 +1100,7 @@ const renderOverviewData = () => {
   $('super-blocks-empty').hidden = blocks.length > 0;
   $('super-audit').replaceChildren(...audit.map(renderAudit));
   $('super-audit-empty').hidden = audit.length > 0;
+  renderStatusChannel();
 };
 
 /** Runs a super-admin mutation, then reloads the overview. Returns the response body or null. */
@@ -1481,6 +1113,178 @@ const superAction = async (url, method, body) => {
   } catch (error) {
     handleFailure(error, message => showNotice($('super-message'), message));
     return null;
+  }
+};
+
+/* ---------- Bot status channel ---------- */
+
+const currentStatusChannelId = () => {
+  const setting = overview && overview.statusChannel;
+  return setting && typeof setting.statusChannelId === 'string' ? setting.statusChannelId : null;
+};
+
+const MAX_MENTION_ROLES = 10;
+
+/** Roles being edited; saved together with the channel. Reset from the overview unless edited. */
+let statusRoleDraft = [];
+let statusRolesDirty = false;
+
+const savedMentionRoleIds = () => {
+  const setting = overview && overview.statusChannel;
+  return setting ? list(setting.mentionRoleIds).filter(id => typeof id === 'string') : [];
+};
+
+const renderStatusRoles = () => {
+  $('status-role-list').replaceChildren(...statusRoleDraft.map(roleId => {
+    const chip = el('span', 'chip status-role-chip');
+    const remove = el('button', '', '×');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', t('super.statusChannel.removeRole', {id: roleId}));
+    remove.addEventListener('click', () => {
+      statusRoleDraft = statusRoleDraft.filter(id => id !== roleId);
+      statusRolesDirty = true;
+      renderStatusRoles();
+    });
+    chip.append(el('span', 'mono', `@${roleId}`), remove);
+    return chip;
+  }));
+};
+
+const addStatusRole = () => {
+  const input = $('status-role-form').elements.roleId;
+  const roleId = input.value.trim();
+  if (!SNOWFLAKE.test(roleId)) {
+    showNotice($('super-message'), t('super.statusChannel.invalidRoleId'));
+    input.focus();
+    return;
+  }
+
+  if (statusRoleDraft.includes(roleId)) {
+    showNotice($('super-message'), t('super.statusChannel.roleExists'));
+    return;
+  }
+
+  if (statusRoleDraft.length >= MAX_MENTION_ROLES) {
+    showNotice($('super-message'), t('super.statusChannel.tooManyRoles'));
+    return;
+  }
+
+  showNotice($('super-message'), '');
+  statusRoleDraft = [...statusRoleDraft, roleId];
+  statusRolesDirty = true;
+  input.value = '';
+  renderStatusRoles();
+};
+
+const setStatusChannelBusy = busy => {
+  const channelId = currentStatusChannelId();
+  $('status-channel-form').querySelector('button[type="submit"]').disabled = busy;
+  $('status-channel-disable').disabled = busy || channelId === null;
+  $('status-channel-test').disabled = busy || channelId === null;
+};
+
+const renderStatusChannel = () => {
+  const setting = (overview && overview.statusChannel) || {};
+  const channelId = currentStatusChannelId();
+  const input = $('status-channel-form').elements.channelId;
+  // Do not overwrite what the super admin is typing when the overview reloads.
+  if (document.activeElement !== input) input.value = channelId || '';
+  setStatusChannelBusy(false);
+  if (!statusRolesDirty) statusRoleDraft = savedMentionRoleIds();
+  renderStatusRoles();
+
+  const current = $('status-channel-current');
+  if (channelId === null) {
+    current.replaceChildren(el('span', '', t('super.statusChannel.none')));
+    return;
+  }
+
+  const parts = [
+    el('strong', '', t('super.statusChannel.current')),
+    tag(channelId, 'info'),
+    el('span', '', t('super.statusChannel.roles', {count: savedMentionRoleIds().length})),
+  ];
+  const actor = setting.updatedBy;
+  if (actor && typeof setting.updatedAt === 'string') {
+    parts.push(el('span', '', t('super.statusChannel.updated', {
+      date: formatDate(setting.updatedAt),
+      name: actor.username || actor.userId || '—',
+    })));
+  }
+
+  current.replaceChildren(...parts);
+};
+
+const statusErrorLabel = code => {
+  const label = lookup(`super.statusChannel.errors.${code}`);
+  return typeof label === 'string' ? label : String(code || '—');
+};
+
+const renderStatusResults = results => {
+  const names = overview ? botNameById() : new Map();
+  $('status-channel-results').replaceChildren(...results.map(result => {
+    const row = el('div', 'status-result');
+    const copy = el('div');
+    copy.append(el('strong', '', names.get(result.workerId) || result.workerId), el('span', 'mono', result.workerId));
+    row.append(copy, result.ok ? tag(t('super.statusChannel.posted'), 'ok') : tag(statusErrorLabel(result.error), 'danger'));
+    return row;
+  }));
+};
+
+const runStatusChannelAction = async action => {
+  setStatusChannelBusy(true);
+  try {
+    return await action();
+  } finally {
+    setStatusChannelBusy(false);
+  }
+};
+
+const saveStatusChannel = async () => {
+  const input = $('status-channel-form').elements.channelId;
+  const channelId = input.value.trim();
+  if (!SNOWFLAKE.test(channelId)) {
+    showNotice($('super-message'), t('super.statusChannel.invalidId'));
+    input.focus();
+    return;
+  }
+
+  const mentionRoleIds = [...statusRoleDraft];
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {channelId, mentionRoleIds}));
+  if (result) {
+    statusRolesDirty = false;
+    renderStatusChannel();
+    $('status-channel-results').replaceChildren();
+    toast(t('super.statusChannel.saved'));
+  }
+};
+
+const disableStatusChannel = async () => {
+  if (currentStatusChannelId() === null || !window.confirm(t('super.statusChannel.confirmDisable'))) return;
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {channelId: null}));
+  if (result) {
+    $('status-channel-results').replaceChildren();
+    toast(t('super.statusChannel.disabled'));
+  }
+};
+
+const testStatusChannel = async () => {
+  if (currentStatusChannelId() === null) {
+    showNotice($('super-message'), t('super.statusChannel.notSet'));
+    return;
+  }
+
+  toast(t('super.statusChannel.testing'));
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel/test', 'POST'));
+  if (!result) return;
+  const results = list(result.results).filter(item => item && typeof item.workerId === 'string');
+  renderStatusResults(results);
+  const ok = results.filter(item => item.ok === true).length;
+  const failed = results.length - ok;
+  if (failed > 0) {
+    showNotice($('super-message'), t('super.statusChannel.testPartial', {ok, failed}));
+  } else {
+    toast(t('super.statusChannel.testOk', {count: ok}));
   }
 };
 
@@ -1625,36 +1429,26 @@ const wire = () => {
     event.preventDefault();
   });
 
-  $('log-channel').addEventListener('change', event => {
-    logDraft = {...logDraft, channelId: event.target.value};
-    logDirty = true;
-    renderLog();
-  });
-
-  $('log-role-add').addEventListener('change', event => {
-    const roleId = event.target.value;
-    if (roleId && !logDraft.roleIds.includes(roleId) && logDraft.roleIds.length < MAX_STATUS_ROLES) {
-      logDraft = {...logDraft, roleIds: [...logDraft.roleIds, roleId]};
-      logDirty = true;
-    }
-
-    renderLog();
-  });
-
-  $('log-save').addEventListener('click', () => {
-    void saveLog();
-  });
-
-  $('log-disable').addEventListener('click', () => {
-    void disableLog();
-  });
-
-  $('log-test').addEventListener('click', () => {
-    void testLog();
-  });
-
   $('super-refresh').addEventListener('click', () => {
     void loadOverview();
+  });
+
+  $('status-channel-form').addEventListener('submit', event => {
+    event.preventDefault();
+    void saveStatusChannel();
+  });
+
+  $('status-role-form').addEventListener('submit', event => {
+    event.preventDefault();
+    addStatusRole();
+  });
+
+  $('status-channel-disable').addEventListener('click', () => {
+    void disableStatusChannel();
+  });
+
+  $('status-channel-test').addEventListener('click', () => {
+    void testStatusChannel();
   });
 
   for (const form of [$('block-user-form'), $('block-guild-form')]) {

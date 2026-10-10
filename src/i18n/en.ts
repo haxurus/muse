@@ -207,7 +207,7 @@ export const EN_MESSAGES = {
   playbackNoSongToSkip: 'There is no song to skip to.',
   playbackQueueEmpty: 'The queue is empty.',
 
-  // Bot status channel (posted by each bot in the channel chosen per server; see docs/DASHBOARD.md)
+  // Bot status channel (posted by each bot; see docs/SUPER_CONSOLE.md)
   statusOnlineTitle: 'Bot started',
   statusOnlineDescription: 'Bot connected as {tag}.',
   statusTestTitle: 'Test message',

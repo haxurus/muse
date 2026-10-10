@@ -1,10 +1,14 @@
 import {ChannelType, EmbedBuilder, PermissionFlagsBits, type Channel, type Client} from 'discord.js';
-import type {StatusAnnounceError, StatusAnnounceResult} from '../control/types.js';
+import {HttpError} from '../control/http.js';
+import {parseMentionRoleIds} from '../control/mention-roles.js';
+import {isSnowflake} from '../control/snowflake.js';
+import type {StatusAnnounceError, StatusAnnounceRequest, StatusAnnounceResult} from '../control/types.js';
 import {t, type Locale} from '../i18n/index.js';
+import {getGuildLocale} from '../i18n/guild-locale.js';
 
 /** Left bar of the "Bot started" embed (Sentinel green). */
 export const STATUS_ONLINE_COLOR = 0x3ccf8e;
-/** Left bar of the dashboard test embed (Muse violet, the dashboard accent). */
+/** Left bar of the super console test embed (Muse violet, the dashboard accent). */
 export const STATUS_TEST_COLOR = 0xa78bfa;
 /** Footer when MUSE_DASHBOARD_PUBLIC_URL is missing or invalid. */
 export const DEFAULT_STATUS_FOOTER = 'Muse';
@@ -21,18 +25,10 @@ const UNKNOWN_CHANNEL = 10_003;
 const MISSING_ACCESS = 50_001;
 const MISSING_PERMISSIONS = 50_013;
 
-/** One status message of one bot in one guild. */
-export type StatusMessageInput = {
-  /** The guild whose setting is being used: the channel must belong to it. */
-  guildId: string;
-  channelId: string;
-  /** Dashboard test message instead of the startup "Bot started" message. */
-  test: boolean;
-  /** Roles pinged by the message (0-10). */
-  mentionRoleIds: readonly string[];
-  /** The guild's bot language. */
-  locale: Locale;
-};
+/** Same payload as the worker control route; `workerId` is this bot's worker id. */
+export type StatusMessageInput = StatusAnnounceRequest & {workerId: string};
+
+export type StatusLocaleResolver = (guildId: string) => Promise<Locale>;
 
 /** Hostname of the public dashboard URL (workers get the whole .env), or "Muse". */
 export const statusFooter = (value: string | undefined): string => {
@@ -89,10 +85,14 @@ const failure = (error: StatusAnnounceError): StatusAnnounceResult => ({ok: fals
 
 /**
  * Post the status embed in `channelId`, pinging exactly `mentionRoleIds` (never users, @everyone or @here).
- * The channel must be a standard text or announcement channel of `guildId`, with View Channel,
- * Send Messages and Embed Links for this bot. Never throws: failures are returned as a short error code.
+ * The channel must be a standard text or announcement channel of a guild this bot is in, with View Channel,
+ * Send Messages and Embed Links. Never throws: failures are returned as a short error code.
  */
-export const postStatusMessage = async (client: Client, input: StatusMessageInput): Promise<StatusAnnounceResult> => {
+export const postStatusMessage = async (
+  client: Client,
+  input: StatusMessageInput,
+  resolveLocale: StatusLocaleResolver = getGuildLocale,
+): Promise<StatusAnnounceResult> => {
   if (!client.isReady()) {
     return failure('NOT_READY');
   }
@@ -112,11 +112,6 @@ export const postStatusMessage = async (client: Client, input: StatusMessageInpu
     return failure('INVALID_CHANNEL');
   }
 
-  // A per-guild setting never posts in another server, even if the stored id was tampered with.
-  if (channel.guild.id !== input.guildId) {
-    return failure('CHANNEL_NOT_FOUND');
-  }
-
   const {me} = channel.guild.members;
   if (!me) {
     return failure('NOT_READY');
@@ -131,7 +126,7 @@ export const postStatusMessage = async (client: Client, input: StatusMessageInpu
     bot: {id: user.id, username: user.username, tag: user.tag},
     guildCount: client.guilds.cache.size,
     test: input.test,
-    locale: input.locale,
+    locale: await resolveLocale(channel.guild.id),
     now: new Date(),
     footer: statusFooter(process.env.MUSE_DASHBOARD_PUBLIC_URL),
   });
@@ -149,4 +144,23 @@ export const postStatusMessage = async (client: Client, input: StatusMessageInpu
   }
 
   return {ok: true};
+};
+
+/** Body of the worker control route `POST /v1/status-channel/announce`. */
+export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceRequest => {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new HttpError(400, 'request body must be an object', 'INVALID_BODY');
+  }
+
+  const {channelId, test, mentionRoleIds} = input as Record<string, unknown>;
+  if (!isSnowflake(channelId)) {
+    throw new HttpError(400, 'channelId must be a Discord channel id', 'INVALID_CHANNEL_ID');
+  }
+
+  if (typeof test !== 'boolean') {
+    throw new HttpError(400, 'test must be a boolean', 'INVALID_BODY');
+  }
+
+  // Optional for callers that predate role mentions.
+  return {channelId, test, mentionRoleIds: mentionRoleIds === undefined ? [] : parseMentionRoleIds(mentionRoleIds)};
 };

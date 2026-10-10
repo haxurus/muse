@@ -13,6 +13,7 @@ const GUILD_ID = '111111111111111111';
 const SUPER_ADMIN_ID = '333333333333333333';
 const BOT_ID = '444444444444444444';
 const BLOCKED_USER_ID = '555555555555555555';
+const STATUS_CHANNEL_ID = '666666666666666666';
 
 const makeConfig = (superAdminUserId: string | null): DashboardConfig => ({
   host: '127.0.0.1',
@@ -57,6 +58,9 @@ const fakeOrchestrator = () => ({
   superLeaveGuild: vi.fn(async () => ({left: ['muse-01'], failed: []})),
   superPutBlock: vi.fn(async () => ({block: {kind: 'USER', subjectId: BLOCKED_USER_ID}, pushed: ['muse-01'], failed: []})),
   superDeleteBlock: vi.fn(async () => ({ok: true})),
+  superStatusChannel: vi.fn(async () => ({statusChannelId: null, updatedAt: null, updatedBy: null})),
+  superSetStatusChannel: vi.fn(async (body: {channelId: string | null; mentionRoleIds?: string[]}) => ({statusChannelId: body.channelId, mentionRoleIds: body.mentionRoleIds ?? [], updatedAt: '2026-10-06T10:00:00.000Z', updatedBy: {userId: SUPER_ADMIN_ID, username: 'haxurus'}})),
+  superTestStatusChannel: vi.fn(async () => ({statusChannelId: STATUS_CHANNEL_ID, results: [{workerId: 'muse-01', ok: true}]})),
 });
 
 type HttpResult = {
@@ -448,24 +452,139 @@ describe('super console API', () => {
   });
 });
 
-describe('platform-wide status channel removal', () => {
-  it('no longer serves the super console status channel routes', async () => {
+describe('super console status channel API', () => {
+  const actor = {userId: SUPER_ADMIN_ID, username: 'haxurus'};
+
+  it('requires a session and the super admin on every route', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const dashboard = await startDashboard();
     const routes: Array<[string, string, string | undefined]> = [
       ['GET', '/api/super/status-channel', undefined],
-      ['PUT', '/api/super/status-channel', JSON.stringify({channelId: '666666666666666666'})],
+      ['PUT', '/api/super/status-channel', JSON.stringify({channelId: STATUS_CHANNEL_ID})],
       ['POST', '/api/super/status-channel/test', '{}'],
     ];
     for (const [method, path, body] of routes) {
-      const headers = method === 'GET' ? {cookie: dashboard.superHeaders().cookie} : dashboard.superHeaders();
-      const result = await call(dashboard.port, method, path, headers, body);
-      expect(result.status, `${method} ${path}`).toBe(404);
-      expect(JSON.parse(result.text)).toEqual({error: 'not found'});
+      const anonymous = await call(dashboard.port, method, path, {'content-type': 'application/json'}, body);
+      expect(anonymous.status, `${method} ${path}`).toBe(401);
+      expect(JSON.parse(anonymous.text)).toMatchObject({code: 'UNAUTHORIZED'});
+
+      const regular = await call(dashboard.port, method, path, dashboard.userHeaders(), body);
+      expect(regular.status, `${method} ${path}`).toBe(403);
+      expect(JSON.parse(regular.text)).toMatchObject({code: 'SUPER_ADMIN_REQUIRED'});
     }
 
-    // Nothing was proxied and no mutation was audited.
-    expect(vi.mocked(console.log).mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'))).toEqual([]);
+    expect(dashboard.orchestrator.superStatusChannel).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superSetStatusChannel).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superTestStatusChannel).not.toHaveBeenCalled();
+  });
+
+  it('proxies the current setting with the actor headers', async () => {
+    const dashboard = await startDashboard();
+    const result = await call(dashboard.port, 'GET', '/api/super/status-channel', {cookie: dashboard.superHeaders().cookie});
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.text)).toEqual({statusChannelId: null, updatedAt: null, updatedBy: null});
+    expect(dashboard.orchestrator.superStatusChannel).toHaveBeenCalledWith(actor);
+  });
+
+  it('rejects mutations without CSRF token, with a foreign Origin or over budget', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+    const missingCsrf = dashboard.superHeaders();
+    delete (missingCsrf as Record<string, string>)['x-csrf-token'];
+    const body = JSON.stringify({channelId: STATUS_CHANNEL_ID});
+
+    const noToken = await call(dashboard.port, 'PUT', '/api/super/status-channel', missingCsrf, body);
+    expect(noToken.status).toBe(403);
+    expect(JSON.parse(noToken.text)).toEqual({error: 'invalid CSRF token'});
+
+    const foreign = await call(dashboard.port, 'POST', '/api/super/status-channel/test', dashboard.superHeaders({origin: 'https://evil.example.test'}), '{}');
+    expect(foreign.status).toBe(403);
+    expect(JSON.parse(foreign.text)).toEqual({error: 'invalid request origin'});
+
+    dashboard.superSession.mutationWindowStartedAt = Date.now();
+    dashboard.superSession.mutationCount = 30;
+    expect((await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), body)).status).toBe(429);
+    expect((await call(dashboard.port, 'POST', '/api/super/status-channel/test', dashboard.superHeaders(), '{}')).status).toBe(429);
+
+    expect(dashboard.orchestrator.superSetStatusChannel).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superTestStatusChannel).not.toHaveBeenCalled();
+  });
+
+  it('saves and disables the channel with the actor and writes audit lines', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+
+    const saved = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: STATUS_CHANNEL_ID}));
+    expect(saved.status).toBe(200);
+    expect(JSON.parse(saved.text)).toMatchObject({statusChannelId: STATUS_CHANNEL_ID});
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenCalledWith({channelId: STATUS_CHANNEL_ID}, actor);
+
+    const cleared = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: null}));
+    expect(cleared.status).toBe(200);
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: null}, actor);
+
+    const roleA = '777777777777777771';
+    const roleB = '777777777777777772';
+    const withRoles = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: [roleA, roleB, roleA]}));
+    expect(withRoles.status).toBe(200);
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: STATUS_CHANNEL_ID, mentionRoleIds: [roleA, roleB]}, actor);
+    await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: []}));
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: STATUS_CHANNEL_ID, mentionRoleIds: []}, actor);
+
+    const lines = log.mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'));
+    expect(lines.map(line => JSON.parse(line) as Record<string, unknown>)).toEqual([
+      expect.objectContaining({action: 'super.status_channel.put', userId: SUPER_ADMIN_ID, subjectId: STATUS_CHANNEL_ID, outcome: 'ok'}),
+      expect.objectContaining({action: 'super.status_channel.put', outcome: 'ok'}),
+      expect.objectContaining({action: 'super.status_channel.put', outcome: 'ok'}),
+      expect.objectContaining({action: 'super.status_channel.put', outcome: 'ok'}),
+    ]);
+    expect(lines.join(' ')).not.toContain(dashboard.superSession.csrfToken);
+  });
+
+  it('rejects invalid channel ids before calling the orchestrator', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+    const tooMany = Array.from({length: 11}, (_, index) => `7777777777777777${String(index).padStart(2, '0')}`);
+    for (const body of [
+      '{}',
+      JSON.stringify({channelId: '1234'}),
+      JSON.stringify({channelId: 666_666_666_666_666}),
+      '[]',
+      JSON.stringify({channelId: '../x'}),
+      JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: '777777777777777771'}),
+      JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: ['@everyone']}),
+      JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: tooMany}),
+    ]) {
+      const result = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), body);
+      expect(result.status, body).toBe(400);
+    }
+
+    expect(dashboard.orchestrator.superSetStatusChannel).not.toHaveBeenCalled();
+  });
+
+  it('runs the test through the orchestrator and keeps its 4xx answers', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'POST', '/api/super/status-channel/test', dashboard.superHeaders(), '{}');
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.text)).toEqual({statusChannelId: STATUS_CHANNEL_ID, results: [{workerId: 'muse-01', ok: true}]});
+    expect(dashboard.orchestrator.superTestStatusChannel).toHaveBeenCalledWith(actor);
+
+    dashboard.orchestrator.superTestStatusChannel.mockRejectedValueOnce(orchestratorError(Object.assign(new Error('Response code 400'), {
+      name: 'HTTPError',
+      response: {statusCode: 400, headers: {}, body: JSON.stringify({error: 'no status channel is configured', code: 'STATUS_CHANNEL_NOT_SET'})},
+    })));
+    const notSet = await call(dashboard.port, 'POST', '/api/super/status-channel/test', dashboard.superHeaders(), '{}');
+    expect(notSet.status).toBe(400);
+    expect(JSON.parse(notSet.text)).toEqual({error: 'no status channel is configured'});
+
+    const actions = log.mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'))
+      .map(line => JSON.parse(line) as {action: string; outcome: string});
+    expect(actions).toEqual([
+      expect.objectContaining({action: 'super.status_channel.test', outcome: 'ok'}),
+      expect.objectContaining({action: 'super.status_channel.test', outcome: 'rejected_400'}),
+    ]);
   });
 });
 

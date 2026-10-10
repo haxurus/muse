@@ -6,7 +6,7 @@ import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
 import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
 import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
-import OrchestratorClient, {BlockKind, GuildSettingsUpdate, SuperActor} from './orchestrator-client.js';
+import OrchestratorClient, {BlockKind, GuildSettingsUpdate, StatusChannelUpdate, SuperActor} from './orchestrator-client.js';
 import type {DashboardSession} from './session-store.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
@@ -72,7 +72,8 @@ export const NEW_SERVER_ANCHOR = 'nuovo-server';
 const SNOWFLAKE = /^\d{17,20}$/u;
 const WORKER_ID = /^muse-\d{2}$/u;
 const MAX_BLOCK_REASON_LENGTH = 500;
-const MAX_SELECTED_WORKERS = 32;
+const MAX_LEAVE_WORKERS = 32;
+const MAX_MENTION_ROLES = 10;
 
 /** Bot invite permissions: View Channels, Send Messages, Read Message History, Connect, Speak. */
 // View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak.
@@ -290,16 +291,6 @@ export default class DashboardServer {
 
         if (segments.length === 3 && request.method === 'PATCH') {
           await this.updateGuild(request, response, guildId);
-          return;
-        }
-
-        if (segments.length === 4 && segments[3] === 'meta' && request.method === 'GET') {
-          await this.guildMetaResponse(request, response, guildId);
-          return;
-        }
-
-        if (segments.length === 5 && segments[3] === 'status-channel' && segments[4] === 'test' && request.method === 'POST') {
-          await this.testStatusChannel(request, response, guildId);
           return;
         }
 
@@ -551,6 +542,25 @@ export default class DashboardServer {
       return;
     }
 
+    if (request.method === 'GET' && route === 'status-channel') {
+      const session = this.requireSuperAdmin(request);
+      sendJson(response, 200, await this.orchestrator.superStatusChannel(superActor(session)));
+      return;
+    }
+
+    if (request.method === 'PUT' && route === 'status-channel') {
+      await this.superSetStatusChannel(request, response);
+      return;
+    }
+
+    if (request.method === 'POST' && route === 'status-channel/test') {
+      await this.superMutate(request, response, {action: 'super.status_channel.test'}, async actor => ({
+        statusCode: 200,
+        body: await this.orchestrator.superTestStatusChannel(actor),
+      }));
+      return;
+    }
+
     this.requireSuperAdmin(request);
     sendJson(response, 404, {error: 'not found'});
   }
@@ -615,7 +625,7 @@ export default class DashboardServer {
       const {workerIds} = input as {workerIds?: unknown};
       if (workerIds !== undefined
         && (!Array.isArray(workerIds)
-          || workerIds.length > MAX_SELECTED_WORKERS
+          || workerIds.length > MAX_LEAVE_WORKERS
           || workerIds.some(workerId => typeof workerId !== 'string' || !WORKER_ID.test(workerId)))) {
         throw new HttpError(400, 'workerIds must be an array of worker ids');
       }
@@ -664,6 +674,42 @@ export default class DashboardServer {
       return {
         statusCode: 200,
         body: await this.orchestrator.superPutBlock(kind, subjectId, reason === undefined ? {} : {reason}, actor),
+      };
+    });
+  }
+
+  private async superSetStatusChannel(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const audit: MutationAudit = {action: 'super.status_channel.put'};
+    await this.superMutate(request, response, audit, async actor => {
+      const input = await readJsonBody(request);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new HttpError(400, 'request body must be an object');
+      }
+
+      const {channelId, mentionRoleIds} = input as {channelId?: unknown; mentionRoleIds?: unknown};
+      if (channelId !== null && (typeof channelId !== 'string' || !SNOWFLAKE.test(channelId))) {
+        throw new HttpError(400, 'channelId must be a Discord channel id or null');
+      }
+
+      const body: StatusChannelUpdate = {channelId};
+      if (mentionRoleIds !== undefined) {
+        if (!Array.isArray(mentionRoleIds)
+          || mentionRoleIds.some(roleId => typeof roleId !== 'string' || !SNOWFLAKE.test(roleId))) {
+          throw new HttpError(400, 'mentionRoleIds must be an array of Discord role ids');
+        }
+
+        const roles = [...new Set(mentionRoleIds as string[])];
+        if (roles.length > MAX_MENTION_ROLES) {
+          throw new HttpError(400, `mentionRoleIds must contain at most ${MAX_MENTION_ROLES} role ids`);
+        }
+
+        body.mentionRoleIds = roles;
+      }
+
+      audit.subjectId = channelId ?? undefined;
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.superSetStatusChannel(body, actor),
       };
     });
   }
@@ -724,40 +770,6 @@ export default class DashboardServer {
         iconUrl: guildIconUrl(guild.id, guild.icon),
       },
       ...details,
-    });
-  }
-
-  /** Channels and roles for the "Log" tab pickers: read-only, same access rule as the guild view. */
-  private async guildMetaResponse(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
-    const session = this.auth.requireSession(request);
-    await this.assertGuildAccess(session, guildId, false);
-    sendJson(response, 200, await this.orchestrator.guildMeta(guildId));
-  }
-
-  /** "Invia messaggio di prova": every selected bot posts the test message with its saved status setting. */
-  private async testStatusChannel(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
-    await this.mutate(request, response, {action: 'status_channel.test', guildId}, async audit => {
-      const input = await readJsonBody(request);
-      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-        throw new HttpError(400, 'request body must be an object');
-      }
-
-      const {workerIds} = input as {workerIds?: unknown};
-      if (workerIds !== undefined
-        && (!Array.isArray(workerIds)
-          || workerIds.length === 0
-          || workerIds.length > MAX_SELECTED_WORKERS
-          || workerIds.some(workerId => typeof workerId !== 'string' || !WORKER_ID.test(workerId)))) {
-        throw new HttpError(400, 'workerIds must be a non-empty array of worker ids');
-      }
-
-      const selected = workerIds === undefined ? undefined : [...new Set(workerIds as string[])];
-      audit.workerIds = selected;
-
-      return {
-        statusCode: 200,
-        body: await this.orchestrator.testGuildStatusChannel(guildId, selected === undefined ? {} : {workerIds: selected}),
-      };
     });
   }
 

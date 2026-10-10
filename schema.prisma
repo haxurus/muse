@@ -35,8 +35,6 @@ model Setting {
   turnDownVolumeWhenPeopleSpeak       Boolean  @default(false)
   turnDownVolumeWhenPeopleSpeakTarget Int      @default(20)
   locale                              String   @default("en")
-  statusChannelId                     String?
-  statusMentionRoleIds                String   @default("")
   createdAt                           DateTime @default(now())
   updatedAt                           DateTime @updatedAt
 }
