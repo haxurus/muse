@@ -3,7 +3,11 @@ import type {AddressInfo} from 'node:net';
 import {ChannelType, Collection} from 'discord.js';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-// The worker control server imports the settings helpers (Prisma); the meta route never uses them.
+// The worker control server imports the settings helpers (Prisma/Config); the meta route never uses them.
+vi.mock('../src/utils/get-guild-settings.js', () => ({
+  getGuildSettings: vi.fn(),
+}));
+
 vi.mock('../src/control/guild-settings.js', () => ({
   sanitizeGuildSettingsPatch: vi.fn((patch: unknown) => patch),
   updateGuildSettings: vi.fn(),
