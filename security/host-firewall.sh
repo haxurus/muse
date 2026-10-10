@@ -14,7 +14,7 @@ set -eu
 FWD_CHAIN=MUSE-FORWARD
 IN_CHAIN=MUSE-INPUT
 EGRESS_IFACES="muse-eg muse-deg"
-INTERNAL_IFACES="muse-dw muse-dc muse-c01 muse-c02 muse-c03 muse-c04 muse-c05"
+INTERNAL_IFACES="muse-dw muse-dc muse-c01 muse-c02 muse-c03 muse-c04 muse-c05 muse-p01 muse-p02 muse-p03 muse-p04 muse-p05"
 EDGE_IFACE=muse-ed
 EDGE_PORT=8080
 ALL_IFACES="$EGRESS_IFACES $INTERNAL_IFACES $EDGE_IFACE"

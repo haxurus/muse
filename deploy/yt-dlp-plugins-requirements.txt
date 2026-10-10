@@ -1,0 +1,6 @@
+# yt-dlp plugins, hash-locked. Installed into the yt-dlp venv together with
+# deploy/yt-dlp-requirements.txt (which the yt-dlp refresh workflow regenerates).
+# bgutil-ytdlp-pot-provider must match the version of the pot-provider image in
+# deploy/docker-compose.prod.yml; bump both together.
+bgutil-ytdlp-pot-provider==2.0.2 \
+    --hash=sha256:4f488008d25a715837df79472aad06ea052d20e14ad3a02609bbb0fbd746b8be

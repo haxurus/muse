@@ -87,6 +87,24 @@ jobs:
             docker-compose.bot-five-playback.yml; do
             cmp "$bundle/$file" "deploy/$file"
           done
+      - name: PO token provider starts with the production hardening
+        if: matrix.node-version == '22'
+        run: |
+          set -euo pipefail
+          image="$(sed -n 's/^    image: \(brainicism\/bgutil-ytdlp-pot-provider:.*@sha256:[a-f0-9]*\)$/\1/p' deploy/docker-compose.prod.yml)"
+          test -n "$image"
+          cid="$(docker run -d --init --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            --cap-drop ALL --security-opt no-new-privileges:true "$image")"
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null' EXIT
+          for _ in $(seq 1 30); do
+            if docker exec "$cid" node -e "fetch('http://127.0.0.1:4416/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              echo "pot-provider answers /ping"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "pot-provider did not become ready" >&2
+          exit 1
 
   shell:
     runs-on: ubuntu-latest

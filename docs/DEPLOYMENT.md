@@ -130,7 +130,27 @@ Spotify is optional. If disabled, keep both Spotify files empty.
 
 A server that sets a bot status channel in the dashboard "Log" tab needs every Muse bot in that server to have the **View Channel**, **Send Messages** and **Embed Links** permissions in the chosen channel; mentioned roles must be mentionable, or the bots need "Mention @everyone, @here and All Roles". The setting is stored per server in each worker's SQLite database (`data/bot-0N/db.sqlite`), covered by the usual worker database backups.
 
-### YouTube cookies (optional, usually needed on a VPS)
+### YouTube PO tokens (automatic)
+
+YouTube asks clients for a proof-of-origin (PO) token and flags requests without one, especially from datacenter IP ranges. The fleet generates these tokens itself, with no account and no manual upkeep:
+
+- the `pot-provider` service runs the pinned `brainicism/bgutil-ytdlp-pot-provider` image (by digest);
+- the matching `bgutil-ytdlp-pot-provider` yt-dlp plugin is installed hash-locked in the Muse image (`deploy/yt-dlp-plugins-requirements.txt`);
+- workers pass `YT_DLP_POT_PROVIDER_URL=http://muse-pot:4416` to yt-dlp for YouTube only (never for SoundCloud).
+
+The provider server is unauthenticated, so it publishes no port: each worker reaches it over its own internal network `pot-0N` (bridge `muse-p0N`), and the provider reaches YouTube through the filtered `egress` bridge, where containers cannot talk to each other. `muse-deploy` pulls the provider image before stopping the fleet and refuses any third-party image that is not pinned by digest.
+
+To upgrade, bump the image tag and digest in `deploy/docker-compose.prod.yml`, `ARG BGUTIL_POT_VERSION` in the Dockerfile and the plugin hash in `deploy/yt-dlp-plugins-requirements.txt` together (a test enforces matching versions).
+
+Check that tokens are generated after a YouTube `/play`:
+
+```bash
+sudo docker logs --tail 50 muse-pot-provider-1
+```
+
+A PO token does not lift every IP-based block: if "Sign in to confirm you're not a bot" still appears in worker logs, add cookies as well (next section). Both mechanisms work together.
+
+### YouTube cookies (optional fallback)
 
 YouTube often answers requests from datacenter IP ranges with "Sign in to confirm you're not a bot". yt-dlp then needs the cookies of a signed-in YouTube account, stored in `secrets/youtube_cookies` (Netscape `cookies.txt` format) and mounted into every worker as `/run/secrets/youtube_cookies`. An empty file means "no cookies" and is created automatically by the installer and by `muse-deploy`.
 
@@ -230,6 +250,14 @@ Do not expose or proxy ports 3000, 3100, or 3101 directly. Attach nothing other 
 - edge bridge `muse-ed`: only new TCP connections to port 8080 between peers on the bridge (NPM -> edge); anything the edge initiates is rejected;
 - every Muse bridge: no connections to services on the host itself;
 - IPv6 (best effort when `ip6tables` is available): all traffic from or to Muse bridges rejected.
+
+The firewall script is installed by `ops/install-vps.sh`, not by `muse-deploy`. When a release adds a bridge (for example `muse-p01` ... `muse-p05` for the PO token provider), refresh it on existing installations **before** deploying that release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/haxurus/muse/main/security/host-firewall.sh -o /tmp/muse-host-firewall
+sudo install -m 755 -o root -g root /tmp/muse-host-firewall /usr/local/sbin/muse-host-firewall && rm /tmp/muse-host-firewall
+sudo /usr/local/sbin/muse-host-firewall
+```
 
 To remove every rule the script owns:
 
@@ -379,7 +407,8 @@ Networks are segmented as follows:
 - `dashboard-web` (`muse-dw`, internal): edge <-> dashboard;
 - `dashboard-control` (`muse-dc`, internal): dashboard <-> orchestrator;
 - `control-01` ... `control-05` (`muse-c01` ... `muse-c05`, internal): orchestrator <-> one worker each;
-- `egress` (`muse-eg`): filtered outbound Internet access for music workers;
+- `pot-01` ... `pot-05` (`muse-p01` ... `muse-p05`, internal): one worker each <-> YouTube PO token provider;
+- `egress` (`muse-eg`): filtered outbound Internet access for music workers and the PO token provider, with inter-container traffic disabled;
 - `dashboard-egress` (`muse-deg`): separate filtered outbound Internet access for the OAuth dashboard.
 
 All Muse networks have IPv6 disabled. The host firewall (section 8) blocks private/link-local destinations from the egress bridges, restricts `muse-ed` to NPM -> edge connections, and blocks every Muse bridge from reaching host services.
@@ -390,6 +419,7 @@ Do not attach the dashboard, orchestrator, or workers to Sentinel networks, `pro
 
 - The base image is pinned by multi-arch index digest (`node:22-bookworm-slim@sha256:...`); Dependabot proposes updates against `main`.
 - yt-dlp is installed with `pip --require-hashes --only-binary=:all:` from `deploy/yt-dlp-requirements.txt`, which locks yt-dlp and the dependency set yt-dlp publishes as its `pin` extra. `ARG YT_DLP_VERSION` must match the lock; the build fails otherwise.
+- The PO token plugin is hash-locked separately in `deploy/yt-dlp-plugins-requirements.txt` and must match `ARG BGUTIL_POT_VERSION`; the `pot-provider` image is pinned by tag and multi-arch digest at the same version.
 - The **Refresh yt-dlp pin** workflow checks daily for a new yt-dlp release and opens a pull request bumping `YT_DLP_VERSION` and regenerating the lock with `.github/scripts/yt-dlp-lock.py`. Pull requests opened with `GITHUB_TOKEN` do not start CI on their own: close and reopen the PR to run CI, review, then merge to build and deploy.
 - All GitHub Actions are pinned to full commit SHAs; Dependabot keeps them current.
 - Images are built for `linux/amd64` and `linux/arm64` (the VPS architecture is not assumed) with SBOM, BuildKit provenance and a GitHub build provenance attestation.

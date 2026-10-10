@@ -83,6 +83,25 @@ const firstNonEmpty = (...values: Array<string | undefined>) => values
   .map(value => value?.trim())
   .find((value): value is string => Boolean(value));
 
+// A plain http(s) origin: the value is embedded in a yt-dlp extractor argument,
+// where ';' or ',' would smuggle in further arguments.
+const POT_PROVIDER_URL_PATTERN = /^https?:\/\/[a-z\d.-]+(?::\d{1,5})?$/i;
+
+/** Extractor arguments pointing the bgutil PO token plugin at the provider service, if configured. */
+export const getPotProviderArgs = (): string[] => {
+  const url = firstNonEmpty(process.env.YT_DLP_POT_PROVIDER_URL)?.replace(/\/$/, '');
+  if (!url) {
+    return [];
+  }
+
+  if (!POT_PROVIDER_URL_PATTERN.test(url)) {
+    console.warn('Ignoring YT_DLP_POT_PROVIDER_URL: expected an http(s) origin such as http://muse-pot:4416');
+    return [];
+  }
+
+  return ['--extractor-args', `youtubepot-bgutilhttp:base_url=${url}`];
+};
+
 const withTemporaryCookies = async <T>(operation: (cookiesPath?: string) => Promise<T>, enabled = true): Promise<T> => {
   const configuredCookiesPath = enabled ? firstNonEmpty(process.env.YT_DLP_COOKIES_PATH) : undefined;
   if (!configuredCookiesPath) {
@@ -315,7 +334,7 @@ export const updateYtDlp = async (): Promise<YtDlpUpdateResult> => {
   };
 };
 
-const extractMedia = async (url: string, playlistLimit?: number, useYouTubeCookies = true): Promise<YtDlpResponse & SoundCloudMetadata> => {
+const extractMedia = async (url: string, playlistLimit?: number, isYouTube = true): Promise<YtDlpResponse & SoundCloudMetadata> => {
   try {
     return await withTemporaryCookies(async cookiesPath => {
       const args = [
@@ -338,6 +357,10 @@ const extractMedia = async (url: string, playlistLimit?: number, useYouTubeCooki
         args.push('--cookies', cookiesPath);
       }
 
+      if (isYouTube) {
+        args.push(...getPotProviderArgs());
+      }
+
       // End option parsing so a URL can never be interpreted as a yt-dlp flag.
       args.push('--', url);
 
@@ -346,7 +369,7 @@ const extractMedia = async (url: string, playlistLimit?: number, useYouTubeCooki
       });
 
       return JSON.parse(stdout) as YtDlpResponse & SoundCloudMetadata;
-    }, useYouTubeCookies);
+    }, isYouTube);
   } catch (error: unknown) {
     if (isExecaError(error)) {
       const detail = error.stderr?.trim() ?? error.shortMessage ?? 'Unknown yt-dlp error';

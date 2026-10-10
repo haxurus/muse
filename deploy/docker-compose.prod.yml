@@ -9,6 +9,7 @@ x-worker-environment: &worker-environment
   MUSE_CONTROL_PORT: "3101"
   YT_DLP_AUTO_UPDATE: "false"
   YT_DLP_COOKIES_PATH: /run/secrets/youtube_cookies
+  YT_DLP_POT_PROVIDER_URL: http://muse-pot:4416
 
 x-worker-common: &worker-common
   image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
@@ -178,6 +179,60 @@ services:
         max-size: 10m
         max-file: "3"
 
+  # Proof-of-origin (PO) token provider for YouTube, used by the bgutil plugin
+  # installed with yt-dlp in the Muse image (versions must match). The server is
+  # unauthenticated: it publishes no port and each worker reaches it only over
+  # its own internal pot-0N network. It reaches YouTube through the filtered
+  # egress bridge, where inter-container traffic is disabled.
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2@sha256:d7d34108b76e52c7d3b575fe9e797e4bf41c1b2a08f80c5292eff6f851ce8472
+    restart: unless-stopped
+    init: true
+    # The muse-pot alias exists only on the pot-0N networks, so workers never
+    # resolve the provider to its egress address (unreachable there by design).
+    networks:
+      egress:
+      pot-01:
+        aliases:
+          - muse-pot
+      pot-02:
+        aliases:
+          - muse-pot
+      pot-03:
+        aliases:
+          - muse-pot
+      pot-04:
+        aliases:
+          - muse-pot
+      pot-05:
+        aliases:
+          - muse-pot
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    pids_limit: 128
+    mem_limit: ${MUSE_POT_PROVIDER_MEM_LIMIT:-512m}
+    cpus: 0.50
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4416/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   muse-01:
     <<: *worker-common
     environment:
@@ -197,6 +252,7 @@ services:
     networks:
       - egress
       - control-01
+      - pot-01
 
   muse-02:
     <<: *worker-common
@@ -217,6 +273,7 @@ services:
     networks:
       - egress
       - control-02
+      - pot-02
 
   muse-03:
     <<: *worker-common
@@ -237,6 +294,7 @@ services:
     networks:
       - egress
       - control-03
+      - pot-03
 
   muse-04:
     <<: *worker-common
@@ -257,6 +315,7 @@ services:
     networks:
       - egress
       - control-04
+      - pot-04
 
   muse-05:
     <<: *worker-common
@@ -277,6 +336,7 @@ services:
     networks:
       - egress
       - control-05
+      - pot-05
 
 networks:
   # Created once by ops/install-vps.sh as an internal bridge (muse-ed); the Nginx
@@ -338,6 +398,36 @@ networks:
     enable_ipv6: false
     driver_opts:
       com.docker.network.bridge.name: muse-c05
+  pot-01:
+    internal: true
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: muse-p01
+  pot-02:
+    internal: true
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: muse-p02
+  pot-03:
+    internal: true
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: muse-p03
+  pot-04:
+    internal: true
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: muse-p04
+  pot-05:
+    internal: true
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: muse-p05
 
 secrets:
   dashboard_discord_client_secret:
