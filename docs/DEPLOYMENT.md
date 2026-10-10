@@ -344,6 +344,23 @@ Every release pulls a new multi-arch image. To keep the disk from filling up:
 
 A service that crashes and is restarted by Docker during startup (for example because of an invalid Discord token) fails the health wait immediately instead of after the 240-second timeout, and the worker process now exits with `Muse failed to start (<code>)` on such errors.
 
+### Manual release (GitHub Actions unavailable)
+
+If GitHub Actions cannot build images, `ops/manual-release.sh` runs the same validation and build on the VPS and publishes the image to GHCR, so deploys stay digest-based. It builds for the VPS architecture only and does not attach SBOM/provenance attestations.
+
+1. Create a classic personal access token with only `write:packages` (short expiry).
+2. On the VPS, as root:
+
+```bash
+rm -rf /tmp/muse-release && git clone --branch main https://github.com/haxurus/muse.git /tmp/muse-release
+cd /tmp/muse-release
+docker login ghcr.io -u haxurus
+./ops/manual-release.sh
+docker logout ghcr.io
+```
+
+The script refuses a checkout that differs from `origin/main`, runs lint, typecheck, tests and the TypeScript build inside the image's builder stage, validates Compose, builds and checks the image, smoke-tests the PO token provider, pushes `:main` and `:sha-<commit>` and prints the `muse-deploy deploy` command with the digest. `--no-push` does everything except publishing. Build caches stay in Docker; reclaim them with `docker builder prune` when disk is low.
+
 ## 12. Backups
 
 Before replacing a running release the deploy script stops Muse, verifies that no container of the project is still running, and archives all five worker SQLite databases plus the orchestrator's per-guild group state. If any container keeps running the deploy aborts before touching data.
