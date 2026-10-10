@@ -24,6 +24,20 @@ describe('image supply chain', () => {
     }
   });
 
+  it('ships the PO token plugin hash-locked at the same version as the provider image', async () => {
+    const dockerfile = await read('Dockerfile');
+    const plugins = await read('deploy/yt-dlp-plugins-requirements.txt');
+    const compose = await read('deploy/docker-compose.prod.yml');
+
+    const version = /^ARG BGUTIL_POT_VERSION=(\d+\.\d+\.\d+)$/mu.exec(dockerfile)?.[1] ?? 'missing';
+    expect(plugins.split('\n')).toContain(`bgutil-ytdlp-pot-provider==${version} \\`);
+    expect(plugins).toMatch(/--hash=sha256:[a-f\d]{64}/u);
+    expect(dockerfile).toContain('-r /tmp/yt-dlp-requirements.txt -r /tmp/yt-dlp-plugins-requirements.txt');
+    expect(dockerfile).toContain('import yt_dlp_plugins.extractor.getpot_bgutil_http');
+    const image = /^ {4}image: brainicism\/bgutil-ytdlp-pot-provider:(\S+)@sha256:[a-f\d]{64}$/mu.exec(compose)?.[1];
+    expect(image).toBe(version);
+  });
+
   it('keeps application files root-owned and ships the deployment bundle', async () => {
     const dockerfile = await read('Dockerfile');
 
@@ -107,6 +121,20 @@ describe('deploy tooling', () => {
     expect(install).toContain('ensure_runtime_secret youtube_cookies');
   });
 
+  it('pulls digest-pinned support images before stopping the fleet and waits for the release services', async () => {
+    const muse = await read('ops/muse-deploy');
+    const deployBody = muse.slice(muse.indexOf('deploy_image() {'), muse.indexOf('rollback() {'));
+    const rollbackBody = muse.slice(muse.indexOf('rollback() {'), muse.indexOf('status() {'));
+
+    expect(muse).toContain('Refusing a support image without a digest');
+    expect(deployBody.indexOf('pull_support_images "$image"')).toBeGreaterThan(deployBody.indexOf('validate_config_set'));
+    expect(deployBody.indexOf('pull_support_images "$image"')).toBeLessThan(deployBody.indexOf('stop_fleet'));
+    expect(rollbackBody.indexOf('pull_support_images "$target"')).toBeGreaterThan(rollbackBody.indexOf('validate_config_set'));
+    expect(rollbackBody.indexOf('pull_support_images "$target"')).toBeLessThan(rollbackBody.indexOf('stop_fleet'));
+    expect(muse).toContain('compose config --services');
+    expect(muse).not.toMatch(/^SERVICES=/mu);
+  });
+
   it('fails fast when a service restarts during startup', async () => {
     const muse = await read('ops/muse-deploy');
     expect(muse).toContain('{{.RestartCount}}');
@@ -136,6 +164,33 @@ describe('network isolation', () => {
     expect(projectNetworks).toContain('muse-edge');
     expect(networks.match(/enable_ipv6: false/gu)).toHaveLength(projectNetworks.length - 1);
     expect(compose).toContain('com.docker.network.bridge.name: muse-eg');
+  });
+
+  it('reaches the PO token provider only through one internal network per worker', async () => {
+    const compose = await read('deploy/docker-compose.prod.yml');
+    const firewall = await read('security/host-firewall.sh');
+    const services = compose.slice(compose.indexOf('\nservices:\n'), compose.indexOf('\nnetworks:\n'));
+    const provider = services.slice(services.indexOf('\n  pot-provider:\n'), services.indexOf('\n  muse-01:\n'));
+    const internalIfaces = /^INTERNAL_IFACES="([^"]*)"$/mu.exec(firewall)?.[1].split(' ') ?? [];
+
+    expect(compose).toContain('YT_DLP_POT_PROVIDER_URL: http://muse-pot:4416');
+    expect(provider).not.toContain('ports:');
+    expect(provider).toContain('read_only: true');
+    expect(provider).toContain('      - ALL');
+    expect(provider).toContain('no-new-privileges:true');
+    expect(provider).toContain('      egress:\n      pot-01:\n');
+    expect(provider.match(/^ {10}- muse-pot$/gmu)).toHaveLength(5);
+
+    for (const number of ['01', '02', '03', '04', '05']) {
+      const start = services.indexOf(`\n  muse-${number}:\n`);
+      const worker = services.slice(start, services.indexOf('\n\n', start + 1));
+      expect(worker.match(/^ {6}- pot-\d{2}$/gmu)).toEqual([`      - pot-${number}`]);
+      expect(compose).toContain(`com.docker.network.bridge.name: muse-p${number}`);
+      expect(internalIfaces).toContain(`muse-p${number}`);
+    }
+
+    const networks = compose.slice(compose.indexOf('\nnetworks:\n'), compose.indexOf('\nsecrets:\n'));
+    expect(networks.match(/^ {2}pot-\d{2}:\n {4}internal: true$/gmu)).toHaveLength(5);
   });
 
   it('firewalls the edge bridge, DNS and IPv6 idempotently', async () => {

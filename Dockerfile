@@ -6,10 +6,15 @@ FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddf
 # Bump both together with .github/scripts/yt-dlp-lock.py (the yt-dlp refresh
 # workflow opens a pull request doing exactly that).
 ARG YT_DLP_VERSION=2026.08.19
+# PO token provider plugin, hash-locked in its own file (the refresh workflow
+# regenerates only the yt-dlp lock). It must match the pot-provider image
+# version in deploy/docker-compose.prod.yml; bump all three together.
+ARG BGUTIL_POT_VERSION=2.0.2
 ENV MUSE_BUNDLED_YT_DLP_PATH=/opt/yt-dlp/bin/yt-dlp \
     CHECKPOINT_DISABLE=1
 
 COPY deploy/yt-dlp-requirements.txt /tmp/yt-dlp-requirements.txt
+COPY deploy/yt-dlp-plugins-requirements.txt /tmp/yt-dlp-plugins-requirements.txt
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
@@ -20,12 +25,15 @@ RUN apt-get update \
     python3 \
     python3-venv \
     && grep -Fqx "yt-dlp[default]==${YT_DLP_VERSION} \\" /tmp/yt-dlp-requirements.txt \
+    && grep -Fqx "bgutil-ytdlp-pot-provider==${BGUTIL_POT_VERSION} \\" /tmp/yt-dlp-plugins-requirements.txt \
     && python3 -m venv /opt/yt-dlp \
     && /opt/yt-dlp/bin/pip install --no-cache-dir --disable-pip-version-check \
-        --require-hashes --only-binary=:all: -r /tmp/yt-dlp-requirements.txt \
+        --require-hashes --only-binary=:all: \
+        -r /tmp/yt-dlp-requirements.txt -r /tmp/yt-dlp-plugins-requirements.txt \
     && test "$(/opt/yt-dlp/bin/yt-dlp --version)" = "${YT_DLP_VERSION}" \
+    && /opt/yt-dlp/bin/python -c "import yt_dlp_plugins.extractor.getpot_bgutil_http" \
     && ln -s /opt/yt-dlp/bin/yt-dlp /usr/local/bin/yt-dlp \
-    && rm -f /tmp/yt-dlp-requirements.txt \
+    && rm -f /tmp/yt-dlp-requirements.txt /tmp/yt-dlp-plugins-requirements.txt \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

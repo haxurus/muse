@@ -106,7 +106,7 @@ import Player, {
 } from '../src/services/player.js';
 import ThirdParty from '../src/services/third-party.js';
 import prepareYtDlp from '../src/utils/prepare-yt-dlp.js';
-import {getExecutable, getSoundCloudMetadata, getSoundCloudMediaSource, getYouTubeMediaSource, getYtDlpVersion, updateYtDlp, YtDlpMediaUnavailableError} from '../src/utils/yt-dlp.js';
+import {getExecutable, getPotProviderArgs, getSoundCloudMetadata, getSoundCloudMediaSource, getYouTubeMediaSource, getYtDlpVersion, updateYtDlp, YtDlpMediaUnavailableError} from '../src/utils/yt-dlp.js';
 
 const GUILD_ID = 'guild-id';
 const ORIGINAL_ENV = {
@@ -118,6 +118,7 @@ const ORIGINAL_ENV = {
   YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
   YT_DLP_COOKIES_PATH: process.env.YT_DLP_COOKIES_PATH,
   YT_DLP_PATH: process.env.YT_DLP_PATH,
+  YT_DLP_POT_PROVIDER_URL: process.env.YT_DLP_POT_PROVIDER_URL,
 };
 const VALID_MEDIA_RESPONSE = JSON.stringify({
   requested_downloads: [{
@@ -268,6 +269,7 @@ beforeEach(() => {
   delete process.env.YT_DLP_COOKIES_PATH;
   delete process.env.YT_DLP_PATH;
   delete process.env.MUSE_BUNDLED_YT_DLP_PATH;
+  delete process.env.YT_DLP_POT_PROVIDER_URL;
   dependencyMocks.execa.mockResolvedValue({stdout: VALID_MEDIA_RESPONSE});
   dependencyMocks.ffmpeg.mockImplementation(makeFfmpegCommand);
   dependencyMocks.getGuildSettings.mockResolvedValue({
@@ -504,6 +506,42 @@ describe('OPS-11 yt-dlp extraction and ffmpeg handoff', () => {
     ], {
       timeout: 45_000,
     });
+  });
+
+  it('points YouTube extraction at the PO token provider just before the URL', async () => {
+    process.env.YT_DLP_PATH = '/fake/yt-dlp';
+    process.env.YT_DLP_POT_PROVIDER_URL = ' http://muse-pot:4416/ ';
+
+    await getYouTubeMediaSource('abcdefghijk');
+
+    const args = dependencyMocks.execa.mock.calls[0][1] as string[];
+    expect(args.slice(-4)).toEqual([
+      '--extractor-args',
+      'youtubepot-bgutilhttp:base_url=http://muse-pot:4416',
+      '--',
+      'https://www.youtube.com/watch?v=abcdefghijk',
+    ]);
+  });
+
+  it('never sends SoundCloud extraction through the PO token provider', async () => {
+    process.env.YT_DLP_POT_PROVIDER_URL = 'http://muse-pot:4416';
+
+    await getSoundCloudMediaSource('https://soundcloud.com/artist/track').catch(() => undefined);
+
+    expect(dependencyMocks.execa.mock.calls[0][1]).not.toContain('--extractor-args');
+  });
+
+  it.each([
+    'http://muse-pot:4416;youtube:player_client=tv',
+    'http://muse-pot:4416/path',
+    'file:///etc/passwd',
+    'muse-pot:4416',
+  ])('ignores a provider URL that is not a plain http(s) origin: %s', async value => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    process.env.YT_DLP_POT_PROVIDER_URL = value;
+
+    expect(getPotProviderArgs()).toEqual([]);
+    expect(warn).toHaveBeenCalledOnce();
   });
 
   it.each([

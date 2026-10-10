@@ -24,10 +24,10 @@ EDGE_NETWORK=muse-edge
 NO_STATE_MARKER=none
 RUNTIME_UID=10001
 RUNTIME_GID=10001
-SERVICES=(dashboard-edge dashboard orchestrator muse-01 muse-02 muse-03 muse-04 muse-05)
 WORKER_NUMBERS=(01 02 03 04 05)
 ALLOWED_OVERLAYS=(bot-one-playback bot-two-playback bot-three-playback bot-four-playback bot-five-playback)
 COMPOSE_FILES=()
+FLEET_SERVICES=()
 TMP_DIRS=()
 BACKUP_RESULT=""
 TMP_RESULT=""
@@ -275,11 +275,20 @@ stop_fleet() {
   [[ -z "$ids" ]] || die 1 "Muse containers are still running after stop; refusing to touch fleet state."
 }
 
+# Services of the installed release, read from its own Compose files: a
+# rollback to a release without a service must not wait for that service.
+fleet_services() {
+  FLEET_SERVICES=()
+  mapfile -t FLEET_SERVICES < <(compose config --services)
+  [[ "${#FLEET_SERVICES[@]}" -gt 0 ]] || { echo "The installed Compose configuration lists no services." >&2; return 1; }
+}
+
 wait_healthy() {
   local deadline=$((SECONDS + 240)) service cid info state health restarts all_healthy
+  fleet_services || return 1
   while (( SECONDS < deadline )); do
     all_healthy=1
-    for service in "${SERVICES[@]}"; do
+    for service in "${FLEET_SERVICES[@]}"; do
       # -a includes exited containers so a crashed service fails fast.
       cid="$(compose ps -a -q "$service" 2>/dev/null | head -n1 || true)"
       if [[ -z "$cid" ]]; then
@@ -316,7 +325,21 @@ start_fleet() {
 }
 
 dump_logs() {
-  compose logs --tail=120 "${SERVICES[@]}" >&2 || true
+  compose logs --tail=120 >&2 || true
+}
+
+# Third-party images of a release (the YouTube PO token provider) must be pinned
+# by digest. They are pulled while the old fleet is still running, so a missing
+# image or registry outage never leaves the fleet stopped.
+pull_support_images() {
+  local image="$1" ref
+  local -a refs=()
+  mapfile -t refs < <(MUSE_IMAGE="$image" compose config --images | sort -u)
+  for ref in "${refs[@]}"; do
+    [[ -n "$ref" && "$ref" != "$image" ]] || continue
+    [[ "$ref" =~ @sha256:[a-f0-9]{64}$ ]] || die 64 "Refusing a support image without a digest: $ref"
+    docker pull "$ref"
+  done
 }
 
 # --- Fleet state backups ---------------------------------------------------
@@ -481,6 +504,7 @@ deploy_image() {
   stage="$TMP_RESULT"
   extract_bundle "$image" "$stage"
   validate_config_set "$stage/docker-compose.prod.yml" "$stage" "$image"
+  pull_support_images "$image"
 
   # 2. Remember the configuration that belongs to the running release.
   make_tmp_dir config-snapshot
@@ -551,6 +575,7 @@ rollback() {
   validate_config_set "$PREVIOUS_CONFIG/docker-compose.yml" "$PREVIOUS_CONFIG/overlays" "$target"
   ensure_disk_space "$target" "$current"
   docker pull "$target"
+  pull_support_images "$target"
 
   make_tmp_dir config-snapshot
   snapshot="$TMP_RESULT"
