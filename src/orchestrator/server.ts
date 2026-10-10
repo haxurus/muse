@@ -211,8 +211,8 @@ export default class OrchestratorServer {
       throw new HttpError(405, 'method not allowed');
     }
 
-    const {statusChannelId, mentionRoleIds} = this.platform.statusChannel();
-    return {statusChannelId, mentionRoleIds};
+    const {statusGuildId, statusChannelId, mentionRoleIds} = this.platform.statusChannel();
+    return {statusGuildId, statusChannelId, mentionRoleIds};
   }
 
   private async workerStatuses() {

@@ -1118,101 +1118,222 @@ const superAction = async (url, method, body) => {
 
 /* ---------- Bot status channel ---------- */
 
-const currentStatusChannelId = () => {
-  const setting = overview && overview.statusChannel;
-  return setting && typeof setting.statusChannelId === 'string' ? setting.statusChannelId : null;
-};
-
 const MAX_MENTION_ROLES = 10;
 
-/** Roles being edited; saved together with the channel. Reset from the overview unless edited. */
-let statusRoleDraft = [];
-let statusRolesDirty = false;
+/** Channels and roles of the server chosen in the picker, merged from the bots in it. */
+let statusMeta = null;
+let statusMetaGuildId = null;
+let statusMetaPendingId = null;
+let statusMetaRequest = 0;
+/** What the super admin is editing; reset from the overview unless edited. */
+let statusDraft = {guildId: '', channelId: '', roleIds: []};
+let statusDirty = false;
+let statusBusy = false;
 
-const savedMentionRoleIds = () => {
-  const setting = overview && overview.statusChannel;
-  return setting ? list(setting.mentionRoleIds).filter(id => typeof id === 'string') : [];
+const snowflakeOrNull = value => (typeof value === 'string' && SNOWFLAKE.test(value) ? value : null);
+
+const savedStatusChannel = () => {
+  const setting = (overview && overview.statusChannel) || {};
+  return {
+    guildId: snowflakeOrNull(setting.statusGuildId),
+    channelId: snowflakeOrNull(setting.statusChannelId),
+    roleIds: list(setting.mentionRoleIds).filter(roleId => snowflakeOrNull(roleId) !== null),
+    updatedAt: setting.updatedAt,
+    updatedBy: setting.updatedBy,
+  };
+};
+
+const statusChannels = () => (statusMeta ? list(statusMeta.channels) : []);
+const statusRoles = () => (statusMeta ? list(statusMeta.roles) : []);
+const findStatusChannel = channelId => statusChannels().find(channel => channel.id === channelId);
+const findStatusRole = roleId => statusRoles().find(role => role.id === roleId);
+const overviewGuilds = () => (overview ? list(overview.guilds).filter(guild => guild && typeof guild.id === 'string') : []);
+const findOverviewGuild = guildId => overviewGuilds().find(guild => guild.id === guildId);
+
+/** Bots of the chosen server that reported they cannot post in the channel (bots that did not answer are unknown). */
+const botsLackingPost = channel => {
+  if (!statusMeta || !channel) return [];
+  const names = botNameById();
+  const failed = new Set(list(statusMeta.failed).map(entry => entry && entry.workerId));
+  const postable = new Set(list(channel.postableBy));
+  return list(statusMeta.workerIds)
+    .filter(workerId => !failed.has(workerId) && !postable.has(workerId))
+    .map(workerId => names.get(workerId) || workerId);
+};
+
+const roleColor = role => {
+  const color = role ? Number(role.color) : 0;
+  return Number.isInteger(color) && color > 0 && color <= 0xffffff ? `#${color.toString(16).padStart(6, '0')}` : '';
+};
+
+const channelLabel = channel => `#${channel.name}${channel.type === 'announcement' ? ` (${t('super.statusChannel.announcement')})` : ''}`;
+
+const option = (label, value) => {
+  const node = el('option', '', label);
+  node.value = value;
+  return node;
+};
+
+const renderStatusGuilds = () => {
+  const nodes = [option(t('super.statusChannel.chooseGuild'), '')];
+  if (statusDraft.guildId && !findOverviewGuild(statusDraft.guildId)) {
+    nodes.push(option(t('super.statusChannel.unknownGuild', {id: statusDraft.guildId}), statusDraft.guildId));
+  }
+
+  nodes.push(...overviewGuilds().map(guild => option(guild.name || guild.id, guild.id)));
+  const select = $('status-guild');
+  select.replaceChildren(...nodes);
+  select.value = statusDraft.guildId;
+  select.disabled = statusBusy;
+};
+
+const renderStatusChannels = () => {
+  const nodes = [option(statusDraft.guildId ? t('super.statusChannel.chooseChannel') : t('super.statusChannel.chooseGuildFirst'), '')];
+  if (statusDraft.channelId && !findStatusChannel(statusDraft.channelId)) {
+    nodes.push(option(t('super.statusChannel.unknownChannel', {id: statusDraft.channelId}), statusDraft.channelId));
+  }
+
+  // The orchestrator sends the channels in Discord sidebar order: group them by category.
+  const groups = new Map();
+  for (const channel of statusChannels()) {
+    const parent = typeof channel.parentName === 'string' ? channel.parentName : '';
+    if (!groups.has(parent)) groups.set(parent, []);
+    groups.get(parent).push(channel);
+  }
+
+  for (const [parent, channels] of groups) {
+    const options = channels.map(channel => {
+      const lacking = botsLackingPost(channel);
+      return option(lacking.length > 0
+        ? `${channelLabel(channel)} · ⚠ ${t('super.statusChannel.cannotPostShort', {names: lacking.join(', ')})}`
+        : channelLabel(channel), channel.id);
+    });
+
+    if (parent === '') {
+      nodes.push(...options);
+    } else {
+      const group = document.createElement('optgroup');
+      group.label = parent;
+      group.append(...options);
+      nodes.push(group);
+    }
+  }
+
+  const select = $('status-channel');
+  select.replaceChildren(...nodes);
+  select.value = statusDraft.channelId;
+  select.disabled = statusBusy || !statusMeta;
+
+  const lacking = botsLackingPost(findStatusChannel(statusDraft.channelId));
+  const warning = $('status-channel-warning');
+  warning.textContent = lacking.length > 0 ? t('super.statusChannel.cannotPost', {names: lacking.join(', ')}) : '';
+  warning.hidden = lacking.length === 0;
 };
 
 const renderStatusRoles = () => {
-  $('status-role-list').replaceChildren(...statusRoleDraft.map(roleId => {
+  const full = statusDraft.roleIds.length >= MAX_MENTION_ROLES;
+  const options = statusRoles().map(role => {
+    const node = option(`@${role.name}`, role.id);
+    node.disabled = statusDraft.roleIds.includes(role.id);
+    return node;
+  });
+  const select = $('status-role-add');
+  select.replaceChildren(option(full ? t('super.statusChannel.maxRoles') : t('super.statusChannel.addRole'), ''), ...options);
+  select.value = '';
+  select.disabled = statusBusy || !statusMeta || full;
+
+  $('status-role-list').replaceChildren(...statusDraft.roleIds.map(roleId => {
+    const role = findStatusRole(roleId);
+    const name = role ? `@${role.name}` : `@${roleId} · ${t('super.statusChannel.unknownRole')}`;
     const chip = el('span', 'chip status-role-chip');
+    const dot = el('span', 'role-dot');
+    const color = roleColor(role);
+    // CSSOM property, not a style attribute: allowed by the style-src 'self' policy.
+    if (color) dot.style.backgroundColor = color;
     const remove = el('button', '', '×');
     remove.type = 'button';
-    remove.setAttribute('aria-label', t('super.statusChannel.removeRole', {id: roleId}));
+    remove.disabled = statusBusy;
+    remove.setAttribute('aria-label', t('super.statusChannel.removeRole', {name}));
     remove.addEventListener('click', () => {
-      statusRoleDraft = statusRoleDraft.filter(id => id !== roleId);
-      statusRolesDirty = true;
-      renderStatusRoles();
+      statusDraft = {...statusDraft, roleIds: statusDraft.roleIds.filter(id => id !== roleId)};
+      statusDirty = true;
+      renderStatusChannel();
     });
-    chip.append(el('span', 'mono', `@${roleId}`), remove);
+    chip.append(dot, el('span', '', name), remove);
     return chip;
   }));
+  $('status-no-roles').hidden = statusDraft.roleIds.length > 0;
+
+  const silent = statusDraft.roleIds.map(findStatusRole).filter(role => role && !role.mentionable).map(role => `@${role.name}`);
+  const warning = $('status-role-warning');
+  warning.textContent = silent.length > 0 ? t('super.statusChannel.roleNotMentionable', {names: silent.join(', ')}) : '';
+  warning.hidden = silent.length === 0;
 };
 
-const addStatusRole = () => {
-  const input = $('status-role-form').elements.roleId;
-  const roleId = input.value.trim();
-  if (!SNOWFLAKE.test(roleId)) {
-    showNotice($('super-message'), t('super.statusChannel.invalidRoleId'));
-    input.focus();
-    return;
-  }
-
-  if (statusRoleDraft.includes(roleId)) {
-    showNotice($('super-message'), t('super.statusChannel.roleExists'));
-    return;
-  }
-
-  if (statusRoleDraft.length >= MAX_MENTION_ROLES) {
-    showNotice($('super-message'), t('super.statusChannel.tooManyRoles'));
-    return;
-  }
-
-  showNotice($('super-message'), '');
-  statusRoleDraft = [...statusRoleDraft, roleId];
-  statusRolesDirty = true;
-  input.value = '';
-  renderStatusRoles();
-};
-
-const setStatusChannelBusy = busy => {
-  const channelId = currentStatusChannelId();
-  $('status-channel-form').querySelector('button[type="submit"]').disabled = busy;
-  $('status-channel-disable').disabled = busy || channelId === null;
-  $('status-channel-test').disabled = busy || channelId === null;
-};
-
-const renderStatusChannel = () => {
-  const setting = (overview && overview.statusChannel) || {};
-  const channelId = currentStatusChannelId();
-  const input = $('status-channel-form').elements.channelId;
-  // Do not overwrite what the super admin is typing when the overview reloads.
-  if (document.activeElement !== input) input.value = channelId || '';
-  setStatusChannelBusy(false);
-  if (!statusRolesDirty) statusRoleDraft = savedMentionRoleIds();
-  renderStatusRoles();
-
+const renderStatusCurrent = saved => {
   const current = $('status-channel-current');
-  if (channelId === null) {
+  if (saved.channelId === null) {
     current.replaceChildren(el('span', '', t('super.statusChannel.none')));
     return;
   }
 
+  const guild = saved.guildId ? findOverviewGuild(saved.guildId) : undefined;
+  const channel = saved.guildId === statusMetaGuildId ? findStatusChannel(saved.channelId) : undefined;
+  const where = `${guild ? guild.name : saved.guildId || '—'} · ${channel ? `#${channel.name}` : saved.channelId}`;
   const parts = [
     el('strong', '', t('super.statusChannel.current')),
-    tag(channelId, 'info'),
-    el('span', '', t('super.statusChannel.roles', {count: savedMentionRoleIds().length})),
+    tag(where, 'info'),
+    el('span', '', t('super.statusChannel.rolesCount', {count: saved.roleIds.length})),
   ];
-  const actor = setting.updatedBy;
-  if (actor && typeof setting.updatedAt === 'string') {
+  const actor = saved.updatedBy;
+  if (actor && typeof saved.updatedAt === 'string') {
     parts.push(el('span', '', t('super.statusChannel.updated', {
-      date: formatDate(setting.updatedAt),
+      date: formatDate(saved.updatedAt),
       name: actor.username || actor.userId || '—',
     })));
   }
 
   current.replaceChildren(...parts);
+};
+
+const renderStatusChannel = () => {
+  const saved = savedStatusChannel();
+  if (!statusDirty) statusDraft = {guildId: saved.guildId || '', channelId: saved.channelId || '', roleIds: [...saved.roleIds]};
+  if (statusDraft.guildId && statusDraft.guildId !== statusMetaGuildId && statusDraft.guildId !== statusMetaPendingId) {
+    void loadStatusMeta(statusDraft.guildId);
+  }
+
+  renderStatusGuilds();
+  renderStatusChannels();
+  renderStatusRoles();
+  renderStatusCurrent(saved);
+  $('status-channel-save').disabled = statusBusy || !statusMeta || !statusDraft.guildId || !statusDraft.channelId;
+  $('status-channel-disable').disabled = statusBusy || saved.channelId === null;
+  $('status-channel-test').disabled = statusBusy || saved.channelId === null;
+};
+
+/** Channels and roles of a server for the pickers, read from the bots that are in it. */
+const loadStatusMeta = async guildId => {
+  const request = ++statusMetaRequest;
+  statusMeta = null;
+  statusMetaPendingId = guildId;
+  setMessage($('status-channel-message'), t('super.statusChannel.loading'));
+  try {
+    const meta = await api(`/api/super/guilds/${encodeURIComponent(guildId)}/meta`);
+    if (request !== statusMetaRequest) return;
+    statusMeta = meta && typeof meta === 'object' ? meta : null;
+    setMessage($('status-channel-message'), '');
+  } catch (error) {
+    if (request !== statusMetaRequest) return;
+    statusMeta = null;
+    setMessage($('status-channel-message'), '');
+    handleFailure(error, message => setMessage($('status-channel-message'), `${t('super.statusChannel.metaFailed')} ${message}`, 'error'));
+  }
+
+  // Remembered even after a failure, so a server whose bots are offline is not asked again on every render.
+  statusMetaGuildId = guildId;
+  statusMetaPendingId = null;
+  renderStatusChannel();
 };
 
 const statusErrorLabel = code => {
@@ -1232,27 +1353,28 @@ const renderStatusResults = results => {
 };
 
 const runStatusChannelAction = async action => {
-  setStatusChannelBusy(true);
+  statusBusy = true;
+  renderStatusChannel();
   try {
     return await action();
   } finally {
-    setStatusChannelBusy(false);
+    statusBusy = false;
+    renderStatusChannel();
   }
 };
 
 const saveStatusChannel = async () => {
-  const input = $('status-channel-form').elements.channelId;
-  const channelId = input.value.trim();
-  if (!SNOWFLAKE.test(channelId)) {
-    showNotice($('super-message'), t('super.statusChannel.invalidId'));
-    input.focus();
+  const {guildId, channelId, roleIds} = statusDraft;
+  if (!guildId || !channelId) {
+    setMessage($('status-channel-message'), t('super.statusChannel.channelRequired'), 'error');
+    $(guildId ? 'status-channel' : 'status-guild').focus();
     return;
   }
 
-  const mentionRoleIds = [...statusRoleDraft];
-  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {channelId, mentionRoleIds}));
+  setMessage($('status-channel-message'), '');
+  const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {guildId, channelId, mentionRoleIds: [...roleIds]}));
   if (result) {
-    statusRolesDirty = false;
+    statusDirty = false;
     renderStatusChannel();
     $('status-channel-results').replaceChildren();
     toast(t('super.statusChannel.saved'));
@@ -1260,20 +1382,23 @@ const saveStatusChannel = async () => {
 };
 
 const disableStatusChannel = async () => {
-  if (currentStatusChannelId() === null || !window.confirm(t('super.statusChannel.confirmDisable'))) return;
+  if (savedStatusChannel().channelId === null || !window.confirm(t('super.statusChannel.confirmDisable'))) return;
   const result = await runStatusChannelAction(() => superAction('/api/super/status-channel', 'PUT', {channelId: null}));
   if (result) {
+    statusDirty = false;
+    renderStatusChannel();
     $('status-channel-results').replaceChildren();
     toast(t('super.statusChannel.disabled'));
   }
 };
 
 const testStatusChannel = async () => {
-  if (currentStatusChannelId() === null) {
-    showNotice($('super-message'), t('super.statusChannel.notSet'));
+  if (savedStatusChannel().channelId === null) {
+    setMessage($('status-channel-message'), t('super.statusChannel.notSet'), 'error');
     return;
   }
 
+  setMessage($('status-channel-message'), statusDirty ? t('super.statusChannel.unsaved') : '');
   toast(t('super.statusChannel.testing'));
   const result = await runStatusChannelAction(() => superAction('/api/super/status-channel/test', 'POST'));
   if (!result) return;
@@ -1433,14 +1558,36 @@ const wire = () => {
     void loadOverview();
   });
 
-  $('status-channel-form').addEventListener('submit', event => {
-    event.preventDefault();
-    void saveStatusChannel();
+  $('status-guild').addEventListener('change', event => {
+    // Channels and roles belong to one server: a new server starts from an empty choice.
+    statusDraft = {guildId: event.target.value, channelId: '', roleIds: []};
+    statusDirty = true;
+    statusMeta = null;
+    statusMetaGuildId = null;
+    statusMetaRequest += 1;
+    statusMetaPendingId = null;
+    setMessage($('status-channel-message'), '');
+    renderStatusChannel();
   });
 
-  $('status-role-form').addEventListener('submit', event => {
-    event.preventDefault();
-    addStatusRole();
+  $('status-channel').addEventListener('change', event => {
+    statusDraft = {...statusDraft, channelId: event.target.value};
+    statusDirty = true;
+    renderStatusChannel();
+  });
+
+  $('status-role-add').addEventListener('change', event => {
+    const roleId = event.target.value;
+    if (roleId && !statusDraft.roleIds.includes(roleId) && statusDraft.roleIds.length < MAX_MENTION_ROLES) {
+      statusDraft = {...statusDraft, roleIds: [...statusDraft.roleIds, roleId]};
+      statusDirty = true;
+    }
+
+    renderStatusChannel();
+  });
+
+  $('status-channel-save').addEventListener('click', () => {
+    void saveStatusChannel();
   });
 
   $('status-channel-disable').addEventListener('click', () => {

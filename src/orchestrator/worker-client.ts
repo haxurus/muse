@@ -2,6 +2,7 @@ import got, {type CancelableRequest, type Response} from 'got';
 import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {
   WorkerBlocklistResult,
+  WorkerGuildMeta,
   WorkerGuildSettings,
   WorkerLeaveGuildResult,
   WorkerStatus,
@@ -84,6 +85,14 @@ export default class WorkerClient {
       `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/leave`,
       requestOptions(this.worker.token),
     )).json<WorkerLeaveGuildResult>();
+  }
+
+  /** Text/announcement channels and mentionable-candidate roles of a guild, as seen by this bot. */
+  async guildMeta(guildId: string): Promise<WorkerGuildMeta> {
+    return capResponseSize(got.get(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/meta`,
+      requestOptions(this.worker.token),
+    )).json<WorkerGuildMeta>();
   }
 
   /** Replace the worker's in-memory blocklist; the worker leaves blocked guilds immediately. */

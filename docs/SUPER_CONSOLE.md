@@ -132,10 +132,11 @@ Headers: actor (required). Removes the block and pushes the blocklist.
 
 ### Bot status channel
 
-The super admin can choose one Discord channel where **every bot posts a message when it comes online**. Only the "online" event is announced (no offline, crash or deploy messages). Each bot posts itself, with its own identity, so every bot must be a member of that channel's server with **View Channel**, **Send Messages** and **Embed Links** there.
+The super admin chooses one server and one channel of it, from the servers the bots are in, where **every bot of that server posts a message when it comes online**. It is a single platform setting: it is not shown in, and cannot be changed from, the per-server consoles. Only the "online" event is announced (no offline, crash or deploy messages). Each bot posts itself, with its own identity, and needs **View Channel**, **Send Messages** and **Embed Links** in the channel; bots that are not members of the chosen server stay silent.
 
 ```ts
 type StatusChannelSetting = {
+  statusGuildId: string | null;            // server of the channel; null when disabled (or for a setting saved before the server was stored)
   statusChannelId: string | null;          // Discord channel id; null = disabled (default)
   mentionRoleIds: string[];                // 0-10 role ids pinged by every status message (default [])
   updatedAt: string | null;                // ISO 8601
@@ -163,14 +164,14 @@ The message mirrors Sentinel's "Bot avviato" message:
 
 Role mentions only notify people when the role is **mentionable** (Server Settings → Roles → "Allow anyone to @mention this role") or the bots have the **Mention @everyone, @here and All Roles** permission in the channel; otherwise Discord shows the mention without pinging anybody.
 
-The channel must be a standard text or announcement channel of a server (threads, forum posts, voice channel chats and DMs are refused with `INVALID_CHANNEL`).
+The channel must be a standard text or announcement channel of the chosen server (threads, forum posts, voice channel chats and DMs are refused with `INVALID_CHANNEL`). A bot never posts in a channel of another server than `statusGuildId`, even if the stored id was tampered with (`CHANNEL_NOT_FOUND`).
 
 Worker error codes, reported by the test action and in the worker logs:
 
 | Code | Meaning |
 | --- | --- |
 | `NOT_READY` | The bot is not connected to Discord (yet). |
-| `CHANNEL_NOT_FOUND` | The channel does not exist, or the bot is not in its server. |
+| `CHANNEL_NOT_FOUND` | The channel does not exist, the bot is not in its server, or it is not in the chosen server. |
 | `INVALID_CHANNEL` | Not a standard text or announcement channel. |
 | `MISSING_PERMISSIONS` | The bot lacks View Channel, Send Messages or Embed Links there. |
 | `DISCORD_ERROR` | Any other Discord failure (or an unexpected worker answer). |
@@ -180,25 +181,43 @@ Worker error codes, reported by the test action and in the worker logs:
 
 `200 StatusChannelSetting`. Actor headers are accepted but not required. The same object is in the overview as `statusChannel`.
 
+#### `GET /v1/super/guilds/:guildId/meta`
+
+The pickers of the status channel card. The orchestrator asks every reachable bot that is a member of the server (`GET /v1/guilds/:guildId/meta` on the worker, see `ORCHESTRATOR.md`) and merges the answers:
+
+```ts
+type MergedGuildMeta = {
+  guildId: string;
+  workerIds: string[];        // bots of the server that were asked, in configuration order
+  sourceWorkerId: string;     // the (ready) bot whose view of channels and roles is returned
+  channels: Array<{id: string; name: string; type: 'text' | 'announcement'; parentName: string | null; position: number;
+    postableBy: string[]}>;   // bots with View Channel, Send Messages and Embed Links there
+  roles: Array<{id: string; name: string; color: number; mentionable: boolean; position: number}>; // no @everyone, no managed roles
+  failed: Array<{workerId: string; error: string}>;
+};
+```
+
+`404 NOT_IN_GUILD` when no reachable bot is in the server, `503 META_UNAVAILABLE` when none of them answered, `400` for a malformed id.
+
 #### `PUT /v1/super/status-channel`
 
-Headers: actor (required). Body: `{"channelId": "<snowflake>" | null, "mentionRoleIds"?: ["<snowflake>", ...]}`. `channelId: null` disables the messages. `mentionRoleIds` omitted keeps the current roles, `[]` removes every mention; duplicates are removed, at most 10 roles.
+Headers: actor (required). Body: `{"guildId": "<snowflake>", "channelId": "<snowflake>" | null, "mentionRoleIds"?: ["<snowflake>", ...]}`. `channelId: null` disables the messages (and clears the server); otherwise `guildId` is required. `mentionRoleIds` omitted keeps the current roles when the server does not change (and none otherwise), `[]` removes every mention; duplicates are removed, at most 10 roles. The channel and the roles are checked against the bots' current view of the server (the meta route above), so only real choices are stored.
 
-- `200 StatusChannelSetting` (the stored value). Saving does not contact the bots: they read the setting the next time they announce.
-- Audited as `status_channel.set` or `status_channel.clear`, subject type `CHANNEL`, subject the new channel (or the previous one when clearing), details `{previousChannelId, statusChannelId, mentionRoleCount}`.
-- `400 INVALID_ACTOR`, `400 INVALID_BODY` (not an object), `400 INVALID_CHANNEL_ID` (missing, or neither a snowflake nor `null`), `400 INVALID_ROLE_IDS` (not an array, a value that is not a snowflake, or more than 10 roles).
+- `200 StatusChannelSetting` (the stored value). Saving does not ask the bots to post: they read the setting the next time they announce.
+- Audited as `status_channel.set` or `status_channel.clear`, subject type `CHANNEL`, subject the new channel (or the previous one when clearing), details `{previousGuildId, previousChannelId, statusGuildId, statusChannelId, mentionRoleCount}`.
+- `400 INVALID_ACTOR`, `400 INVALID_BODY` (not an object), `400 INVALID_CHANNEL_ID` (missing, or neither a snowflake nor `null`), `400 INVALID_GUILD_ID` (missing or malformed with a channel), `400 INVALID_ROLE_IDS` (not an array, a value that is not a snowflake, or more than 10 roles), `400 INVALID_STATUS_CHANNEL` (not a text or announcement channel of that server), `400 INVALID_STATUS_ROLES` (not a role of that server, `@everyone` or a managed role), `404 NOT_IN_GUILD` / `503 META_UNAVAILABLE` as for the meta route.
 
 #### `POST /v1/super/status-channel/test`
 
-Headers: actor (required). No body. Every configured worker is asked (`POST /v1/status-channel/announce` with `{channelId, test: true, mentionRoleIds}`, 10 second timeout) to post the test message in the configured channel.
+Headers: actor (required). No body. Every configured worker is asked (`POST /v1/status-channel/announce` with `{guildId, channelId, test: true, mentionRoleIds}`, 10 second timeout) to post the test message in the configured channel; bots that are not in the server answer `CHANNEL_NOT_FOUND`.
 
-- `200 {statusChannelId, results: [{workerId, ok: true} | {workerId, ok: false, error}]}` in worker order, `error` being one of the codes above.
+- `200 {statusGuildId, statusChannelId, results: [{workerId, ok: true} | {workerId, ok: false, error}]}` in worker order, `error` being one of the codes above.
 - Audited as `status_channel.test` (subject the channel, details `{mentionRoleCount, results}`), outcome `ok` (every bot posted), `partial` or `failed` (none did).
 - `400 STATUS_CHANNEL_NOT_SET` when no channel is configured; `400 INVALID_ACTOR`.
 
 ### Worker endpoints
 
-Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/blocklist`, `POST /v1/status-channel/announce`, extended `GET /v1/status`). They use each worker's control token and are only called by the orchestrator. The orchestrator route `GET /v1/worker/config` goes the other way: workers call it with their own control token.
+Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/blocklist`, `POST /v1/status-channel/announce`, `GET /v1/guilds/:guildId/meta`, extended `GET /v1/status`). They use each worker's control token and are only called by the orchestrator. The orchestrator route `GET /v1/worker/config` goes the other way: workers call it with their own control token.
 
 ### Audit and failure handling
 
@@ -215,7 +234,7 @@ Layout (Sentinel super console style):
 - kicker `SUPER CONSOLE`, title "Controllo globale di Muse.";
 - KPI row: Bot online (ready / total), Server collegati, Player attivi (sum of `activePlayers`), Blacklist;
 - **BOT · Stato dei worker**: avatar, username, worker id and bot id, Pronto / Non pronto / Offline, server and player counts, uptime, "Aggiungi a un server" (`/invite/:id`);
-- **STATO · Canale di log dei bot** (EN "STATUS · Bot status channel"): Channel ID field (client-side 17-20 digit check), "Salva", "Disattiva" (asks for confirmation) and "Invia messaggio di prova"; a role field ("Aggiungi ruolo", 17-20 digit check, no duplicates, at most 10) with removable chips, saved together with the channel by "Salva" (a hint explains Developer Mode → Server Settings → Roles → right click → Copia ID ruolo, and that the role must be mentionable or the bots need "Mention @everyone, @here and All Roles"); the current channel, number of mentioned roles and who changed it and when; after a test, one row per bot with "Pubblicato" or the translated error code. A hint explains how to copy the ID (Discord Developer Mode, right click on the channel → Copia ID canale) and the permissions every bot needs;
+- **STATO · Canale di log dei bot** (EN "STATUS · Bot status channel"): a server menu (the servers of the overview), a channel menu grouped by category (loaded from the meta route; channels where some bot cannot post are marked "⚠ non può scrivere: …" with a warning naming those bots), and a role menu with removable colored chips (at most 10; roles that are not mentionable get a warning). Changing server clears the channel and the roles. "Salva", "Invia messaggio di prova" and "Disattiva" (asks for confirmation); the current server and channel, number of mentioned roles and who changed it and when; after a test, one row per bot with "Pubblicato" or the translated error code;
 - **DISCORD · Server collegati**: icon, name, id, owner id, members, chips of the bots present, "Bloccato" tag, "Fai uscire" (all bots) and "Blocca ed espelli" (both ask for confirmation);
 - **POLICY · Blacklist**: forms to block a user or a server (client-side 17-20 digit check, optional reason up to 500 characters) and rows with "Sblocca";
 - **AUDIT · Azioni super-admin**: action, subject, actor, outcome (`ok` / `partial` / `failed`) and time.

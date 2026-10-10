@@ -8,8 +8,9 @@ import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.
 import type PlaybackWorker from '../playback/worker.js';
 import {assertGuildId} from './snowflake.js';
 import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklist.js';
-import type {WorkerBlocklistResult, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusAnnounceResult} from './types.js';
+import type {WorkerBlocklistResult, WorkerGuildMeta, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusAnnounceResult} from './types.js';
 import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
+import {buildGuildMeta} from '../status/guild-meta.js';
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -110,6 +111,11 @@ export default class WorkerControlServer {
         return;
       }
 
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'meta' && request.method === 'GET') {
+        sendJson(response, 200, this.guildMeta(segments[2]));
+        return;
+      }
+
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'settings') {
         const guildId = segments[2];
         assertGuildId(guildId);
@@ -151,6 +157,21 @@ export default class WorkerControlServer {
     }
 
     return {workerId: this.config.WORKER_ID, ...result};
+  }
+
+  /** Channels and roles for the super console status channel pickers, as seen by this bot. */
+  private guildMeta(guildId: string): WorkerGuildMeta {
+    assertGuildId(guildId);
+    if (!this.client.isReady()) {
+      throw new HttpError(503, 'worker is not connected to Discord', 'NOT_READY');
+    }
+
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) {
+      throw new HttpError(404, 'worker is not a member of that guild', 'NOT_IN_GUILD');
+    }
+
+    return {workerId: this.config.WORKER_ID, guildId: guild.id, ...buildGuildMeta(guild)};
   }
 
   private async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {

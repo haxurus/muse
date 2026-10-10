@@ -62,6 +62,8 @@ export type StatusAnnounceResult = {ok: true} | {ok: false; error: StatusAnnounc
 
 /** Body of `POST /v1/status-channel/announce` on a worker. */
 export type StatusAnnounceRequest = {
+  /** Server the channel must belong to; `null` only for settings saved before the server was stored. */
+  guildId: string | null;
   channelId: string;
   /** Super console test message instead of the startup "online" message. */
   test: boolean;
@@ -74,6 +76,36 @@ export type WorkerStatusAnnounceResult = StatusAnnounceResult & {workerId: strin
 
 /** `GET /v1/worker/config` on the orchestrator (worker control token). */
 export type WorkerPlatformConfig = {
+  statusGuildId: string | null;
   statusChannelId: string | null;
   mentionRoleIds: string[];
+};
+
+/** A channel where the status message can be posted (standard text or announcement channel). */
+export type GuildMetaChannel = {
+  id: string;
+  name: string;
+  type: 'text' | 'announcement';
+  parentName: string | null;
+  position: number;
+  /** This bot has View Channel, Send Messages and Embed Links there. */
+  canPost: boolean;
+};
+
+/** A role that can be mentioned by the status message (not @everyone, not managed by an integration). */
+export type GuildMetaRole = {
+  id: string;
+  name: string;
+  /** Discord role color as an integer (0 = no color). */
+  color: number;
+  mentionable: boolean;
+  position: number;
+};
+
+/** `GET /v1/guilds/:guildId/meta` on a worker: channels in display order, roles by position (highest first). */
+export type WorkerGuildMeta = {
+  workerId: string;
+  guildId: string;
+  channels: GuildMetaChannel[];
+  roles: GuildMetaRole[];
 };

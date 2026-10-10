@@ -85,8 +85,8 @@ const failure = (error: StatusAnnounceError): StatusAnnounceResult => ({ok: fals
 
 /**
  * Post the status embed in `channelId`, pinging exactly `mentionRoleIds` (never users, @everyone or @here).
- * The channel must be a standard text or announcement channel of a guild this bot is in, with View Channel,
- * Send Messages and Embed Links. Never throws: failures are returned as a short error code.
+ * The channel must be a standard text or announcement channel of `guildId` (when set) that this bot is in,
+ * with View Channel, Send Messages and Embed Links. Never throws: failures are returned as a short error code.
  */
 export const postStatusMessage = async (
   client: Client,
@@ -110,6 +110,11 @@ export const postStatusMessage = async (
 
   if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
     return failure('INVALID_CHANNEL');
+  }
+
+  // The setting names its server: never post in another one, even if the stored channel id was tampered with.
+  if (input.guildId !== null && channel.guild.id !== input.guildId) {
+    return failure('CHANNEL_NOT_FOUND');
   }
 
   const {me} = channel.guild.members;
@@ -152,7 +157,12 @@ export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceReques
     throw new HttpError(400, 'request body must be an object', 'INVALID_BODY');
   }
 
-  const {channelId, test, mentionRoleIds} = input as Record<string, unknown>;
+  const {guildId, channelId, test, mentionRoleIds} = input as Record<string, unknown>;
+  // Optional for settings saved before the server was stored.
+  if (guildId !== undefined && guildId !== null && !isSnowflake(guildId)) {
+    throw new HttpError(400, 'guildId must be a Discord server id or null', 'INVALID_GUILD_ID');
+  }
+
   if (!isSnowflake(channelId)) {
     throw new HttpError(400, 'channelId must be a Discord channel id', 'INVALID_CHANNEL_ID');
   }
@@ -162,5 +172,10 @@ export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceReques
   }
 
   // Optional for callers that predate role mentions.
-  return {channelId, test, mentionRoleIds: mentionRoleIds === undefined ? [] : parseMentionRoleIds(mentionRoleIds)};
+  return {
+    guildId: isSnowflake(guildId) ? guildId : null,
+    channelId,
+    test,
+    mentionRoleIds: mentionRoleIds === undefined ? [] : parseMentionRoleIds(mentionRoleIds),
+  };
 };

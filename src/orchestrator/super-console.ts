@@ -11,6 +11,7 @@ import {
 import type WorkerClient from './worker-client.js';
 import {isPlainObject, isPrintable} from './durable-file.js';
 import type {PlatformSettingsStore} from './platform-store.js';
+import {mergeGuildMeta, type MergedGuildMeta} from './guild-meta.js';
 import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {
   MAX_ACTOR_NAME_LENGTH,
@@ -188,6 +189,15 @@ export default class SuperConsole {
         : {statusCode: 200, body: await this.deleteBlock(kind, subjectId, actor)};
     }
 
+    if (request.method === 'GET'
+      && segments.length === 5
+      && segments[1] === 'super'
+      && segments[2] === 'guilds'
+      && segments[4] === 'meta') {
+      assertGuildId(segments[3]);
+      return {statusCode: 200, body: await this.guildMeta(segments[3])};
+    }
+
     if (segments.length >= 3 && segments[1] === 'super' && segments[2] === 'status-channel') {
       return this.statusChannelRoute(request, segments.slice(3));
     }
@@ -328,7 +338,7 @@ export default class SuperConsole {
 
     if (rest.length === 0 && request.method === 'PUT') {
       const actor = parseActor(request);
-      return {statusCode: 200, body: this.setStatusChannel(await readJsonBody(request), actor)};
+      return {statusCode: 200, body: await this.setStatusChannel(await readJsonBody(request), actor)};
     }
 
     if (rest.length === 1 && rest[0] === 'test' && request.method === 'POST') {
@@ -339,22 +349,63 @@ export default class SuperConsole {
     return undefined;
   }
 
-  setStatusChannel(input: unknown, actor: Actor) {
+  /** Channel and role pickers of the status channel card: one bot's view plus which bots can post where. */
+  async guildMeta(guildId: string): Promise<MergedGuildMeta> {
+    const statuses = await this.statuses();
+    const present = this.workers.flatMap(worker => {
+      const status = statuses.find(result => result.workerId === worker.id);
+      return status?.ok && status.value.guilds.some(guild => guild.id === guildId)
+        ? [{worker, ready: status.value.discordReady}]
+        : [];
+    });
+    if (present.length === 0) {
+      throw new HttpError(404, 'no reachable bot is a member of that guild', 'NOT_IN_GUILD');
+    }
+
+    const answers = await Promise.all(present.map(async ({worker, ready}) => ({
+      ready,
+      result: await settle<unknown>(worker.id, worker.guildMeta(guildId)),
+    })));
+    return mergeGuildMeta(guildId, answers);
+  }
+
+  /**
+   * Save the server, channel and mentioned roles (`channelId: null` disables the messages). The channel
+   * and roles are checked against what the bots in that server currently see, so only real choices are stored.
+   */
+  async setStatusChannel(input: unknown, actor: Actor) {
     const body = objectBody(input);
-    const {channelId} = body;
+    const {guildId, channelId} = body;
     if (channelId !== null && !isSnowflake(channelId)) {
       throw new HttpError(400, 'channelId must be a Discord channel id or null', 'INVALID_CHANNEL_ID');
     }
 
+    if (channelId !== null && !isSnowflake(guildId)) {
+      throw new HttpError(400, 'guildId must be the Discord server id of the channel', 'INVALID_GUILD_ID');
+    }
+
     const current = this.platform.statusChannel();
-    // Omitted means "keep the current roles"; [] removes every mention.
-    const mentionRoleIds = body.mentionRoleIds === undefined ? current.mentionRoleIds : parseMentionRoleIds(body.mentionRoleIds);
+    const statusGuildId = channelId === null || !isSnowflake(guildId) ? null : guildId;
+    // Omitted means "keep the current roles" (only within the same server); [] removes every mention.
+    const keptRoleIds = statusGuildId === current.statusGuildId ? current.mentionRoleIds : [];
+    const mentionRoleIds = body.mentionRoleIds === undefined ? keptRoleIds : parseMentionRoleIds(body.mentionRoleIds);
+    if (channelId !== null && statusGuildId !== null) {
+      const meta = await this.guildMeta(statusGuildId);
+      if (!meta.channels.some(channel => channel.id === channelId)) {
+        throw new HttpError(400, 'channelId must be a text or announcement channel of that server', 'INVALID_STATUS_CHANNEL');
+      }
+
+      if (!mentionRoleIds.every(roleId => meta.roles.some(role => role.id === roleId))) {
+        throw new HttpError(400, 'mentionRoleIds must be roles of that server (not @everyone, not managed roles)', 'INVALID_STATUS_ROLES');
+      }
+    }
+
     const previousChannelId = current.statusChannelId;
     const action = channelId === null ? 'status_channel.clear' : 'status_channel.set';
     const subjectId = channelId ?? previousChannelId ?? 'none';
     const setting = this.persist(
       {actor, action, subjectType: 'CHANNEL', subjectId},
-      () => this.platform.setStatusChannel(channelId, mentionRoleIds, actor),
+      () => this.platform.setStatusChannel(statusGuildId, channelId, mentionRoleIds, actor),
     );
 
     this.record({
@@ -362,7 +413,13 @@ export default class SuperConsole {
       action,
       subjectType: 'CHANNEL',
       subjectId,
-      details: {previousChannelId, statusChannelId: channelId, mentionRoleCount: mentionRoleIds.length},
+      details: {
+        previousGuildId: current.statusGuildId,
+        previousChannelId,
+        statusGuildId,
+        statusChannelId: channelId,
+        mentionRoleCount: mentionRoleIds.length,
+      },
       outcome: 'ok',
     });
 
@@ -371,12 +428,12 @@ export default class SuperConsole {
 
   /** Every worker posts a test message in the configured channel; unreachable workers are reported, never fatal. */
   async testStatusChannel(actor: Actor) {
-    const {statusChannelId, mentionRoleIds} = this.platform.statusChannel();
+    const {statusGuildId, statusChannelId, mentionRoleIds} = this.platform.statusChannel();
     if (statusChannelId === null) {
       throw new HttpError(400, 'no status channel is configured', 'STATUS_CHANNEL_NOT_SET');
     }
 
-    const settled = await Promise.all(this.workers.map(async worker => settle(worker.id, worker.announceStatus({channelId: statusChannelId, test: true, mentionRoleIds}))));
+    const settled = await Promise.all(this.workers.map(async worker => settle(worker.id, worker.announceStatus({guildId: statusGuildId, channelId: statusChannelId, test: true, mentionRoleIds}))));
     const results = settled.map(result => statusTestResult(result));
     const succeeded = results.filter(result => result.ok).length;
 
@@ -389,7 +446,7 @@ export default class SuperConsole {
       outcome: outcomeOf(succeeded, results.length - succeeded),
     });
 
-    return {statusChannelId, results};
+    return {statusGuildId, statusChannelId, results};
   }
 
   async leaveGuild(guildId: string, input: unknown, actor: Actor) {

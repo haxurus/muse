@@ -43,8 +43,13 @@ export const fetchWorkerPlatformConfig = async (
     throw new Error('Invalid worker config');
   }
 
-  const {statusChannelId, mentionRoleIds} = body as {statusChannelId?: unknown; mentionRoleIds?: unknown};
+  const {statusGuildId, statusChannelId, mentionRoleIds} = body as {statusGuildId?: unknown; statusChannelId?: unknown; mentionRoleIds?: unknown};
   if (statusChannelId !== null && !isSnowflake(statusChannelId)) {
+    throw new Error('Invalid worker config');
+  }
+
+  // A missing server (older orchestrator or setting) means "any server this bot is in".
+  if (statusGuildId !== undefined && statusGuildId !== null && !isSnowflake(statusGuildId)) {
     throw new Error('Invalid worker config');
   }
 
@@ -58,7 +63,7 @@ export const fetchWorkerPlatformConfig = async (
     roles = mentionRoleIds;
   }
 
-  return {statusChannelId, mentionRoleIds: roles};
+  return {statusGuildId: isSnowflake(statusGuildId) ? statusGuildId : null, statusChannelId, mentionRoleIds: roles};
 };
 
 export type StatusAnnouncerDependencies = {
@@ -122,14 +127,19 @@ export default class StatusAnnouncer {
       return 'failed';
     }
 
-    const {statusChannelId, mentionRoleIds} = config;
+    const {statusGuildId, statusChannelId, mentionRoleIds} = config;
     if (statusChannelId === null) {
+      return 'skipped';
+    }
+
+    // Bots that are not members of the chosen server stay silent instead of logging a failure.
+    if (statusGuildId !== null && !this.client.guilds.cache.has(statusGuildId)) {
       return 'skipped';
     }
 
     // Count every attempt, so a channel with missing permissions is not retried on each reconnect.
     this.lastPostedAt = this.dependencies.now();
-    const result = await this.dependencies.post(this.client, {channelId: statusChannelId, workerId: this.config.WORKER_ID, test: false, mentionRoleIds});
+    const result = await this.dependencies.post(this.client, {guildId: statusGuildId, channelId: statusChannelId, workerId: this.config.WORKER_ID, test: false, mentionRoleIds});
     if (!result.ok) {
       console.warn(`Status channel: online message not posted in ${statusChannelId} (${result.error})`);
       return 'failed';

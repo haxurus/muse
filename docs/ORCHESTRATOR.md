@@ -58,6 +58,7 @@ PATCH /v1/guilds/:guildId/settings
 POST  /v1/guilds/:guildId/leave
 PUT   /v1/blocklist
 POST  /v1/status-channel/announce
+GET   /v1/guilds/:guildId/meta
 POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "true")
 ```
 
@@ -67,7 +68,9 @@ POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "t
 
 `PUT /v1/blocklist` with `{guildIds: string[], userIds: string[]}` (Discord ids, at most 5000 each, duplicates removed, body up to 512 KiB) replaces the worker's in-memory blocklist and immediately leaves every blocked guild it is in: `200 {workerId, left: string[], failed: string[]}` (`failed` lists guilds it could not leave). Invalid input is `400 {error, code: "INVALID_BLOCKLIST"}` and leaves the current list unchanged.
 
-`POST /v1/status-channel/announce` with `{channelId: string, test: boolean, mentionRoleIds?: string[]}` makes the bot post its status embed (the "Bot started" message, or the super console test message when `test` is `true`) in that channel, pinging exactly those roles (0-10, default none; invalid lists are `400 INVALID_ROLE_IDS`). Discord-side failures are not HTTP errors: the answer is always `200 {workerId, ok: true}` or `200 {workerId, ok: false, error}` with `error` one of `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR` (see `SUPER_CONSOLE.md`). A malformed body is `400` with `INVALID_CHANNEL_ID` or `INVALID_BODY`.
+`GET /v1/guilds/:guildId/meta` lists, for the super console pickers, the guild's text and announcement channels in Discord sidebar order (`{id, name, type: 'text' | 'announcement', parentName, position, canPost}`, `canPost` meaning this bot has View Channel, Send Messages and Embed Links there) and its roles by position, without `@everyone` and managed roles (`{id, name, color, mentionable, position}`): `200 {workerId, guildId, channels, roles}`, `404 NOT_IN_GUILD`, `503 NOT_READY`.
+
+`POST /v1/status-channel/announce` with `{guildId?: string | null, channelId: string, test: boolean, mentionRoleIds?: string[]}` makes the bot post its status embed (the "Bot started" message, or the super console test message when `test` is `true`) in that channel, pinging exactly those roles (0-10, default none; invalid lists are `400 INVALID_ROLE_IDS`). Discord-side failures are not HTTP errors: the answer is always `200 {workerId, ok: true}` or `200 {workerId, ok: false, error}` with `error` one of `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR` (see `SUPER_CONSOLE.md`). When `guildId` is set, a channel of any other server is refused with `CHANNEL_NOT_FOUND`. A malformed body is `400` with `INVALID_CHANNEL_ID`, `INVALID_GUILD_ID` or `INVALID_BODY`.
 
 The settings endpoint only accepts the existing Muse guild settings:
 
@@ -107,6 +110,7 @@ POST   /v1/super/guilds/:guildId/leave
 PUT    /v1/super/blocks/:kind/:subjectId
 DELETE /v1/super/blocks/:kind/:subjectId
 GET    /v1/super/status-channel
+GET    /v1/super/guilds/:guildId/meta
 PUT    /v1/super/status-channel
 POST   /v1/super/status-channel/test
 GET    /v1/blocks/users/:userId
@@ -144,7 +148,7 @@ muse-0N  --GET /v1/worker/config, Bearer control_token_0N-->  orchestrator
 ```
 
 - The caller is identified only by its bearer token, which must match exactly one configured worker (any worker, not only playback pilots); otherwise `401`. The orchestrator API token is refused with `403 {code: "WORKER_TOKEN_REQUIRED"}`, so the route never doubles as an admin entry point. Methods other than `GET` are `405`.
-- `200 {statusChannelId: string | null, mentionRoleIds: string[]}`: the bot status channel chosen in the super console (`SUPER_CONSOLE.md`), or `null` when disabled, and the roles its messages mention. Nothing else is exposed.
+- `200 {statusGuildId: string | null, statusChannelId: string | null, mentionRoleIds: string[]}`: the server and bot status channel chosen in the super console (`SUPER_CONSOLE.md`), or `null` when disabled, and the roles its messages mention. Bots that are not in `statusGuildId` do not announce. Nothing else is exposed.
 - Workers call it in the background after becoming ready (5 second timeout, at most once per announcement) at `MUSE_ORCHESTRATOR_URL` (default `http://orchestrator:3100`); a failure is only logged.
 
 ### Control token reuse and rotation

@@ -111,14 +111,14 @@ describe('orchestrator status channel client', () => {
     gotMock.post.mockReturnValue(jsonResult({statusChannelId: '666666666666666666', results: []}));
 
     await expect(client.superStatusChannel(actor)).resolves.toEqual({statusChannelId: null, updatedAt: null, updatedBy: null});
-    await client.superSetStatusChannel({channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']}, actor);
+    await client.superSetStatusChannel({guildId: '555555555555555551', channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']}, actor);
     await client.superSetStatusChannel({channelId: null}, actor);
     await expect(client.superTestStatusChannel(actor)).resolves.toEqual({statusChannelId: '666666666666666666', results: []});
 
     expect(gotMock.get.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel');
     expect(gotMock.put.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel');
     expect(gotMock.post.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/status-channel/test');
-    expect(optionsOf(gotMock.put, 0).json).toEqual({channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']});
+    expect(optionsOf(gotMock.put, 0).json).toEqual({guildId: '555555555555555551', channelId: '666666666666666666', mentionRoleIds: ['777777777777777771']});
     expect(optionsOf(gotMock.put, 1).json).toEqual({channelId: null});
     expect(optionsOf(gotMock.post).json).toBeUndefined();
 
@@ -129,5 +129,14 @@ describe('orchestrator status channel client', () => {
         'x-muse-actor-name': 'haxurus',
       });
     }
+  });
+
+  it('reads the channel and role pickers of a server with the actor headers', async () => {
+    const client = new OrchestratorClient(config);
+    gotMock.get.mockReturnValue(jsonResult({guildId: '555555555555555551', channels: [], roles: []}));
+
+    await expect(client.superGuildMeta('555555555555555551', actor)).resolves.toMatchObject({guildId: '555555555555555551'});
+    expect(gotMock.get.mock.calls[0][0]).toBe('http://orchestrator:3100/v1/super/guilds/555555555555555551/meta');
+    expect(optionsOf(gotMock.get).headers).toMatchObject({'x-muse-actor-id': actor.userId});
   });
 });

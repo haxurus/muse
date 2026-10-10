@@ -17,6 +17,8 @@ import {fetchWorkerPlatformConfig} from '../src/status/startup-announcer.js';
 
 const apiToken = 'a'.repeat(32);
 const actorId = '123456789012345678';
+const guildId = '111111111111111111';
+const otherGuildId = '222222222222222222';
 const channelId = '987654321098765432';
 const otherChannelId = '876543210987654321';
 const roleA = '555555555555555551';
@@ -32,6 +34,8 @@ type FakeWorker = {
   down: boolean;
   /** Body answered to POST /v1/status-channel/announce. */
   announce: unknown;
+  /** Guilds this fake bot is a member of. */
+  guilds: string[];
   server: Server;
 };
 
@@ -67,8 +71,23 @@ const json = (response: ServerResponse, status: number, body: unknown) => {
   response.end(JSON.stringify(body));
 };
 
+const guildMeta = (workerId: string, metaGuildId: string) => ({
+  workerId,
+  guildId: metaGuildId,
+  channels: [
+    {id: channelId, name: 'bot-log', type: 'text', parentName: 'Staff', position: 0, canPost: true},
+    {id: otherChannelId, name: 'news', type: 'announcement', parentName: null, position: 1, canPost: workerId === 'muse-01'},
+  ],
+  roles: [
+    {id: roleA, name: 'Admin', color: 0, mentionable: true, position: 2},
+    {id: roleB, name: 'Staff', color: 16_711_680, mentionable: false, position: 1},
+  ],
+});
+
+const META_PATH = /^\/v1\/guilds\/(\d+)\/meta$/u;
+
 const startFakeWorker = async (id: string, announce: unknown = {workerId: id, ok: true}): Promise<FakeWorker> => {
-  const worker = {id, token: `${id}-`.padEnd(32, 't'), requests: [] as Recorded[], down: false, announce} as FakeWorker;
+  const worker = {id, token: `${id}-`.padEnd(32, 't'), requests: [] as Recorded[], down: false, announce, guilds: [guildId]} as FakeWorker;
   worker.server = createServer((request, response) => {
     void (async () => {
       const body = await readBody(request);
@@ -79,7 +98,25 @@ const startFakeWorker = async (id: string, announce: unknown = {workerId: id, ok
       }
 
       if (request.method === 'GET' && request.url === '/v1/status') {
-        json(response, 200, {workerId: id, discordReady: true, bot: {id: '900000000000000001', username: id}, guilds: [], players: [], uptimeSeconds: 1});
+        json(response, 200, {
+          workerId: id,
+          discordReady: true,
+          bot: {id: '900000000000000001', username: id},
+          guilds: worker.guilds.map(memberGuildId => ({id: memberGuildId, name: `Guild ${memberGuildId}`})),
+          players: [],
+          uptimeSeconds: 1,
+        });
+        return;
+      }
+
+      const meta = META_PATH.exec(request.url ?? '');
+      if (request.method === 'GET' && meta) {
+        if (worker.guilds.includes(meta[1])) {
+          json(response, 200, guildMeta(id, meta[1]));
+        } else {
+          json(response, 404, {error: 'worker is not a member of that guild', code: 'NOT_IN_GUILD'});
+        }
+
         return;
       }
 
@@ -150,21 +187,32 @@ describe('platform settings store', () => {
   it('starts disabled, persists the status channel and survives a reload', () => {
     const filePath = path.join(tempDirectory(), 'platform-settings.json');
     const store = new PlatformSettingsStore(filePath);
-    expect(store.statusChannel()).toEqual({statusChannelId: null, mentionRoleIds: [], updatedAt: null, updatedBy: null});
+    expect(store.statusChannel()).toEqual({statusGuildId: null, statusChannelId: null, mentionRoleIds: [], updatedAt: null, updatedBy: null});
 
-    const saved = store.setStatusChannel(channelId, [roleA, roleB], {userId: actorId, username: 'Admin'});
-    expect(saved).toEqual({statusChannelId: channelId, mentionRoleIds: [roleA, roleB], updatedAt: expect.any(String), updatedBy: {userId: actorId, username: 'Admin'}});
+    const saved = store.setStatusChannel(guildId, channelId, [roleA, roleB], {userId: actorId, username: 'Admin'});
+    expect(saved).toEqual({
+      statusGuildId: guildId,
+      statusChannelId: channelId,
+      mentionRoleIds: [roleA, roleB],
+      updatedAt: expect.any(String),
+      updatedBy: {userId: actorId, username: 'Admin'},
+    });
     expect(new PlatformSettingsStore(filePath).statusChannel()).toEqual(saved);
     expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({version: 1, statusChannel: saved});
 
-    store.setStatusChannel(null, [], {userId: actorId, username: 'Admin'});
-    expect(new PlatformSettingsStore(filePath).statusChannel()).toMatchObject({statusChannelId: null, mentionRoleIds: []});
+    // Disabling clears the server too.
+    store.setStatusChannel(guildId, null, [], {userId: actorId, username: 'Admin'});
+    expect(new PlatformSettingsStore(filePath).statusChannel()).toMatchObject({statusGuildId: null, statusChannelId: null, mentionRoleIds: []});
   });
 
-  it('reads a file without role mentions as no mentions and rejects invalid role lists', () => {
+  it('reads a file without server or role mentions as legacy values and rejects invalid ones', () => {
     const filePath = path.join(tempDirectory(), 'platform-settings.json');
     writeFileSync(filePath, JSON.stringify({version: 1, statusChannel: {statusChannelId: channelId, updatedAt: null, updatedBy: null}}));
-    expect(new PlatformSettingsStore(filePath).statusChannel()).toEqual({statusChannelId: channelId, mentionRoleIds: [], updatedAt: null, updatedBy: null});
+    expect(new PlatformSettingsStore(filePath).statusChannel()).toEqual({statusGuildId: null, statusChannelId: channelId, mentionRoleIds: [], updatedAt: null, updatedBy: null});
+
+    const badGuild = path.join(tempDirectory(), 'platform-settings.json');
+    writeFileSync(badGuild, JSON.stringify({version: 1, statusChannel: {statusGuildId: 'nope', statusChannelId: channelId, updatedAt: null, updatedBy: null}}));
+    expect(() => new PlatformSettingsStore(badGuild)).toThrow(/invalid schema/);
 
     for (const mentionRoleIds of [['nope'], [roleA, roleA], Array.from({length: 11}, (_, index) => `5555555555555555${String(index).padStart(2, '0')}`)]) {
       const other = path.join(tempDirectory(), 'platform-settings.json');
@@ -176,8 +224,8 @@ describe('platform settings store', () => {
   it('recovers from the backup and refuses an invalid file without one', () => {
     const filePath = path.join(tempDirectory(), 'platform-settings.json');
     const store = new PlatformSettingsStore(filePath);
-    store.setStatusChannel(channelId, [], {userId: actorId, username: 'Admin'});
-    store.setStatusChannel(otherChannelId, [], {userId: actorId, username: 'Admin'});
+    store.setStatusChannel(guildId, channelId, [], {userId: actorId, username: 'Admin'});
+    store.setStatusChannel(guildId, otherChannelId, [], {userId: actorId, username: 'Admin'});
     writeFileSync(filePath, JSON.stringify({version: 1, statusChannel: {statusChannelId: 'nope', updatedAt: null, updatedBy: null}}));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(new PlatformSettingsStore(filePath).statusChannel().statusChannelId).toBe(channelId);
@@ -203,11 +251,12 @@ describe('super console status channel API', () => {
     const {call} = await startOrchestrator([one]);
     for (const [method, url] of [
       ['GET', '/v1/super/status-channel'],
+      ['GET', `/v1/super/guilds/${guildId}/meta`],
       ['PUT', '/v1/super/status-channel'],
       ['POST', '/v1/super/status-channel/test'],
     ]) {
-      expect((await call(method, url, {token: null, headers: actor(), ...(method === 'GET' ? {} : {body: {channelId}})})).status).toBe(401);
-      expect((await call(method, url, {token: one.token, headers: actor(), ...(method === 'GET' ? {} : {body: {channelId}})})).status).toBe(401);
+      expect((await call(method, url, {token: null, headers: actor(), ...(method === 'GET' ? {} : {body: {guildId, channelId}})})).status).toBe(401);
+      expect((await call(method, url, {token: one.token, headers: actor(), ...(method === 'GET' ? {} : {body: {guildId, channelId}})})).status).toBe(401);
     }
 
     expect(announces(one)).toEqual([]);
@@ -216,25 +265,30 @@ describe('super console status channel API', () => {
   it('starts disabled and reports the setting in the overview', async () => {
     const one = await startFakeWorker('muse-01');
     const {call} = await startOrchestrator([one]);
-    const disabled = {statusChannelId: null, mentionRoleIds: [], updatedAt: null, updatedBy: null};
+    const disabled = {statusGuildId: null, statusChannelId: null, mentionRoleIds: [], updatedAt: null, updatedBy: null};
     expect(await call('GET', '/v1/super/status-channel')).toEqual({status: 200, body: disabled});
     expect((await call('GET', '/v1/super/overview')).body.statusChannel).toEqual(disabled);
   });
 
   it.each([
-    ['a missing channelId', {}, 'INVALID_CHANNEL_ID'],
-    ['a malformed channelId', {channelId: '12ab'}, 'INVALID_CHANNEL_ID'],
-    ['a numeric channelId', {channelId: 987_654_321_098_765}, 'INVALID_CHANNEL_ID'],
-    ['an array body', [channelId], 'INVALID_BODY'],
-    ['role ids that are not an array', {channelId, mentionRoleIds: roleA}, 'INVALID_ROLE_IDS'],
-    ['a malformed role id', {channelId, mentionRoleIds: [roleA, '@everyone']}, 'INVALID_ROLE_IDS'],
-    ['a numeric role id', {channelId, mentionRoleIds: [555_555_555_555_555]}, 'INVALID_ROLE_IDS'],
-    ['more than 10 roles', {channelId, mentionRoleIds: Array.from({length: 11}, (_, index) => `5555555555555555${String(index).padStart(2, '0')}`)}, 'INVALID_ROLE_IDS'],
-  ])('rejects %s without saving or auditing', async (_label, body, code) => {
+    ['a missing channelId', {guildId}, 400, 'INVALID_CHANNEL_ID'],
+    ['a malformed channelId', {guildId, channelId: '12ab'}, 400, 'INVALID_CHANNEL_ID'],
+    ['a numeric channelId', {guildId, channelId: 987_654_321_098_765}, 400, 'INVALID_CHANNEL_ID'],
+    ['a missing guildId', {channelId}, 400, 'INVALID_GUILD_ID'],
+    ['a malformed guildId', {guildId: 'guild', channelId}, 400, 'INVALID_GUILD_ID'],
+    ['an array body', [channelId], 400, 'INVALID_BODY'],
+    ['role ids that are not an array', {guildId, channelId, mentionRoleIds: roleA}, 400, 'INVALID_ROLE_IDS'],
+    ['a malformed role id', {guildId, channelId, mentionRoleIds: [roleA, '@everyone']}, 400, 'INVALID_ROLE_IDS'],
+    ['a numeric role id', {guildId, channelId, mentionRoleIds: [555_555_555_555_555]}, 400, 'INVALID_ROLE_IDS'],
+    ['more than 10 roles', {guildId, channelId, mentionRoleIds: Array.from({length: 11}, (_, index) => `5555555555555555${String(index).padStart(2, '0')}`)}, 400, 'INVALID_ROLE_IDS'],
+    ['a channel of another server', {guildId, channelId: '333333333333333333'}, 400, 'INVALID_STATUS_CHANNEL'],
+    ['a role of another server', {guildId, channelId, mentionRoleIds: ['444444444444444444']}, 400, 'INVALID_STATUS_ROLES'],
+    ['a server without bots', {guildId: otherGuildId, channelId}, 404, 'NOT_IN_GUILD'],
+  ])('rejects %s without saving or auditing', async (_label, body, status, code) => {
     const one = await startFakeWorker('muse-01');
     const {call, directory} = await startOrchestrator([one]);
     const result = await call('PUT', '/v1/super/status-channel', {headers: actor(), body});
-    expect(result.status).toBe(400);
+    expect(result.status).toBe(status);
     expect(result.body.code).toBe(code);
     expect(() => readFileSync(path.join(directory, 'platform-settings.json'))).toThrow();
     expect((await call('GET', '/v1/super/overview')).body.audit).toEqual([]);
@@ -243,7 +297,7 @@ describe('super console status channel API', () => {
   it('requires the actor on mutations', async () => {
     const one = await startFakeWorker('muse-01');
     const {call} = await startOrchestrator([one]);
-    expect((await call('PUT', '/v1/super/status-channel', {body: {channelId}})).body.code).toBe('INVALID_ACTOR');
+    expect((await call('PUT', '/v1/super/status-channel', {body: {guildId, channelId}})).body.code).toBe('INVALID_ACTOR');
     expect((await call('POST', '/v1/super/status-channel/test')).body.code).toBe('INVALID_ACTOR');
   });
 
@@ -251,8 +305,9 @@ describe('super console status channel API', () => {
     const one = await startFakeWorker('muse-01');
     const {call, directory} = await startOrchestrator([one]);
 
-    const saved = await call('PUT', '/v1/super/status-channel', {headers: actor(encodeURIComponent('Alessio 🎧')), body: {channelId}});
+    const saved = await call('PUT', '/v1/super/status-channel', {headers: actor(encodeURIComponent('Alessio 🎧')), body: {guildId, channelId}});
     expect(saved).toEqual({status: 200, body: {
+      statusGuildId: guildId,
       statusChannelId: channelId,
       mentionRoleIds: [],
       updatedAt: expect.any(String),
@@ -263,7 +318,7 @@ describe('super console status channel API', () => {
     expect(JSON.parse(readFileSync(path.join(directory, 'platform-settings.json'), 'utf8')).statusChannel).toEqual(saved.body);
 
     const cleared = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId: null}});
-    expect(cleared.body).toMatchObject({statusChannelId: null, updatedBy: {userId: actorId, username: 'Admin'}});
+    expect(cleared.body).toMatchObject({statusGuildId: null, statusChannelId: null, updatedBy: {userId: actorId, username: 'Admin'}});
 
     const {body} = await call('GET', '/v1/super/overview');
     expect(body.audit).toEqual([
@@ -271,7 +326,7 @@ describe('super console status channel API', () => {
         action: 'status_channel.clear',
         subjectType: 'CHANNEL',
         subjectId: channelId,
-        details: {previousChannelId: channelId, statusChannelId: null, mentionRoleCount: 0},
+        details: {previousGuildId: guildId, previousChannelId: channelId, statusGuildId: null, statusChannelId: null, mentionRoleCount: 0},
         outcome: 'ok',
       }),
       expect.objectContaining({
@@ -279,7 +334,7 @@ describe('super console status channel API', () => {
         subjectType: 'CHANNEL',
         subjectId: channelId,
         actor: {userId: actorId, username: 'Alessio 🎧'},
-        details: {previousChannelId: null, statusChannelId: channelId, mentionRoleCount: 0},
+        details: {previousGuildId: null, previousChannelId: null, statusGuildId: guildId, statusChannelId: channelId, mentionRoleCount: 0},
         outcome: 'ok',
       }),
     ]);
@@ -287,22 +342,31 @@ describe('super console status channel API', () => {
     expect(announces(one)).toEqual([]);
   });
 
-  it('stores deduplicated role mentions, keeps them when omitted and clears them with []', async () => {
+  it('stores deduplicated role mentions, keeps them within the same server and clears them with []', async () => {
     const one = await startFakeWorker('muse-01');
+    one.guilds = [guildId, otherGuildId];
     const {call} = await startOrchestrator([one]);
 
-    const saved = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId, mentionRoleIds: [roleA, roleB, roleA]}});
+    const saved = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId, mentionRoleIds: [roleA, roleB, roleA]}});
     expect(saved.status).toBe(200);
     expect(saved.body.mentionRoleIds).toEqual([roleA, roleB]);
-    expect((await call('GET', '/v1/super/overview')).body.audit[0].details).toEqual({previousChannelId: null, statusChannelId: channelId, mentionRoleCount: 2});
+    expect((await call('GET', '/v1/super/overview')).body.audit[0].details).toEqual({
+      previousGuildId: null,
+      previousChannelId: null,
+      statusGuildId: guildId,
+      statusChannelId: channelId,
+      mentionRoleCount: 2,
+    });
 
-    // Omitted: the roles are kept, also when the channel is disabled.
-    const moved = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId: otherChannelId}});
-    expect(moved.body).toMatchObject({statusChannelId: otherChannelId, mentionRoleIds: [roleA, roleB]});
-    expect((await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId: null}})).body.mentionRoleIds).toEqual([roleA, roleB]);
-    expect((await call('GET', '/v1/super/overview')).body.statusChannel.mentionRoleIds).toEqual([roleA, roleB]);
+    // Omitted: the roles are kept for another channel of the same server...
+    const moved = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId: otherChannelId}});
+    expect(moved.body).toMatchObject({statusGuildId: guildId, statusChannelId: otherChannelId, mentionRoleIds: [roleA, roleB]});
+    // ...but never carried over to another server, whose roles are different.
+    const elsewhere = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId: otherGuildId, channelId}});
+    expect(elsewhere.body).toMatchObject({statusGuildId: otherGuildId, statusChannelId: channelId, mentionRoleIds: []});
 
-    const cleared = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId, mentionRoleIds: []}});
+    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId, mentionRoleIds: [roleA]}});
+    const cleared = await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId, mentionRoleIds: []}});
     expect(cleared.body).toMatchObject({statusChannelId: channelId, mentionRoleIds: []});
     expect((await call('GET', '/v1/super/overview')).body.audit[0].details.mentionRoleCount).toBe(0);
   });
@@ -310,11 +374,47 @@ describe('super console status channel API', () => {
   it('keeps the setting across an orchestrator restart', async () => {
     const one = await startFakeWorker('muse-01');
     const first = await startOrchestrator([one]);
-    await first.call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId, mentionRoleIds: [roleA]}});
+    await first.call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId, mentionRoleIds: [roleA]}});
     await first.server.close();
 
     const second = await startOrchestrator([one], first.directory);
-    expect((await second.call('GET', '/v1/super/status-channel')).body).toMatchObject({statusChannelId: channelId, mentionRoleIds: [roleA]});
+    expect((await second.call('GET', '/v1/super/status-channel')).body).toMatchObject({statusGuildId: guildId, statusChannelId: channelId, mentionRoleIds: [roleA]});
+  });
+});
+
+describe('super console guild meta', () => {
+  it('merges the channels and roles of the bots in the server, with who can post where', async () => {
+    const one = await startFakeWorker('muse-01');
+    const two = await startFakeWorker('muse-02');
+    const three = await startFakeWorker('muse-03');
+    three.guilds = [otherGuildId];
+    const {call} = await startOrchestrator([one, two, three]);
+
+    const result = await call('GET', `/v1/super/guilds/${guildId}/meta`);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      guildId,
+      workerIds: ['muse-01', 'muse-02'],
+      sourceWorkerId: 'muse-01',
+      channels: [
+        {id: channelId, name: 'bot-log', type: 'text', parentName: 'Staff', position: 0, postableBy: ['muse-01', 'muse-02']},
+        {id: otherChannelId, name: 'news', type: 'announcement', parentName: null, position: 1, postableBy: ['muse-01']},
+      ],
+      roles: guildMeta('muse-01', guildId).roles,
+      failed: [],
+    });
+    // Only the bots that are members of the server are asked.
+    expect(three.requests.some(request => request.url.endsWith('/meta'))).toBe(false);
+  });
+
+  it('answers 404 NOT_IN_GUILD when no reachable bot is in the server, and 400 for a bad id', async () => {
+    const one = await startFakeWorker('muse-01');
+    const {call} = await startOrchestrator([one]);
+    expect(await call('GET', `/v1/super/guilds/${otherGuildId}/meta`)).toEqual({
+      status: 404,
+      body: {error: 'no reachable bot is a member of that guild', code: 'NOT_IN_GUILD'},
+    });
+    expect((await call('GET', '/v1/super/guilds/nope/meta')).status).toBe(400);
   });
 });
 
@@ -336,10 +436,11 @@ describe('super console status channel test', () => {
     three.down = true;
     const four = await startFakeWorker('muse-04', {workerId: 'muse-04', ok: false, error: 'SOMETHING_ELSE', detail: 'x'});
     const {call} = await startOrchestrator([one, two, three, four]);
-    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId, mentionRoleIds: [roleA, roleB]}});
+    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId, mentionRoleIds: [roleA, roleB]}});
 
     const result = await call('POST', '/v1/super/status-channel/test', {headers: actor()});
     expect(result).toEqual({status: 200, body: {
+      statusGuildId: guildId,
       statusChannelId: channelId,
       results: [
         {workerId: 'muse-01', ok: true},
@@ -354,7 +455,7 @@ describe('super console status channel test', () => {
         method: 'POST',
         url: '/v1/status-channel/announce',
         authorization: `Bearer ${worker.token}`,
-        body: {channelId, test: true, mentionRoleIds: [roleA, roleB]},
+        body: {guildId, channelId, test: true, mentionRoleIds: [roleA, roleB]},
       }]);
     }
 
@@ -373,7 +474,7 @@ describe('super console status channel test', () => {
     const one = await startFakeWorker('muse-01');
     const two = await startFakeWorker('muse-02');
     const {call} = await startOrchestrator([one, two]);
-    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId}});
+    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId}});
 
     await call('POST', '/v1/super/status-channel/test', {headers: actor()});
     expect((await call('GET', '/v1/super/overview')).body.audit[0]).toMatchObject({action: 'status_channel.test', outcome: 'ok'});
@@ -394,13 +495,14 @@ describe('worker config route', () => {
     const one = await startFakeWorker('muse-01');
     const two = await startFakeWorker('muse-02');
     const {call, baseUrl} = await startOrchestrator([one, two]);
-    expect(await call('GET', '/v1/worker/config', {token: one.token})).toEqual({status: 200, body: {statusChannelId: null, mentionRoleIds: []}});
+    expect(await call('GET', '/v1/worker/config', {token: one.token})).toEqual({status: 200, body: {statusGuildId: null, statusChannelId: null, mentionRoleIds: []}});
 
-    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {channelId, mentionRoleIds: [roleA, roleB]}});
-    expect(await call('GET', '/v1/worker/config', {token: two.token})).toEqual({status: 200, body: {statusChannelId: channelId, mentionRoleIds: [roleA, roleB]}});
+    await call('PUT', '/v1/super/status-channel', {headers: actor(), body: {guildId, channelId, mentionRoleIds: [roleA, roleB]}});
+    const configured = {statusGuildId: guildId, statusChannelId: channelId, mentionRoleIds: [roleA, roleB]};
+    expect(await call('GET', '/v1/worker/config', {token: two.token})).toEqual({status: 200, body: configured});
 
     // The worker-side client reads the same route.
-    await expect(fetchWorkerPlatformConfig(one.token, `${baseUrl}/v1/worker/config`)).resolves.toEqual({statusChannelId: channelId, mentionRoleIds: [roleA, roleB]});
+    await expect(fetchWorkerPlatformConfig(one.token, `${baseUrl}/v1/worker/config`)).resolves.toEqual(configured);
     await expect(fetchWorkerPlatformConfig('x'.repeat(32), `${baseUrl}/v1/worker/config`)).rejects.toThrow(/401/);
   });
 

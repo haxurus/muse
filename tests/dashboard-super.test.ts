@@ -61,6 +61,7 @@ const fakeOrchestrator = () => ({
   superStatusChannel: vi.fn(async () => ({statusChannelId: null, updatedAt: null, updatedBy: null})),
   superSetStatusChannel: vi.fn(async (body: {channelId: string | null; mentionRoleIds?: string[]}) => ({statusChannelId: body.channelId, mentionRoleIds: body.mentionRoleIds ?? [], updatedAt: '2026-10-06T10:00:00.000Z', updatedBy: {userId: SUPER_ADMIN_ID, username: 'haxurus'}})),
   superTestStatusChannel: vi.fn(async () => ({statusChannelId: STATUS_CHANNEL_ID, results: [{workerId: 'muse-01', ok: true}]})),
+  superGuildMeta: vi.fn(async (guildId: string) => ({guildId, workerIds: ['muse-01'], sourceWorkerId: 'muse-01', channels: [], roles: [], failed: []})),
 });
 
 type HttpResult = {
@@ -460,8 +461,9 @@ describe('super console status channel API', () => {
     const dashboard = await startDashboard();
     const routes: Array<[string, string, string | undefined]> = [
       ['GET', '/api/super/status-channel', undefined],
-      ['PUT', '/api/super/status-channel', JSON.stringify({channelId: STATUS_CHANNEL_ID})],
+      ['PUT', '/api/super/status-channel', JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID})],
       ['POST', '/api/super/status-channel/test', '{}'],
+      ['GET', `/api/super/guilds/${GUILD_ID}/meta`, undefined],
     ];
     for (const [method, path, body] of routes) {
       const anonymous = await call(dashboard.port, method, path, {'content-type': 'application/json'}, body);
@@ -476,6 +478,18 @@ describe('super console status channel API', () => {
     expect(dashboard.orchestrator.superStatusChannel).not.toHaveBeenCalled();
     expect(dashboard.orchestrator.superSetStatusChannel).not.toHaveBeenCalled();
     expect(dashboard.orchestrator.superTestStatusChannel).not.toHaveBeenCalled();
+    expect(dashboard.orchestrator.superGuildMeta).not.toHaveBeenCalled();
+  });
+
+  it('proxies the channel and role pickers of a server for the super admin only', async () => {
+    const dashboard = await startDashboard();
+    const result = await call(dashboard.port, 'GET', `/api/super/guilds/${GUILD_ID}/meta`, {cookie: dashboard.superHeaders().cookie});
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.text)).toMatchObject({guildId: GUILD_ID, workerIds: ['muse-01']});
+    expect(dashboard.orchestrator.superGuildMeta).toHaveBeenCalledWith(GUILD_ID, actor);
+
+    expect((await call(dashboard.port, 'GET', '/api/super/guilds/nope/meta', {cookie: dashboard.superHeaders().cookie})).status).toBe(400);
+    expect(dashboard.orchestrator.superGuildMeta).toHaveBeenCalledOnce();
   });
 
   it('proxies the current setting with the actor headers', async () => {
@@ -491,7 +505,7 @@ describe('super console status channel API', () => {
     const dashboard = await startDashboard();
     const missingCsrf = dashboard.superHeaders();
     delete (missingCsrf as Record<string, string>)['x-csrf-token'];
-    const body = JSON.stringify({channelId: STATUS_CHANNEL_ID});
+    const body = JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID});
 
     const noToken = await call(dashboard.port, 'PUT', '/api/super/status-channel', missingCsrf, body);
     expect(noToken.status).toBe(403);
@@ -514,10 +528,10 @@ describe('super console status channel API', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const dashboard = await startDashboard();
 
-    const saved = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: STATUS_CHANNEL_ID}));
+    const saved = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID}));
     expect(saved.status).toBe(200);
     expect(JSON.parse(saved.text)).toMatchObject({statusChannelId: STATUS_CHANNEL_ID});
-    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenCalledWith({channelId: STATUS_CHANNEL_ID}, actor);
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenCalledWith({channelId: STATUS_CHANNEL_ID, guildId: GUILD_ID}, actor);
 
     const cleared = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: null}));
     expect(cleared.status).toBe(200);
@@ -525,11 +539,11 @@ describe('super console status channel API', () => {
 
     const roleA = '777777777777777771';
     const roleB = '777777777777777772';
-    const withRoles = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: [roleA, roleB, roleA]}));
+    const withRoles = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID, mentionRoleIds: [roleA, roleB, roleA]}));
     expect(withRoles.status).toBe(200);
-    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: STATUS_CHANNEL_ID, mentionRoleIds: [roleA, roleB]}, actor);
-    await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: []}));
-    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: STATUS_CHANNEL_ID, mentionRoleIds: []}, actor);
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: STATUS_CHANNEL_ID, guildId: GUILD_ID, mentionRoleIds: [roleA, roleB]}, actor);
+    await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID, mentionRoleIds: []}));
+    expect(dashboard.orchestrator.superSetStatusChannel).toHaveBeenLastCalledWith({channelId: STATUS_CHANNEL_ID, guildId: GUILD_ID, mentionRoleIds: []}, actor);
 
     const lines = log.mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'));
     expect(lines.map(line => JSON.parse(line) as Record<string, unknown>)).toEqual([
@@ -547,13 +561,15 @@ describe('super console status channel API', () => {
     const tooMany = Array.from({length: 11}, (_, index) => `7777777777777777${String(index).padStart(2, '0')}`);
     for (const body of [
       '{}',
-      JSON.stringify({channelId: '1234'}),
-      JSON.stringify({channelId: 666_666_666_666_666}),
+      JSON.stringify({guildId: GUILD_ID, channelId: '1234'}),
+      JSON.stringify({guildId: GUILD_ID, channelId: 666_666_666_666_666}),
       '[]',
-      JSON.stringify({channelId: '../x'}),
-      JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: '777777777777777771'}),
-      JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: ['@everyone']}),
-      JSON.stringify({channelId: STATUS_CHANNEL_ID, mentionRoleIds: tooMany}),
+      JSON.stringify({guildId: GUILD_ID, channelId: '../x'}),
+      JSON.stringify({channelId: STATUS_CHANNEL_ID}),
+      JSON.stringify({guildId: '../x', channelId: STATUS_CHANNEL_ID}),
+      JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID, mentionRoleIds: '777777777777777771'}),
+      JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID, mentionRoleIds: ['@everyone']}),
+      JSON.stringify({guildId: GUILD_ID, channelId: STATUS_CHANNEL_ID, mentionRoleIds: tooMany}),
     ]) {
       const result = await call(dashboard.port, 'PUT', '/api/super/status-channel', dashboard.superHeaders(), body);
       expect(result.status, body).toBe(400);

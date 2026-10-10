@@ -88,6 +88,8 @@ export const actorName = (username: string): string => {
 };
 
 export type StatusChannelUpdate = {
+  /** Server of the channel; required by the orchestrator unless `channelId` is null. */
+  guildId?: string;
   channelId: string | null;
   mentionRoleIds?: string[];
 };
@@ -276,6 +278,18 @@ export default class OrchestratorClient {
     return call(async () => got.get(
       `${this.config.orchestratorUrl}/v1/super/status-channel`,
       actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
+  }
+
+  /** Channel and role pickers of the super console status channel card (read-only). */
+  async superGuildMeta(guildId: string, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.get(
+      `${this.config.orchestratorUrl}/v1/super/guilds/${encodeURIComponent(guildId)}/meta`,
+      {
+        ...actorOptions(this.config.orchestratorToken, actor),
+        // The orchestrator reads every bot's status, then asks the bots in the guild.
+        timeout: {request: 10_000},
+      },
     ).json<unknown>());
   }
 

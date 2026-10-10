@@ -443,20 +443,24 @@ describe('status channel copy', () => {
       }
     }
 
-    expect(leaf(english, 'super.statusChannel.hint')).toContain('Copy Channel ID');
-    expect(leaf(english, 'super.statusChannel.hint')).toContain('Embed Links');
-    expect(leaf(italian, 'super.statusChannel.hint')).toContain('Modalità sviluppatore');
-    expect(leaf(english, 'super.statusChannel.rolesHint')).toContain('Copy Role ID');
-    expect(leaf(english, 'super.statusChannel.rolesHint')).toContain('Mention @everyone, @here and All Roles');
-    expect(leaf(italian, 'super.statusChannel.rolesHint')).toContain('Copia ID ruolo');
+    expect(leaf(english, 'super.statusChannel.cannotPost')).toContain('Embed Links');
+    expect(leaf(italian, 'super.statusChannel.cannotPost')).toContain('Incorpora link');
+    expect(leaf(english, 'super.statusChannel.roleNotMentionable')).toContain('Mention @everyone, @here and All Roles');
+    expect(leaf(italian, 'super.statusChannel.roleNotMentionable')).toContain('Menziona @everyone, @here e tutti i ruoli');
 
     const markup = await readFile(new URL('../dashboard/index.html', import.meta.url), 'utf8');
-    for (const id of ['status-channel-form', 'status-channel-disable', 'status-channel-test', 'status-channel-current', 'status-channel-results', 'status-role-form', 'status-role-list']) {
+    for (const id of ['status-guild', 'status-channel', 'status-role-add', 'status-role-list', 'status-channel-save', 'status-channel-disable', 'status-channel-test', 'status-channel-current', 'status-channel-results']) {
       expect(markup).toContain(`id="${id}"`);
     }
+
+    // The server is chosen from the bots' servers: no free-text channel or role ids any more.
+    expect(markup).not.toContain('name="channelId"');
+    expect(markup).not.toContain('name="roleId"');
 
     const client = await readFile(new URL('../dashboard/dashboard.js', import.meta.url), 'utf8');
     expect(client).toContain('\'/api/super/status-channel\'');
     expect(client).toContain('\'/api/super/status-channel/test\'');
+    expect(client).toContain('`/api/super/guilds/${encodeURIComponent(guildId)}/meta`');
+    expect(client).toContain('{guildId, channelId, mentionRoleIds: [...roleIds]}');
   });
 });

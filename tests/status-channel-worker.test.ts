@@ -126,6 +126,7 @@ describe('worker status announce route', () => {
     });
     expect((await announce({channelId})).body.code).toBe('INVALID_BODY');
     expect((await announce([channelId])).body.code).toBe('INVALID_BODY');
+    expect((await announce({guildId: 'nope', channelId, test: true})).body.code).toBe('INVALID_GUILD_ID');
     expect((await announce({channelId, test: true, mentionRoleIds: ['@everyone']})).body.code).toBe('INVALID_ROLE_IDS');
     expect((await announce({channelId, test: true, mentionRoleIds: roleA})).body.code).toBe('INVALID_ROLE_IDS');
     const tooMany = Array.from({length: 11}, (_, index) => `5555555555555555${String(index).padStart(2, '0')}`);
@@ -228,7 +229,7 @@ describe('status message helpers', () => {
 });
 
 describe('postStatusMessage error codes', () => {
-  const input = {channelId, workerId: 'muse-01', test: false, mentionRoleIds: []};
+  const input = {guildId: null, channelId, workerId: 'muse-01', test: false, mentionRoleIds: []};
   const english = async () => 'en' as const;
 
   it('reports a bot that is not connected', async () => {
@@ -257,6 +258,16 @@ describe('postStatusMessage error codes', () => {
     }
   });
 
+  it('never posts in a channel of another server than the configured one', async () => {
+    const {channel} = makeChannel();
+    await expect(postStatusMessage(makeClient(channel) as never, {...input, guildId: italianGuild}, english))
+      .resolves.toEqual({ok: false, error: 'CHANNEL_NOT_FOUND'});
+    expect(channel.send).not.toHaveBeenCalled();
+
+    await expect(postStatusMessage(makeClient(channel) as never, {...input, guildId: englishGuild}, english)).resolves.toEqual({ok: true});
+    expect(channel.send).toHaveBeenCalledOnce();
+  });
+
   it('accepts announcement channels and maps send failures', async () => {
     const {channel} = makeChannel({type: ChannelType.GuildAnnouncement});
     await expect(postStatusMessage(makeClient(channel) as never, input, english)).resolves.toEqual({ok: true});
@@ -268,16 +279,18 @@ describe('postStatusMessage error codes', () => {
 
 describe('startup status announcer', () => {
   const config = {WORKER_ID: 'muse-01', CONTROL_TOKEN: token};
+  /** A Discord client stub that is a member of exactly these guilds. */
+  const memberOf = (...guildIds: string[]) => ({guilds: {cache: new Collection(guildIds.map(id => [id, {id}]))}});
 
   const setup = (overrides: Partial<StatusAnnouncerDependencies> = {}) => {
     let now = 1_000_000;
     const dependencies = {
-      fetchConfig: vi.fn(async () => ({statusChannelId: channelId as string | null, mentionRoleIds: [roleA]})),
+      fetchConfig: vi.fn(async () => ({statusGuildId: englishGuild as string | null, statusChannelId: channelId as string | null, mentionRoleIds: [roleA]})),
       post: vi.fn(async () => ({ok: true as const})),
       now: () => now,
       ...overrides,
     };
-    const announcer = new StatusAnnouncer({} as never, config, dependencies);
+    const announcer = new StatusAnnouncer(memberOf(englishGuild) as never, config, dependencies);
     return {
       announcer,
       dependencies,
@@ -288,8 +301,8 @@ describe('startup status announcer', () => {
   };
 
   it('does nothing outside a managed worker', async () => {
-    const fetchConfig = vi.fn(async () => ({statusChannelId: channelId, mentionRoleIds: []}));
-    const announcer = new StatusAnnouncer({} as never, {WORKER_ID: '', CONTROL_TOKEN: ''}, {fetchConfig});
+    const fetchConfig = vi.fn(async () => ({statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: []}));
+    const announcer = new StatusAnnouncer(memberOf(englishGuild) as never, {WORKER_ID: '', CONTROL_TOKEN: ''}, {fetchConfig});
     await expect(announcer.announceOnline()).resolves.toBe('skipped');
     expect(fetchConfig).not.toHaveBeenCalled();
   });
@@ -298,11 +311,32 @@ describe('startup status announcer', () => {
     const {announcer, dependencies} = setup();
     await expect(announcer.announceOnline()).resolves.toBe('posted');
     expect(dependencies.fetchConfig).toHaveBeenCalledWith(token);
-    expect(dependencies.post).toHaveBeenCalledWith({}, {channelId, workerId: 'muse-01', test: false, mentionRoleIds: [roleA]});
+    expect(dependencies.post).toHaveBeenCalledWith(
+      memberOf(englishGuild),
+      {guildId: englishGuild, channelId, workerId: 'muse-01', test: false, mentionRoleIds: [roleA]},
+    );
+  });
+
+  it('stays silent when this bot is not in the configured server', async () => {
+    const dependencies = {
+      fetchConfig: vi.fn(async () => ({statusGuildId: italianGuild, statusChannelId: channelId, mentionRoleIds: []})),
+      post: vi.fn(async () => ({ok: true as const})),
+      now: () => 1,
+    };
+    const announcer = new StatusAnnouncer(memberOf(englishGuild) as never, config, dependencies);
+    await expect(announcer.announceOnline()).resolves.toBe('skipped');
+    expect(dependencies.post).not.toHaveBeenCalled();
+    expect(vi.mocked(console.warn)).not.toHaveBeenCalled();
+  });
+
+  it('still posts a setting saved before the server was stored', async () => {
+    const {announcer, dependencies} = setup({fetchConfig: vi.fn(async () => ({statusGuildId: null, statusChannelId: channelId, mentionRoleIds: []}))});
+    await expect(announcer.announceOnline()).resolves.toBe('posted');
+    expect(dependencies.post).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({guildId: null, channelId}));
   });
 
   it('stays quiet when no status channel is configured', async () => {
-    const {announcer, dependencies} = setup({fetchConfig: vi.fn(async () => ({statusChannelId: null, mentionRoleIds: [roleA]}))});
+    const {announcer, dependencies} = setup({fetchConfig: vi.fn(async () => ({statusGuildId: null, statusChannelId: null, mentionRoleIds: [roleA]}))});
     await expect(announcer.announceOnline()).resolves.toBe('skipped');
     expect(dependencies.post).not.toHaveBeenCalled();
   });
@@ -310,7 +344,7 @@ describe('startup status announcer', () => {
   it('only logs an orchestrator failure and retries on the next reconnect', async () => {
     const fetchConfig = vi.fn()
       .mockRejectedValueOnce(Object.assign(new Error('timed out'), {name: 'TimeoutError'}))
-      .mockResolvedValueOnce({statusChannelId: channelId, mentionRoleIds: []});
+      .mockResolvedValueOnce({statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: []});
     const {announcer, dependencies} = setup({fetchConfig});
     await expect(announcer.announceOnline()).resolves.toBe('failed');
     expect(vi.mocked(console.warn)).toHaveBeenCalledWith('Status channel: could not read the worker config from the orchestrator (TimeoutError)');
@@ -335,14 +369,15 @@ describe('startup status announcer', () => {
   });
 
   it('never runs two announcements at once', async () => {
-    let release: (value: {statusChannelId: string; mentionRoleIds: string[]}) => void = () => undefined;
-    const fetchConfig = vi.fn(async () => new Promise<{statusChannelId: string; mentionRoleIds: string[]}>(resolve => {
+    type Answer = {statusGuildId: string; statusChannelId: string; mentionRoleIds: string[]};
+    let release: (value: Answer) => void = () => undefined;
+    const fetchConfig = vi.fn(async () => new Promise<Answer>(resolve => {
       release = resolve;
     }));
     const {announcer, dependencies} = setup({fetchConfig});
     const first = announcer.announceOnline();
     await expect(announcer.announceOnline()).resolves.toBe('skipped');
-    release({statusChannelId: channelId, mentionRoleIds: []});
+    release({statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: []});
     await expect(first).resolves.toBe('posted');
     expect(dependencies.post).toHaveBeenCalledOnce();
   });
@@ -351,10 +386,11 @@ describe('startup status announcer', () => {
 describe('worker config client', () => {
   it('calls MUSE_ORCHESTRATOR_URL with the control token and validates the answer', async () => {
     vi.stubEnv('MUSE_ORCHESTRATOR_URL', 'https://orchestrator.internal:9443/base/');
-    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify({statusChannelId: channelId, mentionRoleIds: [roleA]}), {status: 200}));
+    const answer = {statusGuildId: englishGuild, statusChannelId: channelId, mentionRoleIds: [roleA]};
+    const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify(answer), {status: 200}));
     vi.stubGlobal('fetch', fetcher);
 
-    await expect(fetchWorkerPlatformConfig(token)).resolves.toEqual({statusChannelId: channelId, mentionRoleIds: [roleA]});
+    await expect(fetchWorkerPlatformConfig(token)).resolves.toEqual(answer);
     expect(fetcher.mock.calls[0][0]).toBe('https://orchestrator.internal:9443/base/v1/worker/config');
     expect(fetcher.mock.calls[0][1]).toMatchObject({
       method: 'GET',
@@ -362,9 +398,11 @@ describe('worker config client', () => {
       headers: {authorization: `Bearer ${token}`},
     });
 
-    // An orchestrator without role mentions means no mentions.
+    // An orchestrator without server or role mentions means any server and no mentions.
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusChannelId: channelId}), {status: 200}));
-    await expect(fetchWorkerPlatformConfig(token)).resolves.toEqual({statusChannelId: channelId, mentionRoleIds: []});
+    await expect(fetchWorkerPlatformConfig(token)).resolves.toEqual({statusGuildId: null, statusChannelId: channelId, mentionRoleIds: []});
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusGuildId: 'nope', statusChannelId: channelId, mentionRoleIds: []}), {status: 200}));
+    await expect(fetchWorkerPlatformConfig(token)).rejects.toThrow('Invalid worker config');
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusChannelId: 'nope', mentionRoleIds: []}), {status: 200}));
     await expect(fetchWorkerPlatformConfig(token)).rejects.toThrow('Invalid worker config');
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify({statusChannelId: channelId, mentionRoleIds: ['@everyone']}), {status: 200}));

@@ -532,6 +532,16 @@ export default class DashboardServer {
       return;
     }
 
+    if (request.method === 'GET' && segments.length === 3 && segments[0] === 'guilds' && segments[2] === 'meta') {
+      const session = this.requireSuperAdmin(request);
+      if (!SNOWFLAKE.test(segments[1])) {
+        throw new HttpError(400, 'guild id must be a Discord server id');
+      }
+
+      sendJson(response, 200, await this.orchestrator.superGuildMeta(segments[1], superActor(session)));
+      return;
+    }
+
     if (request.method === 'POST' && segments.length === 3 && segments[0] === 'guilds' && segments[2] === 'leave') {
       await this.superLeave(request, response, segments[1]);
       return;
@@ -686,12 +696,20 @@ export default class DashboardServer {
         throw new HttpError(400, 'request body must be an object');
       }
 
-      const {channelId, mentionRoleIds} = input as {channelId?: unknown; mentionRoleIds?: unknown};
+      const {guildId, channelId, mentionRoleIds} = input as {guildId?: unknown; channelId?: unknown; mentionRoleIds?: unknown};
       if (channelId !== null && (typeof channelId !== 'string' || !SNOWFLAKE.test(channelId))) {
         throw new HttpError(400, 'channelId must be a Discord channel id or null');
       }
 
       const body: StatusChannelUpdate = {channelId};
+      if (channelId !== null) {
+        if (typeof guildId !== 'string' || !SNOWFLAKE.test(guildId)) {
+          throw new HttpError(400, 'guildId must be the Discord server id of the channel');
+        }
+
+        body.guildId = guildId;
+      }
+
       if (mentionRoleIds !== undefined) {
         if (!Array.isArray(mentionRoleIds)
           || mentionRoleIds.some(roleId => typeof roleId !== 'string' || !SNOWFLAKE.test(roleId))) {

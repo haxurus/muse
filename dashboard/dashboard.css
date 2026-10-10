@@ -346,15 +346,15 @@ select {
 .block-row > div > span { color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
 
 /* Bot status channel */
-.status-roles { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
-.status-role-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.status-picker { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.status-warning { margin: 0; padding: 9px 12px; border: 1px solid var(--warn-line); border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: .8rem; line-height: 1.55; }
 .status-role-list:empty { display: none; }
-.status-role-chip { display: inline-flex; align-items: center; gap: 6px; }
+.status-role-chip { display: inline-flex; align-items: center; gap: 7px; }
 .status-role-chip button { padding: 0 4px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .status-role-chip button:hover { color: var(--text); }
-.status-channel-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
-.status-channel-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.status-channel-hint { margin: 12px 0 0; color: var(--muted); font-size: .82rem; line-height: 1.6; }
+.role-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
+.status-channel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.status-channel-hint { margin: 0; color: var(--muted); font-size: .82rem; line-height: 1.6; }
 .status-channel-current { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0; color: var(--text-2); font-size: .84rem; }
 .status-channel-current:empty { display: none; }
 .status-channel-current span { color: var(--muted); }
@@ -514,7 +514,6 @@ select {
   .card { padding: 20px; }
   .card-head { flex-direction: column; }
   .block-forms form { grid-template-columns: 1fr; }
-  .status-channel-form, .status-role-form { grid-template-columns: 1fr; }
   .status-channel-actions .button { flex: 1 1 auto; }
   .block-row { grid-template-columns: 1fr auto; }
   .block-row .button { grid-column: 1 / -1; }

@@ -92,7 +92,8 @@ POST   /api/super/guilds/:guildId/leave        -> orchestrator POST   /v1/super/
 PUT    /api/super/blocks/:kind/:subjectId      -> orchestrator PUT    /v1/super/blocks/:kind/:subjectId
 DELETE /api/super/blocks/:kind/:subjectId      -> orchestrator DELETE /v1/super/blocks/:kind/:subjectId
 GET    /api/super/status-channel               -> orchestrator GET    /v1/super/status-channel
-PUT    /api/super/status-channel               -> orchestrator PUT    /v1/super/status-channel   (body {channelId: string | null, mentionRoleIds?: string[]})
+PUT    /api/super/status-channel               -> orchestrator PUT    /v1/super/status-channel   (body {guildId, channelId: string | null, mentionRoleIds?: string[]}; guildId required unless channelId is null)
+GET    /api/super/guilds/:guildId/meta         -> orchestrator GET    /v1/super/guilds/:guildId/meta (channel and role pickers)
 POST   /api/super/status-channel/test          -> orchestrator POST   /v1/super/status-channel/test
 ```
 
@@ -247,7 +248,7 @@ The web UI is bilingual (Italian and English), following Sentinel:
 | `/it`, `/en` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "How it works", self-hosting steps, security, call to action. "Sign in" links to `/<lang>/dashboard`, "Add to Discord" to `/add?lang=<lang>` |
 | `/<lang>/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
 | `/<lang>/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, language, logout) and three sections: **Overview** (bots in the server with ready/voice state), **Settings** (bot selection, one switch per field including the bot language, mixed values shown as "Mixed values", only enabled fields are patched) and **Groups** (create, edit, select, delete, keep or drop unavailable members) |
-| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, bot status channel (save, disable, test with per-bot results), linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
+| `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, bot status channel (server, channel and role menus; save, disable, test with per-bot results), linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
 | `/<lang>/development` | Static "Limited access" notice used by `/add` and the invite links |
 
 The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) and `/<lang>/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
