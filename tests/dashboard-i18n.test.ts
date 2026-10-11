@@ -15,6 +15,7 @@ import {
   renderTemplate,
 } from '../src/dashboard/i18n.js';
 import type OrchestratorClient from '../src/dashboard/orchestrator-client.js';
+import {homeStructuredData} from '../src/dashboard/seo.js';
 import DashboardServer, {NEW_SERVER_ANCHOR} from '../src/dashboard/server.js';
 import SessionStore from '../src/dashboard/session-store.js';
 
@@ -154,7 +155,7 @@ describe('template substitution', () => {
     for (const file of ['home.html', 'index.html', 'development.html']) {
       const template = await readFile(new URL(`../dashboard/${file}`, import.meta.url), 'utf8');
       for (const locale of LOCALES) {
-        const html = renderPage(template, locale, '', {origin: PUBLIC_URL});
+        const html = renderPage(template, locale, '', {origin: PUBLIC_URL}, {structuredData: homeStructuredData(locale, PUBLIC_URL)});
         expect(html, `${file} ${locale}`).toContain(`<html lang="${locale}">`);
         expect(html, `${file} ${locale}`).not.toMatch(/\{\{|\}\}/u);
       }
