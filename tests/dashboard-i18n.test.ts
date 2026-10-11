@@ -157,7 +157,9 @@ describe('template substitution', () => {
       for (const locale of LOCALES) {
         const html = renderPage(template, locale, '', {origin: PUBLIC_URL}, {structuredData: homeStructuredData(locale, PUBLIC_URL)});
         expect(html, `${file} ${locale}`).toContain(`<html lang="${locale}">`);
-        expect(html, `${file} ${locale}`).not.toMatch(/\{\{|\}\}/u);
+        // JSON-LD legitimately contains "}}" (nested objects); only the template text is checked.
+        const templateText = html.replace(/<script type="application\/ld\+json">[^<]*<\/script>/u, '');
+        expect(templateText, `${file} ${locale}`).not.toMatch(/\{\{|\}\}/u);
       }
     }
   });
