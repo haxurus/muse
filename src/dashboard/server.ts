@@ -185,7 +185,7 @@ export default class DashboardServer {
   private readonly auth: DashboardAuth;
   private readonly orchestrator: OrchestratorClient;
   private readonly pages: Record<PageName, Record<Locale, Buffer>>;
-  /** robots.txt and sitemap.xml, generated from the public origin at startup. */
+  /** Crawler files (robots.txt, sitemap.xml), generated from the public origin at startup. */
   private readonly crawlerFiles: Map<string, StaticAsset>;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
