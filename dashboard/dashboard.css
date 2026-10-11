@@ -156,6 +156,7 @@ button:disabled, input:disabled, select:disabled { opacity: .45; cursor: not-all
 .tag-warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
 .tag-info { color: var(--info); border-color: rgba(106,167,255,.3); background: var(--info-soft); }
 .tag-danger { color: #ff9da0; border-color: rgba(242,85,90,.32); background: var(--danger-soft); }
+.tag-premium { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
 
 .state {
   display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
@@ -314,7 +315,7 @@ select {
 .invite-tile strong { overflow: hidden; color: var(--text); font-size: .9rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .invite-tile span { color: var(--muted); font-size: .74rem; }
 
-.metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--line); }
+.metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--line); }
 .metric { display: flex; flex-direction: column; gap: 8px; padding: 20px 22px; background: var(--surface); }
 .metric span { color: var(--muted); font-size: .8rem; }
 .metric strong { font: 500 1.8rem/1 var(--font-mono-stack); }
@@ -340,6 +341,25 @@ select {
 .row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 .block-forms { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+
+/* Plans (Sentinel model): super console editor and coupons */
+.plan-editor { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-top: 1px dashed var(--line-strong); background: var(--surface); }
+.plan-editor-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.plan-editor textarea { width: 100%; resize: vertical; }
+.plan-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.plan-price { display: flex; align-items: baseline; gap: 10px; margin: 0; color: var(--muted); font-size: .86rem; }
+.plan-price strong { color: var(--text); font-size: 1.05rem; }
+.plan-price s { color: var(--faint); }
+.plan-editor .row-actions { justify-content: flex-end; }
+.coupon-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.coupon-wide { grid-column: 1 / -1; }
+.coupon-tiers { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; border: 0; color: var(--text-2); font-size: .84rem; }
+.coupon-tiers legend { margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: .8rem; font-weight: 500; }
+.coupon-tiers label, .check { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: .84rem; }
+.coupon-actions { display: flex; justify-content: flex-end; }
+.coupon-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 1fr) auto auto; gap: 16px; align-items: center; padding: 14px 16px; background: var(--bg-raised); }
+.coupon-row > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.coupon-row > div:first-child span { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 .block-forms form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .block-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 12px 16px; background: var(--bg-raised); }
 .block-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -423,6 +443,20 @@ select {
 .panel { padding: 22px 24px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
 .panel-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .panel-title p.muted { margin-top: 6px; font-size: .86rem; }
+
+/* Server plan panel (Sentinel PlanPanel): meters and limits */
+.plan-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.plan-meter { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.plan-meter-head { display: flex; justify-content: space-between; gap: 12px; color: var(--text-2); font-size: .84rem; }
+.plan-meter-bar { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.plan-meter-bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.plan-meter.is-high .plan-meter-bar i { background: var(--warn); }
+.plan-meter.is-full .plan-meter-bar i { background: var(--danger, #f2555a); }
+.plan-limits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0 0; }
+.plan-limits div { display: flex; flex-direction: column; gap: 4px; }
+.plan-limits dt { color: var(--muted); font-size: .78rem; }
+.plan-limits dd { margin: 0; color: var(--text); font-weight: 600; }
+.setting-plan { display: block; margin-top: 4px; color: var(--warn); font-size: .78rem; }
 .panel h2 { font-size: 1.08rem; }
 .panel-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .eyebrow { margin: 0 0 6px; color: var(--accent); font: 500 .68rem var(--font-mono-stack); letter-spacing: .12em; text-transform: uppercase; }
@@ -475,6 +509,10 @@ select {
   .super-guild .row-tags, .super-worker .row-tags { grid-column: 2; grid-row: 1; justify-content: flex-end; }
   .super-guild .row-actions, .super-worker .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .block-forms { grid-template-columns: 1fr; }
+  .plan-editor-grid, .coupon-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .coupon-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .coupon-row .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .plan-limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .setting-row { grid-template-columns: auto minmax(0, 1fr) 160px; }
   .setting-row > .tag { grid-column: 2; grid-row: 2; }
   .setting-row > .setting-input { grid-column: 3; grid-row: 1; }
@@ -514,6 +552,7 @@ select {
   .card { padding: 20px; }
   .card-head { flex-direction: column; }
   .block-forms form { grid-template-columns: 1fr; }
+  .plan-editor-grid, .coupon-form, .plan-meters { grid-template-columns: 1fr; }
   .status-channel-actions .button { flex: 1 1 auto; }
   .block-row { grid-template-columns: 1fr auto; }
   .block-row .button { grid-column: 1 / -1; }

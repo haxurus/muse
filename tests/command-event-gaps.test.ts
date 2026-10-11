@@ -53,6 +53,7 @@ vi.mock('../src/utils/get-guild-settings.js', () => ({
 import Config from '../src/commands/config.js';
 import handleVoiceStateUpdate from '../src/events/voice-state-update.js';
 import Player, {MediaSource, QueuedSong, STATUS} from '../src/services/player.js';
+import {entitlements} from '../src/plans/entitlements.js';
 
 const GUILD_ID = 'guild-id';
 const VOICE_CHANNEL_ID = 'voice-channel-id';
@@ -145,6 +146,8 @@ const installVoiceEventPlayer = () => {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  // These tests cover the settings themselves: a Pro plan lifts every plan limit (24/7, playlists).
+  entitlements.set({guilds: [{guildId: GUILD_ID, tier: 'TIER2', allowed: true, allowedBotIds: []}]});
   mocks.createAudioPlayer.mockImplementation(makeAudioPlayer);
   mocks.createAudioResource.mockImplementation((sourceStream: Readable) => ({
     sourceStream,

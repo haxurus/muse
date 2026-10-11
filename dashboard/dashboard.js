@@ -219,6 +219,7 @@ const mutation = (method, body) => ({
 /** Browser-facing message for an API failure; orchestrator 4xx messages are shown as-is. */
 const errorMessage = error => {
   if (!(error instanceof ApiError)) return t('errors.generic');
+  if (error.code === 'PLAN_LIMIT' || error.code === 'PLAN_REQUIRED') return t('plan.errorLimit');
   if (error.status === 403) return error.code === 'SUPER_ADMIN_REQUIRED' ? t('super.denied') : t('errors.forbidden');
   if (error.status === 429) return t('errors.rateLimited');
   if (error.status >= 500) return t('errors.unavailable');
@@ -347,6 +348,7 @@ const guildCard = guild => {
     tag(guild.availableWorkers === 1 ? t('servers.bot') : t('servers.bots', {count: guild.availableWorkers}), 'ok'),
     tag(guild.owner ? t('servers.owner') : t('servers.admin')),
   );
+  if (isPaidTier(guild.planTier)) tags.append(tag(tierShort(guild.planTier), 'premium'));
   copy.append(el('strong', '', guild.name), tags);
   link.append(picture(guild.iconUrl, guild.name), copy, icon('arrowRight'));
   return link;
@@ -447,6 +449,8 @@ const renderSidebar = guild => {
   const summary = session.guilds.find(candidate => candidate.id === guild.id);
   const copy = el('div');
   copy.append(el('strong', '', guild.name), tag(t('guild.online', {count: onlineWorkers().length}), 'ok'));
+  const plan = guildPlan();
+  if (plan) copy.append(tag(tierShort(plan.effectiveTier), isPaidTier(plan.effectiveTier) ? 'premium' : ''));
   $('sidebar-guild').replaceChildren(picture(guild.iconUrl, guild.name), copy);
   $('sidebar-access').textContent = summary && summary.owner ? t('guild.accessOwner') : t('guild.accessAdmin');
 
@@ -493,6 +497,7 @@ const renderOverview = () => {
         status.discordReady === false ? state(t('overview.notReady'), 'warn') : state(t('overview.ready'), 'ok'),
         player && player.connected ? state(t('overview.inVoice'), 'info') : state(t('overview.idle')),
       );
+      if (!isWorkerIncluded(worker.workerId)) tags.append(state(t('plan.notIncluded'), 'warn'));
     } else {
       row.append(identity(null, worker.workerId, worker.workerId, {round: true}));
       meta.append(el('span', 'mono', t('overview.unavailable', {error: worker.error || t('guild.error')})));
@@ -681,14 +686,20 @@ const collectSettings = () => {
 
     if (definition.type === 'boolean') {
       if (input.value === '') throw new Error(t('settings.chooseValue', {label}));
+      const limits = planLimitsNow();
+      if (definition.key === 'leaveIfNoListeners' && input.value === 'false' && limits && !limits.alwaysOn) {
+        throw new Error(t('plan.alwaysOnRequired', {plan: tierShort('TIER2')}));
+      }
+
       settings[definition.key] = input.value === 'true';
       continue;
     }
 
     if (input.value === '') throw new Error(t('settings.enterValue', {label}));
     const value = Number(input.value);
-    if (!Number.isInteger(value) || value < definition.min || value > definition.max) {
-      throw new Error(t('settings.outOfRange', {label, min: definition.min, max: definition.max}));
+    const bounds = planBounds(definition);
+    if (!Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+      throw new Error(t('settings.outOfRange', {label, min: bounds.min, max: bounds.max}));
     }
 
     settings[definition.key] = value;
@@ -838,6 +849,7 @@ const renderGroups = () => {
 
   $('group-list').replaceChildren(...rows);
   $('group-empty').hidden = rows.length > 0;
+  renderGroupPlanNotice();
 };
 
 const saveGroup = async () => {
@@ -894,8 +906,10 @@ const loadGuild = async (guildId, options = {}) => {
 
   renderSidebar(details.guild);
   renderOverview();
+  renderPlanPanel();
   renderWorkerSelection();
   renderGroups();
+  applyPlanToSettings();
   setWorkerSelection(options.keepSelection || []);
   if (!options.keepTab) setTab('overview');
 
@@ -1010,6 +1024,10 @@ const renderSuperGuild = (guild, names) => {
 
   const tags = el('div', 'row-tags');
   if (guild.blocked) tags.append(tag(t('super.blocked'), 'danger'));
+  const plan = guild.plan || {tier: 'FREE', effectiveTier: 'FREE'};
+  tags.append(tag(tierLabel(plan.effectiveTier), isPaidTier(plan.effectiveTier) ? 'premium' : ''));
+  if (plan.tier !== plan.effectiveTier) tags.append(tag(t('super.plans.expired'), 'warn'));
+  else if (plan.expiresAt && isPaidTier(plan.tier)) meta.append(el('span', '', t('super.plans.expires', {date: formatDate(plan.expiresAt)})));
   const chips = el('div', 'chip-list');
   for (const workerId of list(guild.workerIds)) {
     chips.append(el('span', 'chip', names.get(workerId) || workerId));
@@ -1018,6 +1036,10 @@ const renderSuperGuild = (guild, names) => {
   tags.append(chips);
 
   const actions = el('div', 'row-actions');
+  actions.append(button(t('super.plans.manage'), 'button-primary button-sm', () => {
+    planEditorGuildId = planEditorGuildId === guild.id ? null : guild.id;
+    renderOverviewData();
+  }));
   actions.append(button(t('super.leave'), 'button-secondary button-sm', () => {
     void leaveGuild(guild);
   }));
@@ -1094,7 +1116,12 @@ const renderOverviewData = () => {
   const names = botNameById();
   $('super-workers').replaceChildren(...workers.map(renderSuperWorker));
   $('super-workers-empty').hidden = workers.length > 0;
-  $('super-guilds').replaceChildren(...guilds.map(guild => renderSuperGuild(guild, names)));
+  $('super-guilds').replaceChildren(...guilds.flatMap(guild => (planEditorGuildId === guild.id
+    ? [renderSuperGuild(guild, names), planEditor(guild)]
+    : [renderSuperGuild(guild, names)])));
+  $('metric-paid').textContent = formatNumber(guilds.filter(guild => guild.plan && isPaidTier(guild.plan.effectiveTier)).length);
+  $('metric-coupons').textContent = formatNumber(activeCoupons().length);
+  renderCoupons();
   $('super-guilds-empty').hidden = guilds.length > 0;
   $('super-blocks').replaceChildren(...blocks.map(renderBlock));
   $('super-blocks-empty').hidden = blocks.length > 0;
@@ -1413,6 +1440,389 @@ const testStatusChannel = async () => {
   }
 };
 
+/* ---------- Plans (Sentinel model: Free, Plus, Pro, Brand) ---------- */
+
+const PLAN_ORDER = ['FREE', 'TIER1', 'TIER2', 'TIER3'];
+const isTier = tier => PLAN_ORDER.includes(tier);
+const tierLabel = tier => t(`plans.tierLabel.${isTier(tier) ? tier : 'FREE'}`);
+const tierShort = tier => t(`plans.short.${isTier(tier) ? tier : 'FREE'}`);
+const isPaidTier = tier => isTier(tier) && tier !== 'FREE';
+const pricingPath = () => `${BASE}/pricing`;
+
+/** EUR without decimals for whole euros (Sentinel formatPrice). */
+const formatPrice = cents => new Intl.NumberFormat(LOCALE === 'it' ? 'it-IT' : 'en-IE', {
+  style: 'currency',
+  currency: 'EUR',
+  minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+  maximumFractionDigits: 2,
+}).format(cents / 100);
+
+/** Price after a coupon, never below zero (same rule as the server). */
+const discountedPrice = (cents, coupon) => {
+  if (!coupon) return cents;
+  let price = cents;
+  if (coupon.percentOff) price = Math.round(price * (100 - coupon.percentOff) / 100);
+  if (coupon.amountOffCents) price -= coupon.amountOffCents;
+  return Math.max(0, price);
+};
+
+const guildPlan = () => (guildDetails && guildDetails.plan && guildDetails.plan.plan ? guildDetails.plan : null);
+const planLimitsNow = () => {
+  const plan = guildPlan();
+  return plan ? plan.plan.limits : null;
+};
+
+/** Bots of this server that its plan does not include (they refuse commands). */
+const isWorkerIncluded = workerId => {
+  const plan = guildPlan();
+  return !plan || list(plan.allowedWorkerIds).includes(workerId);
+};
+
+const planMeter = (label, used, max) => {
+  const node = el('div', 'plan-meter');
+  const ratio = max > 0 ? used / max : (used > 0 ? 1 : 0);
+  if (ratio >= 1) node.classList.add('is-full');
+  else if (ratio >= 0.8) node.classList.add('is-high');
+  const head = el('div', 'plan-meter-head');
+  head.append(el('span', '', label), el('strong', 'mono', `${formatNumber(used)} / ${formatNumber(max)}`));
+  const bar = el('div', 'plan-meter-bar');
+  const fill = el('i');
+  // CSSOM property, not a style attribute: allowed by the style-src 'self' policy.
+  fill.style.width = `${Math.min(100, Math.round(ratio * 100))}%`;
+  bar.append(fill);
+  node.append(head, bar);
+  return node;
+};
+
+const renderPlanPanel = () => {
+  const plan = guildPlan();
+  $('plan-panel').hidden = !plan;
+  if (!plan) return;
+
+  const effective = plan.effectiveTier;
+  $('plan-title').textContent = tierLabel(effective);
+  let status;
+  if (plan.tier !== effective) status = t('plan.expired', {plan: tierLabel(plan.tier)});
+  else if (plan.expiresAt) status = t('plan.validUntil', {date: formatDate(plan.expiresAt)});
+  else if (effective === 'FREE') status = t('plan.free');
+  else status = t('plan.noExpiry');
+  $('plan-status').textContent = status;
+  $('plan-pricing').href = pricingPath();
+
+  const {limits} = plan.plan;
+  const usage = plan.usage || {};
+  $('plan-meters').replaceChildren(
+    planMeter(t('plan.meterBots'), Number(usage.bots) || 0, limits.bots),
+    planMeter(t('plan.meterGroups'), Number(usage.groups) || 0, limits.groups),
+  );
+
+  const entry = (label, value) => {
+    const node = el('div');
+    node.append(el('dt', '', label), el('dd', '', value));
+    return node;
+  };
+
+  $('plan-limits').replaceChildren(
+    entry(t('plan.limitPlaylist'), t('plan.tracks', {count: formatNumber(limits.playlistTracks)})),
+    entry(t('plan.limitFavorites'), formatNumber(limits.favorites)),
+    entry(t('plan.limitAlwaysOn'), limits.alwaysOn ? t('settings.yes') : t('settings.no')),
+    entry(t('plan.limitSupport'), plan.plan.prioritySupport ? t('settings.yes') : t('settings.no')),
+  );
+};
+
+/** Bounds of a numeric setting under the server's plan (the server checks the same rules). */
+const planBounds = definition => {
+  const limits = planLimitsNow();
+  if (!limits) return {min: definition.min, max: definition.max};
+  if (definition.key === 'playlistLimit') return {min: definition.min, max: Math.min(definition.max, limits.playlistTracks)};
+  if (definition.key === 'secondsToWaitAfterQueueEmpties' && !limits.alwaysOn) return {min: 1, max: MAX_IDLE_SECONDS_WITHOUT_ALWAYS_ON};
+  return {min: definition.min, max: definition.max};
+};
+
+/** Marks the settings that the plan limits ("· Pro" tag, input bounds, locked "No"). */
+const applyPlanToSettings = () => {
+  const limits = planLimitsNow();
+  for (const definition of SETTINGS) {
+    const row = settingRow(definition.key);
+    if (!row) continue;
+    const input = row.querySelector('.setting-input');
+    const copy = row.querySelector('.setting-copy');
+    const previous = copy.querySelector('.setting-plan');
+    if (previous) previous.remove();
+
+    if (definition.type === 'number') {
+      const bounds = planBounds(definition);
+      input.min = String(bounds.min);
+      input.max = String(bounds.max);
+    }
+
+    let note = '';
+    if (limits && definition.key === 'playlistLimit' && limits.playlistTracks < definition.max) {
+      note = t('plan.settingPlaylist', {max: limits.playlistTracks});
+    } else if (limits && !limits.alwaysOn && (definition.key === 'leaveIfNoListeners' || definition.key === 'secondsToWaitAfterQueueEmpties')) {
+      note = t('plan.settingAlwaysOn', {plan: tierShort('TIER2'), max: MAX_IDLE_SECONDS_WITHOUT_ALWAYS_ON});
+    }
+
+    if (definition.key === 'leaveIfNoListeners' && input.options.length > 2) {
+      input.options[2].disabled = Boolean(limits && !limits.alwaysOn);
+    }
+
+    if (note) copy.append(el('span', 'setting-plan', note));
+  }
+};
+
+/** Without 24/7 the bots wait at most this long after the queue ends (server: plans.ts). */
+const MAX_IDLE_SECONDS_WITHOUT_ALWAYS_ON = 600;
+
+const renderGroupPlanNotice = () => {
+  const limits = planLimitsNow();
+  const notice = $('group-plan-notice');
+  const groups = (guildDetails && guildDetails.groups) || [];
+  const full = Boolean(limits) && groups.length >= limits.groups;
+  notice.hidden = !full;
+  if (full) {
+    notice.textContent = limits.groups === 0
+      ? t('plan.groupsNone', {plan: tierShort(guildPlan().effectiveTier)})
+      : t('plan.groupsLimit', {plan: tierShort(guildPlan().effectiveTier), max: limits.groups});
+  }
+
+  // Editing an existing group is always allowed; only a new one needs room in the plan.
+  $('save-group').disabled = full && editingGroupId === null;
+};
+
+/* ---------- Super console: plans and coupons ---------- */
+
+let planEditorGuildId = null;
+
+const planCatalog = () => list(overview && overview.planCatalog);
+const catalogEntry = tier => planCatalog().find(entry => entry.tier === tier);
+const activeCoupons = () => list(overview && overview.coupons).filter(coupon => coupon.active);
+
+const dateInputValue = iso => {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+/** End of the chosen day in local time, like Sentinel's plan editor. */
+const endOfDay = value => (value ? new Date(`${value}T23:59:59`).toISOString() : null);
+const startOfDay = value => (value ? new Date(`${value}T00:00:00`).toISOString() : null);
+
+const addPeriod = (value, months) => {
+  const base = value ? new Date(`${value}T12:00:00`) : new Date();
+  const start = base.getTime() < Date.now() ? new Date() : base;
+  start.setMonth(start.getMonth() + months);
+  return dateInputValue(start.toISOString());
+};
+
+const planEditor = guild => {
+  const plan = guild.plan || {tier: 'FREE'};
+  const form = el('form', 'plan-editor');
+  form.noValidate = true;
+
+  const field = (label, control) => {
+    const node = el('label', 'field');
+    node.append(el('span', '', label), control);
+    return node;
+  };
+
+  const tierSelect = document.createElement('select');
+  for (const tier of PLAN_ORDER) tierSelect.append(option(tierLabel(tier), tier));
+  tierSelect.value = isTier(plan.tier) ? plan.tier : 'FREE';
+
+  const billingSelect = document.createElement('select');
+  billingSelect.append(option('—', ''));
+  for (const billing of ['MONTHLY', 'YEARLY', 'GIFT']) billingSelect.append(option(t(`plans.billing.${billing}`), billing));
+  billingSelect.value = plan.billing || '';
+
+  const expiry = document.createElement('input');
+  expiry.type = 'date';
+  expiry.value = dateInputValue(plan.expiresAt);
+
+  const quick = el('div', 'plan-quick');
+  quick.append(
+    button(t('super.plans.plusMonth'), 'button-ghost button-sm', () => {
+      expiry.value = addPeriod(expiry.value, 1);
+    }),
+    button(t('super.plans.plusYear'), 'button-ghost button-sm', () => {
+      expiry.value = addPeriod(expiry.value, 12);
+    }),
+    button(t('super.plans.noExpiry'), 'button-ghost button-sm', () => {
+      expiry.value = '';
+    }),
+  );
+
+  const coupon = document.createElement('input');
+  coupon.maxLength = 32;
+  coupon.autocomplete = 'off';
+  coupon.placeholder = 'BETA50';
+  coupon.value = plan.couponCode || '';
+  const datalistId = `coupons-${guild.id}`;
+  coupon.setAttribute('list', datalistId);
+  const datalist = document.createElement('datalist');
+  datalist.id = datalistId;
+  for (const entry of activeCoupons()) datalist.append(option(entry.code, entry.code));
+
+  const note = document.createElement('textarea');
+  note.maxLength = 500;
+  note.rows = 2;
+  note.placeholder = t('super.plans.notePlaceholder');
+  note.value = plan.note || '';
+
+  const price = el('p', 'plan-price');
+  const updatePrice = () => {
+    const tier = tierSelect.value;
+    const entry = catalogEntry(tier);
+    const billing = billingSelect.value;
+    const base = entry && billing === 'YEARLY' ? entry.yearlyCents : (entry && billing === 'MONTHLY' ? entry.monthlyCents : 0);
+    const selected = activeCoupons().find(candidate => candidate.code === coupon.value.trim().toUpperCase());
+    const final = discountedPrice(base, selected);
+    price.replaceChildren(el('span', '', t('super.plans.price')), el('strong', 'mono', formatPrice(final)));
+    if (final !== base) price.append(el('s', 'mono', formatPrice(base)));
+  };
+
+  for (const control of [tierSelect, billingSelect]) control.addEventListener('change', updatePrice);
+  coupon.addEventListener('input', updatePrice);
+  updatePrice();
+
+  const grid = el('div', 'plan-editor-grid');
+  grid.append(
+    field(t('super.plans.tier'), tierSelect),
+    field(t('super.plans.billing'), billingSelect),
+    field(t('super.plans.expiry'), expiry),
+    field(t('super.plans.coupon'), coupon),
+  );
+
+  const actions = el('div', 'row-actions');
+  const save = button(t('super.plans.save'), 'button-primary button-sm', () => undefined);
+  save.type = 'submit';
+  actions.append(button(t('super.plans.cancel'), 'button-ghost button-sm', () => {
+    planEditorGuildId = null;
+    renderOverviewData();
+  }), save);
+
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const tier = tierSelect.value;
+    const current = guild.plan ? guild.plan.effectiveTier : 'FREE';
+    if (PLAN_ORDER.indexOf(tier) < PLAN_ORDER.indexOf(current) && !window.confirm(t('super.plans.confirmDowngrade'))) return;
+    void (async () => {
+      save.disabled = true;
+      const body = {
+        tier,
+        billing: tier === 'FREE' ? null : billingSelect.value || null,
+        expiresAt: tier === 'FREE' ? null : endOfDay(expiry.value),
+        couponCode: tier === 'FREE' ? null : coupon.value.trim() || null,
+        note: note.value,
+      };
+      const result = await superAction(`/api/super/guilds/${encodeURIComponent(guild.id)}/plan`, 'PUT', body);
+      save.disabled = false;
+      if (result) {
+        planEditorGuildId = null;
+        renderOverviewData();
+        toast(t('super.plans.saved', {name: guild.name, plan: tierLabel(result.effectiveTier || tier)}));
+      }
+    })();
+  });
+
+  form.append(grid, quick, field(t('super.plans.note'), note), datalist, price, actions);
+  return form;
+};
+
+const couponDiscount = coupon => (coupon.percentOff ? `-${coupon.percentOff}%` : `-${formatPrice(coupon.amountOffCents || 0)}`);
+const couponScope = coupon => {
+  const tiers = list(coupon.tiers).length > 0 ? list(coupon.tiers).map(tierShort).join(', ') : t('super.coupons.allPlans');
+  return coupon.billing === 'ANY' ? tiers : `${tiers} · ${t(`plans.billing.${coupon.billing}`)}`;
+};
+
+const renderCoupon = coupon => {
+  const row = el('article', 'coupon-row');
+  const copy = el('div');
+  copy.append(el('strong', 'mono', coupon.code), el('span', '', `${couponDiscount(coupon)} · ${couponScope(coupon)}`));
+  if (coupon.description) copy.append(el('span', 'muted', coupon.description));
+
+  const meta = el('div', 'row-meta');
+  meta.append(
+    el('span', '', t('super.coupons.uses', {
+      count: coupon.redemptions,
+      max: coupon.maxRedemptions === null ? t('super.coupons.unlimited') : coupon.maxRedemptions,
+    })),
+    el('span', '', `${coupon.validFrom ? formatDate(coupon.validFrom) : '—'} → ${coupon.validUntil ? formatDate(coupon.validUntil) : '∞'}`),
+  );
+
+  const tags = el('div', 'row-tags');
+  tags.append(
+    coupon.active ? tag(t('super.coupons.active'), 'ok') : tag(t('super.coupons.inactive')),
+    ...(coupon.public ? [tag(t('super.coupons.publicTag'), 'info')] : []),
+  );
+
+  const update = async (body, message) => {
+    if (await superAction(`/api/super/coupons/${encodeURIComponent(coupon.code)}`, 'PUT', body)) toast(message);
+  };
+
+  const actions = el('div', 'row-actions');
+  actions.append(
+    button(coupon.active ? t('super.coupons.deactivate') : t('super.coupons.activate'), 'button-secondary button-sm', () => {
+      void update({active: !coupon.active}, t('super.coupons.updated'));
+    }),
+    button(coupon.public ? t('super.coupons.hide') : t('super.coupons.show'), 'button-ghost button-sm', () => {
+      void update({public: !coupon.public}, t('super.coupons.updated'));
+    }),
+    button(t('super.coupons.delete'), 'button-danger button-sm', () => {
+      if (!window.confirm(t('super.coupons.confirmDelete', {code: coupon.code}))) return;
+      void (async () => {
+        if (await superAction(`/api/super/coupons/${encodeURIComponent(coupon.code)}`, 'DELETE')) toast(t('super.coupons.deleted'));
+      })();
+    }),
+  );
+
+  row.append(copy, meta, tags, actions);
+  return row;
+};
+
+const renderCoupons = () => {
+  const coupons = list(overview && overview.coupons);
+  $('coupon-list').replaceChildren(...coupons.map(renderCoupon));
+  $('coupon-empty').hidden = coupons.length > 0;
+};
+
+const COUPON_CODE = /^[A-Za-z\d_-]{3,32}$/;
+
+const submitCouponForm = async form => {
+  const data = new FormData(form);
+  const code = String(data.get('code') || '').trim();
+  const value = Number(data.get('value'));
+  if (!COUPON_CODE.test(code)) {
+    showNotice($('super-message'), t('super.coupons.invalidCode'));
+    return;
+  }
+
+  const percent = data.get('type') === 'percent';
+  if (!Number.isInteger(value) || value < 1 || (percent && value > 100)) {
+    showNotice($('super-message'), t('super.coupons.invalidValue'));
+    return;
+  }
+
+  const maxRedemptions = String(data.get('maxRedemptions') || '').trim();
+  const body = {
+    code,
+    description: String(data.get('description') || '').trim() || null,
+    ...(percent ? {percentOff: value} : {amountOffCents: value * 100}),
+    tiers: data.getAll('tier'),
+    billing: data.get('billing'),
+    maxRedemptions: maxRedemptions ? Number(maxRedemptions) : null,
+    validFrom: startOfDay(String(data.get('validFrom') || '')),
+    validUntil: endOfDay(String(data.get('validUntil') || '')),
+    public: data.get('public') === 'on',
+  };
+  if (await superAction('/api/super/coupons', 'POST', body)) {
+    form.reset();
+    toast(t('super.coupons.created', {code: code.toUpperCase()}));
+  }
+};
+
 const leaveGuild = async guild => {
   if (!window.confirm(t('super.confirmLeave', {name: guild.name}))) return;
   const result = await superAction(`/api/super/guilds/${encodeURIComponent(guild.id)}/leave`, 'POST', {});
@@ -1596,6 +2006,11 @@ const wire = () => {
 
   $('status-channel-test').addEventListener('click', () => {
     void testStatusChannel();
+  });
+
+  $('coupon-form').addEventListener('submit', event => {
+    event.preventDefault();
+    void submitCouponForm(event.currentTarget);
   });
 
   for (const form of [$('block-user-form'), $('block-guild-form')]) {

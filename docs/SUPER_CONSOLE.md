@@ -27,6 +27,7 @@ They live in the orchestrator `/state` volume (`./data/orchestrator` in producti
 | `/state/blocks.json` | `MUSE_ORCHESTRATOR_BLOCKS_FILE` | `{"version": 1, "blocks": [Block...]}` |
 | `/state/super-audit.json` | `MUSE_ORCHESTRATOR_AUDIT_FILE` | `{"version": 1, "entries": [AuditEntry...]}` (oldest first) |
 | `/state/platform-settings.json` | `MUSE_ORCHESTRATOR_PLATFORM_FILE` | `{"version": 1, "statusChannel": StatusChannelSetting}` (see [Bot status channel](#bot-status-channel)) |
+| `/state/plans.json` | `MUSE_ORCHESTRATOR_PLANS_FILE` | `{"version": 1, "guilds": {guildId: GuildPlan}, "coupons": [Coupon...]}` (see [Plans and coupons](#plans-and-coupons)) |
 
 Overrides must normalize to a path under `/state/` and be distinct from each other and from the groups file, or the orchestrator refuses to start. A missing `platform-settings.json` means "no status channel".
 
@@ -215,9 +216,44 @@ Headers: actor (required). No body. Every configured worker is asked (`POST /v1/
 - Audited as `status_channel.test` (subject the channel, details `{mentionRoleCount, results}`), outcome `ok` (every bot posted), `partial` or `failed` (none did).
 - `400 STATUS_CHANNEL_NOT_SET` when no channel is configured; `400 INVALID_ACTOR`.
 
+### Plans and coupons
+
+Muse uses the same plan model as Sentinel: four tiers, prices in euro, billing `MONTHLY`, `YEARLY` or `GIFT` (trial / complimentary), and **no online payments**. The pricing page asks people to get in touch; the super admin assigns the plan by hand ("Gestisci piano") and coupons only change the price shown in the editor and count redemptions. The catalog lives in `src/plans/plans.ts`, shared by the workers, the orchestrator and (through the API) the dashboard.
+
+| Tier | Name | Monthly | Yearly | Bots usable in the server | Saved groups | Tracks per playlist | Favorites | 24/7 | Priority support | Custom bot name and banner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `FREE` | Free | €0 | €0 | 1 | 0 | 50 | 10 | no | no | no |
+| `TIER1` | Plus | €2 | €20 | 2 | 2 | 200 | 50 | no | yes | no |
+| `TIER2` | Pro | €5 | €50 | 5 | 10 | 500 | 200 | yes | yes | no |
+| `TIER3` | Brand | €10 | €90 | 5 | 10 | 500 | 200 | yes | yes | yes |
+
+How the limits apply:
+
+- **Bots**: the first N bots of a server, in configuration order (`muse-01`, `muse-02`, ...), are the plan's bots; the others answer every command, button and autocomplete in that server with an ephemeral refusal that names the included bots and links the pricing page.
+- **24/7**: below Pro the bots always leave an empty voice channel, and leave at most 600 seconds after the queue ends (`0` = never is Pro only).
+- **Playlists, favorites, groups**: imports are cut at the plan limit, `/favorites create` and new dashboard groups are refused at the limit (`403 PLAN_LIMIT`).
+- **Settings**: `/config` and dashboard changes beyond the plan are refused (`403 PLAN_LIMIT` / `403 PLAN_REQUIRED`). Stored values are never rewritten on a downgrade: they are clamped to the plan in force at play time, so they come back when the plan does.
+- **Expiry**: an expired plan behaves as Free at once; every 10 minutes (and at startup) the orchestrator sweeps expired plans back to `FREE` (expiry date and note are kept) and audits `plan.expired` with the system actor `{userId: "system", username: "Muse"}`.
+
+The workers learn their guilds' plans from the orchestrator: `PUT /v1/entitlements` (worker control token, see `ORCHESTRATOR.md`) is pushed at startup, with every reconcile pass (60 seconds) and right after every plan change or expiry. A guild that a worker has not been told about yet gets the Free limits and is not refused.
+
+#### `PUT /v1/super/guilds/:guildId/plan`
+
+Headers: actor (required). Body: `{"tier": "FREE"|"TIER1"|"TIER2"|"TIER3", "billing"?: "MONTHLY"|"YEARLY"|"GIFT"|null, "expiresAt"?: ISO 8601|null, "couponCode"?: string|null, "note"?: string|null}`.
+
+- `FREE` clears billing, expiry and coupon (the note is kept). A coupon is validated and redeemed only when it differs from the stored one (one redemption per server).
+- `200 {ok, previousTier, tier, effectiveTier, couponRedeemed, plan}`; audited as `plan.update` (subject the guild, details `{previousTier, tier, billing, expiresAt, couponCode, couponRedeemed}`).
+- `400 INVALID_PLAN`, `400 EXPIRY_IN_PAST`, `404 GUILD_NOT_FOUND` (no reachable bot is in the guild), `404 COUPON_NOT_FOUND`, `400 COUPON_*` (`INACTIVE`, `NOT_STARTED`, `EXPIRED`, `EXHAUSTED`, `FREE_PLAN`, `WRONG_TIER`, `WRONG_BILLING`).
+
+#### Coupons
+
+`POST /v1/super/coupons`, `PUT /v1/super/coupons/:code` (partial update) and `DELETE /v1/super/coupons/:code`, actor required. Body fields: `code` (3-32 letters, digits, `_`, `-`; stored upper case), `description` (at most 200), exactly one of `percentOff` (1-100) or `amountOffCents` (1-100000), `tiers` (paid tiers; empty = every paid plan), `billing` (`ANY`, `MONTHLY`, `YEARLY`), `maxRedemptions` (1-100000 or null = unlimited), `validFrom` / `validUntil`, `active`, `public` (shown as a promotion on the pricing page). Errors: `400 INVALID_COUPON`, `409 COUPON_EXISTS`, `404 COUPON_NOT_FOUND`. Audited as `coupon.create`, `coupon.update`, `coupon.delete`.
+
+The overview adds `plan` to every guild (stored plan with note and coupon, plus `effectiveTier`), and `coupons` and `planCatalog` at the top level.
+
 ### Worker endpoints
 
-Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/blocklist`, `POST /v1/status-channel/announce`, `GET /v1/guilds/:guildId/meta`, extended `GET /v1/status`). They use each worker's control token and are only called by the orchestrator. The orchestrator route `GET /v1/worker/config` goes the other way: workers call it with their own control token.
+Documented in `ORCHESTRATOR.md` (`POST /v1/guilds/:guildId/leave`, `PUT /v1/blocklist`, `PUT /v1/entitlements`, `POST /v1/status-channel/announce`, `GET /v1/guilds/:guildId/meta`, extended `GET /v1/status`). They use each worker's control token and are only called by the orchestrator. The orchestrator route `GET /v1/worker/config` goes the other way: workers call it with their own control token.
 
 ### Audit and failure handling
 

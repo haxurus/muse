@@ -114,6 +114,13 @@ const startFakeWorker = async (id: string, guilds: FakeWorker['guilds']): Promis
   return worker;
 };
 
+/** The startup reconcile pass runs in the background; overlapping passes are skipped while it runs. */
+const waitForReconcile = async (superConsole: SuperConsole) => {
+  await vi.waitFor(() => {
+    expect((superConsole as unknown as {reconciling: boolean}).reconciling).toBe(false);
+  }, {timeout: 5000, interval: 10});
+};
+
 const startOrchestrator = async (workers: FakeWorker[], reconcileMs = 60_000) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'muse-super-orchestrator-'));
   cleanups.push(() => {
@@ -134,7 +141,8 @@ const startOrchestrator = async (workers: FakeWorker[], reconcileMs = 60_000) =>
   await server.start();
   cleanups.push(async () => server.close());
   const internals = server as unknown as {server: Server; superConsole: SuperConsole};
-  // Wait for the startup reconcile push, then forget its requests.
+  // Wait for the startup reconcile pass (blocklist, then plan entitlements), then forget its requests.
+  await waitForReconcile(internals.superConsole);
   await internals.superConsole.pushBlocklist();
   for (const worker of workers) {
     worker.requests.splice(0);
@@ -239,8 +247,8 @@ describe('super console overview', () => {
       {id: 'muse-03', reachable: false, ready: false, bot: null, guildCount: 0, activePlayers: 0, uptimeSeconds: null, error: expect.any(String)},
     ]);
     expect(body.guilds).toEqual([
-      {id: guildA, name: 'Alpha', iconUrl: 'https://cdn.discordapp.com/icons/a.png', memberCount: 10, ownerId: actorId, workerIds: ['muse-01', 'muse-02'], blocked: false},
-      {id: guildB, name: 'Beta', iconUrl: null, memberCount: null, ownerId: null, workerIds: ['muse-01'], blocked: false},
+      {id: guildA, name: 'Alpha', iconUrl: 'https://cdn.discordapp.com/icons/a.png', memberCount: 10, ownerId: actorId, workerIds: ['muse-01', 'muse-02'], blocked: false, plan: expect.objectContaining({tier: 'FREE', effectiveTier: 'FREE'})},
+      {id: guildB, name: 'Beta', iconUrl: null, memberCount: null, ownerId: null, workerIds: ['muse-01'], blocked: false, plan: expect.objectContaining({tier: 'FREE', effectiveTier: 'FREE'})},
     ]);
     expect(body.blocks).toEqual([]);
     expect(body.audit).toEqual([]);
@@ -445,6 +453,7 @@ describe('blocklist reconcile', () => {
     expect(pushes(one)[0].body).toEqual({guildIds: [], userIds: [userX]});
 
     // Overlapping reconcile passes collapse into one.
+    await waitForReconcile(superConsole);
     one.requests.splice(0);
     one.pushDelayMs = 100;
     await Promise.all([superConsole.reconcile(), superConsole.reconcile(), superConsole.reconcile()]);
