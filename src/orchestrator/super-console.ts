@@ -139,14 +139,14 @@ const objectBody = (input: unknown): Record<string, unknown> => {
 
 /** Super-console routes, durable block/audit state and the blocklist reconcile loop. */
 export default class SuperConsole {
+  /** Server plans and coupons; shares this console's audit log and worker statuses. */
+  readonly plans: PlanService;
   private pushQueue: Promise<unknown> = Promise.resolve();
   private reconcileTimer?: NodeJS.Timeout;
   private sweepTimer?: NodeJS.Timeout;
   private reconciling = false;
   private lastReconcileFailures = '';
   private lastEntitlementFailures = '';
-  /** Server plans and coupons; shares this console's audit log and worker statuses. */
-  readonly plans: PlanService;
 
   constructor(
     private readonly workers: WorkerClient[],

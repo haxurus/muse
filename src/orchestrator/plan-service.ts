@@ -11,7 +11,6 @@ import {
   isBillingPeriod,
   isPlanTier,
   normalizeCouponCode,
-  type BillingPeriod,
   type CouponBilling,
   type PlanTier,
 } from '../plans/plans.js';
@@ -49,7 +48,7 @@ const objectBody = (input: unknown): Record<string, unknown> => {
 /** Optional ISO 8601 date: undefined when absent, null when cleared. */
 const optionalDate = (value: unknown, field: string, code: string): string | null | undefined => {
   if (value === undefined || value === null) {
-    return value as undefined | null;
+    return value;
   }
 
   if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
@@ -61,7 +60,7 @@ const optionalDate = (value: unknown, field: string, code: string): string | nul
 
 const optionalText = (value: unknown, field: string, max: number, code: string): string | null | undefined => {
   if (value === undefined || value === null) {
-    return value as undefined | null;
+    return value;
   }
 
   if (typeof value !== 'string') {
@@ -82,7 +81,7 @@ const optionalText = (value: unknown, field: string, max: number, code: string):
 
 const optionalInteger = (value: unknown, field: string, min: number, max: number): number | null | undefined => {
   if (value === undefined || value === null) {
-    return value as undefined | null;
+    return value;
   }
 
   if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) {
@@ -237,7 +236,7 @@ export default class PlanService {
     }
 
     const previous = this.plan(guildId, now);
-    const billing = free ? null : (body.billing as BillingPeriod | null | undefined) ?? null;
+    const billing = free || !isBillingPeriod(body.billing) ? null : body.billing;
     const requestedCode = optionalText(body.couponCode, 'couponCode', 32, 'INVALID_PLAN');
     const couponCode = free || !requestedCode ? null : normalizeCouponCode(requestedCode);
 
