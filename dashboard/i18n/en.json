@@ -415,6 +415,7 @@
     "alwaysOnRequired": "Staying in an empty channel (24/7) requires the {plan} plan.",
     "groupsNone": "The {plan} plan includes no saved groups: Plus or higher lets you create them.",
     "groupsLimit": "The {plan} plan allows {max} saved groups: delete one or move to a higher plan.",
-    "errorLimit": "This change goes beyond the server plan. See the plans to unlock it."
+    "errorLimit": "This change goes beyond the server plan. See the plans to unlock it.",
+    "botsOver": "The plan includes {max} bots: the extra ones ({count}) stay in the server but only answer with the plan notice."
   }
 }

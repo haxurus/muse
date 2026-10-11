@@ -457,6 +457,7 @@ select {
 .plan-limits dt { color: var(--muted); font-size: .78rem; }
 .plan-limits dd { margin: 0; color: var(--text); font-weight: 600; }
 .setting-plan { display: block; margin-top: 4px; color: var(--warn); font-size: .78rem; }
+.plan-note { grid-column: 1 / -1; margin: 0; color: var(--warn); font-size: .82rem; }
 .panel h2 { font-size: 1.08rem; }
 .panel-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .eyebrow { margin: 0 0 6px; color: var(--accent); font: 500 .68rem var(--font-mono-stack); letter-spacing: .12em; text-transform: uppercase; }

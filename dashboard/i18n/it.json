@@ -415,6 +415,7 @@
     "alwaysOnRequired": "Restare in un canale vuoto (24/7) richiede il piano {plan}.",
     "groupsNone": "Il piano {plan} non include gruppi salvati: con Plus o superiore puoi crearne.",
     "groupsLimit": "Il piano {plan} consente {max} gruppi salvati: eliminane uno o passa a un piano superiore.",
-    "errorLimit": "Questa modifica supera i limiti del piano del server. Vedi i piani per sbloccarla."
+    "errorLimit": "Questa modifica supera i limiti del piano del server. Vedi i piani per sbloccarla.",
+    "botsOver": "Il piano include {max} bot: quelli in più ({count}) restano nel server ma rispondono solo con l’avviso del piano."
   }
 }

@@ -1027,7 +1027,7 @@ const renderSuperGuild = (guild, names) => {
   const plan = guild.plan || {tier: 'FREE', effectiveTier: 'FREE'};
   tags.append(tag(tierLabel(plan.effectiveTier), isPaidTier(plan.effectiveTier) ? 'premium' : ''));
   if (plan.tier !== plan.effectiveTier) tags.append(tag(t('super.plans.expired'), 'warn'));
-  else if (plan.expiresAt && isPaidTier(plan.tier)) meta.append(el('span', '', t('super.plans.expires', {date: formatDate(plan.expiresAt)})));
+  else if (plan.expiresAt && isPaidTier(plan.tier)) meta.append(el('span', '', t('super.plans.expires', {date: formatDay(plan.expiresAt)})));
   const chips = el('div', 'chip-list');
   for (const workerId of list(guild.workerIds)) {
     chips.append(el('span', 'chip', names.get(workerId) || workerId));
@@ -1447,6 +1447,12 @@ const isTier = tier => PLAN_ORDER.includes(tier);
 const tierLabel = tier => t(`plans.tierLabel.${isTier(tier) ? tier : 'FREE'}`);
 const tierShort = tier => t(`plans.short.${isTier(tier) ? tier : 'FREE'}`);
 const isPaidTier = tier => isTier(tier) && tier !== 'FREE';
+
+/** Calendar day only, for plan expiries and coupon validity (Sentinel shows no time). */
+const formatDay = value => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(INTL_LOCALE, {dateStyle: 'medium'}).format(date);
+};
 const pricingPath = () => `${BASE}/pricing`;
 
 /** EUR without decimals for whole euros (Sentinel formatPrice). */
@@ -1503,7 +1509,7 @@ const renderPlanPanel = () => {
   $('plan-title').textContent = tierLabel(effective);
   let status;
   if (plan.tier !== effective) status = t('plan.expired', {plan: tierLabel(plan.tier)});
-  else if (plan.expiresAt) status = t('plan.validUntil', {date: formatDate(plan.expiresAt)});
+  else if (plan.expiresAt) status = t('plan.validUntil', {date: formatDay(plan.expiresAt)});
   else if (effective === 'FREE') status = t('plan.free');
   else status = t('plan.noExpiry');
   $('plan-status').textContent = status;
@@ -1511,10 +1517,15 @@ const renderPlanPanel = () => {
 
   const {limits} = plan.plan;
   const usage = plan.usage || {};
+  const bots = Number(usage.bots) || 0;
   $('plan-meters').replaceChildren(
-    planMeter(t('plan.meterBots'), Number(usage.bots) || 0, limits.bots),
+    planMeter(t('plan.meterBots'), bots, limits.bots),
     planMeter(t('plan.meterGroups'), Number(usage.groups) || 0, limits.groups),
   );
+  // Bots beyond the plan stay in the server but only answer with the plan notice.
+  if (bots > limits.bots) {
+    $('plan-meters').append(el('p', 'plan-note', t('plan.botsOver', {count: bots - limits.bots, max: limits.bots})));
+  }
 
   const entry = (label, value) => {
     const node = el('div');
@@ -1749,7 +1760,7 @@ const renderCoupon = coupon => {
       count: coupon.redemptions,
       max: coupon.maxRedemptions === null ? t('super.coupons.unlimited') : coupon.maxRedemptions,
     })),
-    el('span', '', `${coupon.validFrom ? formatDate(coupon.validFrom) : '—'} → ${coupon.validUntil ? formatDate(coupon.validUntil) : '∞'}`),
+    el('span', '', `${coupon.validFrom ? formatDay(coupon.validFrom) : '—'} → ${coupon.validUntil ? formatDay(coupon.validUntil) : '∞'}`),
   );
 
   const tags = el('div', 'row-tags');
