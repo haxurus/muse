@@ -13,6 +13,8 @@ import Config from './config.js';
 import KeyValueCacheProvider from './key-value-cache.js';
 import {ONE_HOUR_IN_SECONDS} from '../utils/constants.js';
 import {UserError, localeOf, t} from '../i18n/index.js';
+import {entitlements} from '../plans/entitlements.js';
+import {planAdjustedSettings} from '../plans/plans.js';
 
 // Only the local queue context and reply sink are required, never an interaction token.
 export type QueueRequestContext = Pick<ChatInputCommandInteraction, 'guild' | 'member' | 'channel'> & {
@@ -72,7 +74,7 @@ export default class AddQueryToQueue {
 
     const [targetVoiceChannel] = getMemberVoiceChannel(interaction.member as GuildMember) ?? getMostPopularVoiceChannel(interaction.guild!);
 
-    const settings = await getGuildSettings(guildId);
+    const settings = planAdjustedSettings(await getGuildSettings(guildId), entitlements.get(guildId).limits);
 
     const {playlistLimit, queueAddResponseEphemeral} = settings;
     const locale = localeOf(settings);

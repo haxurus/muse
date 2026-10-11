@@ -74,6 +74,8 @@ const WORKER_ID = /^muse-\d{2}$/u;
 const MAX_BLOCK_REASON_LENGTH = 500;
 const MAX_LEAVE_WORKERS = 32;
 const MAX_MENTION_ROLES = 10;
+/** Coupon codes in URLs (normalized to upper case by the orchestrator). */
+const COUPON_PATH = /^[\w-]{3,32}$/u;
 
 /** Bot invite permissions: View Channels, Send Messages, Read Message History, Connect, Speak. */
 // View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak.
@@ -358,6 +360,7 @@ export default class DashboardServer {
         iconUrl: guildIconUrl(guild.id, guild.icon),
         owner: guild.owner,
         availableWorkers: availableById.get(guild.id)!.availableWorkers,
+        planTier: availableById.get(guild.id)!.planTier ?? 'FREE',
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
 
@@ -542,6 +545,37 @@ export default class DashboardServer {
       return;
     }
 
+    if (request.method === 'PUT' && segments.length === 3 && segments[0] === 'guilds' && segments[2] === 'plan') {
+      await this.superPassThrough(request, response, {action: 'super.plan.put', guildId: SNOWFLAKE.test(segments[1]) ? segments[1] : undefined}, async (body, actor) => {
+        if (!SNOWFLAKE.test(segments[1])) {
+          throw new HttpError(400, 'guild id must be a Discord server id');
+        }
+
+        return this.orchestrator.superSetGuildPlan(segments[1], body, actor);
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && route === 'coupons') {
+      await this.superPassThrough(request, response, {action: 'super.coupon.create'}, async (body, actor) => this.orchestrator.superCreateCoupon(body, actor), 201);
+      return;
+    }
+
+    if ((request.method === 'PUT' || request.method === 'DELETE') && segments.length === 2 && segments[0] === 'coupons') {
+      const code = segments[1];
+      const audit: MutationAudit = {action: request.method === 'PUT' ? 'super.coupon.put' : 'super.coupon.delete', subjectId: COUPON_PATH.test(code) ? code : undefined};
+      await this.superPassThrough(request, response, audit, async (body, actor) => {
+        if (!COUPON_PATH.test(code)) {
+          throw new HttpError(400, 'coupon code must have 3-32 letters, digits, "_" or "-"');
+        }
+
+        return request.method === 'PUT'
+          ? this.orchestrator.superUpdateCoupon(code, body, actor)
+          : this.orchestrator.superDeleteCoupon(code, actor);
+      });
+      return;
+    }
+
     if (request.method === 'POST' && segments.length === 3 && segments[0] === 'guilds' && segments[2] === 'leave') {
       await this.superLeave(request, response, segments[1]);
       return;
@@ -618,6 +652,32 @@ export default class DashboardServer {
     } finally {
       auditMutation(session, audit, outcome);
     }
+  }
+
+  /**
+   * Super-admin mutation whose JSON object body is validated by the orchestrator (plans,
+   * coupons). A DELETE carries no body.
+   */
+  private async superPassThrough(
+    request: IncomingMessage,
+    response: ServerResponse,
+    audit: MutationAudit,
+    execute: (body: Record<string, unknown>, actor: SuperActor) => Promise<unknown>,
+    statusCode = 200,
+  ): Promise<void> {
+    await this.superMutate(request, response, audit, async actor => {
+      let body: Record<string, unknown> = {};
+      if (request.method !== 'DELETE') {
+        const input = await readJsonBody(request);
+        if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+          throw new HttpError(400, 'request body must be an object');
+        }
+
+        body = input as Record<string, unknown>;
+      }
+
+      return {statusCode, body: await execute(body, actor)};
+    });
   }
 
   private async superLeave(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {

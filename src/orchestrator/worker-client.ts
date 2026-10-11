@@ -10,6 +10,7 @@ import type {
   WorkerStatusAnnounceResult,
 } from '../control/types.js';
 import type {Blocklist} from '../control/blocklist.js';
+import type {EntitlementsPush} from '../plans/entitlements.js';
 import type {WorkerDefinition} from './config.js';
 
 /** Worker responses are small JSON documents; anything larger is treated as a failure. */
@@ -85,6 +86,17 @@ export default class WorkerClient {
       `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/leave`,
       requestOptions(this.worker.token),
     )).json<WorkerLeaveGuildResult>();
+  }
+
+  /** Replace the worker's in-memory plan entitlements (the guilds it is in). */
+  async pushEntitlements(body: EntitlementsPush): Promise<unknown> {
+    return capResponseSize(got.put(
+      `${this.worker.baseUrl}/v1/entitlements`,
+      {
+        ...requestOptions(this.worker.token),
+        json: body,
+      },
+    )).json<unknown>();
   }
 
   /** Text/announcement channels and mentionable-candidate roles of a guild, as seen by this bot. */

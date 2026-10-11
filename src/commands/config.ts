@@ -5,6 +5,7 @@ import {prisma} from '../utils/db.js';
 import Command from './index.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {UserError, isLocale, localeOf, t, type Locale} from '../i18n/index.js';
+import {assertConfigWithinPlan} from '../plans/messages.js';
 
 // Matches the dashboard validator; each playlist track costs provider API quota.
 const MAX_PLAYLIST_LIMIT = 500;
@@ -143,6 +144,8 @@ export default class implements Command {
           throw new UserError('configInvalidLimit', {max: MAX_PLAYLIST_LIMIT});
         }
 
+        assertConfigWithinPlan(interaction.guild!.id, {playlistLimit: limit});
+
         await prisma.setting.update({
           where: {
             guildId: interaction.guild!.id,
@@ -164,6 +167,8 @@ export default class implements Command {
           throw new UserError('configInvalidDelay', {max: MAX_WAIT_AFTER_QUEUE_EMPTIES_SECONDS});
         }
 
+        assertConfigWithinPlan(interaction.guild!.id, {secondsToWaitAfterQueueEmpties: delay});
+
         await prisma.setting.update({
           where: {
             guildId: interaction.guild!.id,
@@ -180,6 +185,7 @@ export default class implements Command {
 
       case 'set-leave-if-no-listeners': {
         const value = interaction.options.getBoolean('value')!;
+        assertConfigWithinPlan(interaction.guild!.id, {leaveIfNoListeners: value});
 
         await prisma.setting.update({
           where: {
