@@ -9,6 +9,7 @@ import {
   type CouponBilling,
   type PlanTier,
 } from '../plans/plans.js';
+import {isValidBotBranding, type BotBranding} from '../plans/branding.js';
 import {commitWithBackup, isPlainObject, isPrintable, loadWithBackup} from './durable-file.js';
 import {isValidActor, type Actor} from './super-store.js';
 
@@ -48,7 +49,11 @@ type PlanFile = {
   version: 1;
   guilds: Record<string, GuildPlan>;
   coupons: Coupon[];
+  /** Brand plan profiles per guild and worker; absent in files written before the Brand plan. */
+  branding?: Record<string, Record<string, BotBranding>>;
 };
+
+const BRANDING_WORKER_ID = /^[\w-]{1,64}$/u;
 
 export const COUPON_CODE = /^[A-Z\d_-]{3,32}$/u;
 export const MAX_PLAN_NOTE_LENGTH = 500;
@@ -91,7 +96,13 @@ const isValidPlanFile = (value: unknown): value is PlanFile => {
     return false;
   }
 
-  const {guilds, coupons} = value as {guilds: Record<string, unknown>; coupons: unknown[]};
+  const {guilds, coupons, branding} = value as {guilds: Record<string, unknown>; coupons: unknown[]; branding?: unknown};
+  if (branding !== undefined && !(isPlainObject(branding) && Object.entries(branding).every(([guildId, bots]) => isSnowflake(guildId)
+    && isPlainObject(bots)
+    && Object.entries(bots).every(([workerId, profile]) => BRANDING_WORKER_ID.test(workerId) && isValidBotBranding(profile))))) {
+    return false;
+  }
+
   return Object.entries(guilds).every(([guildId, plan]) => isSnowflake(guildId) && isValidGuildPlan(plan))
     && coupons.length <= MAX_COUPONS
     && coupons.every(coupon => isValidCoupon(coupon))
@@ -128,6 +139,24 @@ export class PlanStore {
       : this.data.coupons.map(coupon => coupon.code === redeemCode ? {...coupon, redemptions: coupon.redemptions + 1} : coupon);
     this.commit({...this.data, guilds: {...this.data.guilds, [guildId]: copyPlan(plan)}, coupons});
     return copyPlan(plan);
+  }
+
+  /** Brand profiles of a guild by worker id. */
+  branding(guildId: string): Record<string, BotBranding> {
+    return Object.fromEntries(Object.entries(this.data.branding?.[guildId] ?? {}).map(([workerId, profile]) => [workerId, {...profile}]));
+  }
+
+  /** Store one bot's profile; `null` forgets it (both fields back to Discord's default). */
+  setBotBranding(guildId: string, workerId: string, profile: BotBranding | null): void {
+    const others = Object.entries(this.data.branding?.[guildId] ?? {}).filter(([id]) => id !== workerId);
+    const bots = Object.fromEntries(profile === null ? others : [...others, [workerId, {...profile}]]);
+    this.commit({...this.data, branding: {...this.withoutGuild(guildId), ...(Object.keys(bots).length > 0 ? {[guildId]: bots} : {})}});
+  }
+
+  clearBranding(guildId: string): void {
+    if (this.data.branding?.[guildId] !== undefined) {
+      this.commit({...this.data, branding: this.withoutGuild(guildId)});
+    }
   }
 
   /** Newest first. */
@@ -170,6 +199,10 @@ export class PlanStore {
 
     this.commit({...this.data, coupons: this.data.coupons.filter(candidate => candidate !== existing)});
     return copyCoupon(existing);
+  }
+
+  private withoutGuild(guildId: string): Record<string, Record<string, BotBranding>> {
+    return Object.fromEntries(Object.entries(this.data.branding ?? {}).filter(([id]) => id !== guildId));
   }
 
   private commit(next: PlanFile): void {

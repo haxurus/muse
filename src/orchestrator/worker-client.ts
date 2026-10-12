@@ -2,6 +2,7 @@ import got, {type CancelableRequest, type Response} from 'got';
 import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {
   WorkerBlocklistResult,
+  WorkerBrandingResult,
   WorkerGuildMeta,
   WorkerGuildSettings,
   WorkerLeaveGuildResult,
@@ -11,6 +12,7 @@ import type {
 } from '../control/types.js';
 import type {Blocklist} from '../control/blocklist.js';
 import type {EntitlementsPush} from '../plans/entitlements.js';
+import type {BrandingProfile} from '../plans/branding.js';
 import type {WorkerDefinition} from './config.js';
 
 /** Worker responses are small JSON documents; anything larger is treated as a failure. */
@@ -97,6 +99,19 @@ export default class WorkerClient {
         json: body,
       },
     )).json<unknown>();
+  }
+
+  /** Brand plan: this bot's nickname and banner in one guild (`null` restores the default). */
+  async setBranding(guildId: string, profile: BrandingProfile): Promise<WorkerBrandingResult> {
+    return capResponseSize(got.post(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/branding`,
+      {
+        ...requestOptions(this.worker.token),
+        // Uploading a banner to Discord can take a few seconds.
+        timeout: {request: 15_000},
+        json: profile,
+      },
+    )).json<WorkerBrandingResult>();
   }
 
   /** Text/announcement channels and mentionable-candidate roles of a guild, as seen by this bot. */

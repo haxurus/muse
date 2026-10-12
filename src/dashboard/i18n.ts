@@ -100,7 +100,7 @@ export const renderTemplate = (
   return escapeHtml(values[name]);
 });
 
-/* ---------- Dictionaries (home page, development notice, shared chrome) ---------- */
+/* ---------- Dictionaries (home page, pricing page, shared chrome) ---------- */
 
 const it = {
   lang: {
@@ -112,7 +112,6 @@ const it = {
     ogLocale: 'it_IT',
     ogLocaleAlternate: 'en_US',
     ogImageAlt: 'Muse: music bot Discord per cinque canali vocali insieme, con YouTube, Spotify e SoundCloud.',
-    developmentTitle: 'Muse · Accesso limitato',
     pricingTitle: 'Prezzi · Piani gratuiti e premium del music bot Discord Muse',
     pricingDescription: 'Confronta i piani di Muse: music bot Discord gratuito con YouTube, Spotify e SoundCloud, più i piani Plus, Pro e Brand con più bot in canali vocali diversi, 24/7 e nome del bot personalizzato.',
     appNoscript: 'Muse Control richiede JavaScript.',
@@ -304,20 +303,11 @@ const it = {
     credits: 'Muse © 2026 · Fatto da Haxurus',
     tagline: 'discord music · self-hosted',
   },
-  development: {
-    kicker: 'Accesso limitato',
-    title: 'Muse è ancora in sviluppo.',
-    text: 'Per ora i bot di Muse possono essere aggiunti a nuovi server solo dal proprietario del progetto.',
-    follow: 'Puoi seguire lo sviluppo su GitHub oppure fare un fork del progetto e self-hostarlo sulla tua infrastruttura.',
-    github: 'Stato del progetto su GitHub',
-    fork: 'Fai un fork e self-hostalo',
-    back: 'Torna alla home',
-  },
   pricing: {
     kicker: 'Piani',
     title: 'Un piano per ogni server.',
     intro: 'Il piano Free include un bot musicale con tutti i comandi e le sorgenti. I livelli a pagamento aggiungono più bot in canali vocali diversi, il 24/7, limiti più alti e il supporto prioritario.',
-    betaNotice: 'Muse è in beta: i pagamenti online non sono ancora attivi. Per attivare un piano contattami direttamente, lo configuro io sul tuo server.',
+    betaNotice: 'I pagamenti online non sono ancora attivi: per attivare un piano contattami direttamente, lo configuro io sul tuo server.',
     unavailable: 'Impossibile caricare promozioni e recapiti in questo momento. Riprova tra poco.',
     monthly: 'Mensile',
     yearly: 'Annuale',
@@ -379,7 +369,7 @@ const it = {
     faqBotsQuestion: 'Cosa vuol dire “bot in vocale insieme”?',
     faqBotsAnswer: 'Ogni bot Discord può stare in un solo canale vocale per server. Con due bot Muse hai musica in due canali contemporaneamente, con cinque in cinque, ognuno con la propria coda.',
     faqTrialQuestion: 'Posso provare prima di pagare?',
-    faqTrialAnswer: 'Sì: il piano Free resta sempre disponibile e durante la beta posso attivare periodi di prova.',
+    faqTrialAnswer: 'Sì: il piano Free resta sempre disponibile e su richiesta posso attivare un periodo di prova dei piani a pagamento.',
   },
 
 };
@@ -397,7 +387,6 @@ const en: Messages = {
     ogLocale: 'en_US',
     ogLocaleAlternate: 'it_IT',
     ogImageAlt: 'Muse: Discord music bot for five voice channels at once, with YouTube, Spotify and SoundCloud.',
-    developmentTitle: 'Muse · Limited access',
     pricingTitle: 'Pricing · Free and premium Discord music bot plans',
     pricingDescription: 'Compare Muse plans: a free Discord music bot with YouTube, Spotify and SoundCloud, plus Plus, Pro and Brand plans with more bots in different voice channels, 24/7 and a custom bot name.',
     appNoscript: 'Muse Control requires JavaScript.',
@@ -589,20 +578,11 @@ const en: Messages = {
     credits: 'Muse © 2026 · Made by Haxurus',
     tagline: 'discord music · self-hosted',
   },
-  development: {
-    kicker: 'Limited access',
-    title: 'Muse is still in development.',
-    text: 'For now, Muse bots can only be added to new servers by the project owner.',
-    follow: 'You can follow development on GitHub, or fork the project and self-host it on your own infrastructure.',
-    github: 'Project status on GitHub',
-    fork: 'Fork it and self-host',
-    back: 'Back to home',
-  },
   pricing: {
     kicker: 'Plans',
     title: 'A plan for every server.',
     intro: 'The Free plan includes one music bot with every command and source. Paid levels add more bots in different voice channels, 24/7, higher limits and priority support.',
-    betaNotice: 'Muse is in beta: online payments are not active yet. To activate a plan, contact me directly and I will set it up on your server.',
+    betaNotice: 'Online payments are not active yet: to activate a plan, contact me directly and I will set it up on your server.',
     unavailable: 'Promotions and contacts cannot be loaded right now. Please try again shortly.',
     monthly: 'Monthly',
     yearly: 'Yearly',
@@ -664,7 +644,7 @@ const en: Messages = {
     faqBotsQuestion: 'What does “bots in voice at once” mean?',
     faqBotsAnswer: 'A Discord bot can only be in one voice channel per server. With two Muse bots you have music in two channels at the same time, with five in five, each with its own queue.',
     faqTrialQuestion: 'Can I try before paying?',
-    faqTrialAnswer: 'Yes: the Free plan is always available, and during the beta I can enable trial periods.',
+    faqTrialAnswer: 'Yes: the Free plan is always available, and on request I can enable a trial of the paid plans.',
   },
 
 };
