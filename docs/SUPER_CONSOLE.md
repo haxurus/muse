@@ -249,6 +249,10 @@ Headers: actor (required). Body: `{"tier": "FREE"|"TIER1"|"TIER2"|"TIER3", "bill
 
 `POST /v1/super/coupons`, `PUT /v1/super/coupons/:code` (partial update) and `DELETE /v1/super/coupons/:code`, actor required. Body fields: `code` (3-32 letters, digits, `_`, `-`; stored upper case), `description` (at most 200), exactly one of `percentOff` (1-100) or `amountOffCents` (1-100000), `tiers` (paid tiers; empty = every paid plan), `billing` (`ANY`, `MONTHLY`, `YEARLY`), `maxRedemptions` (1-100000 or null = unlimited), `validFrom` / `validUntil`, `active`, `public` (shown as a promotion on the pricing page). Errors: `400 INVALID_COUPON`, `409 COUPON_EXISTS`, `404 COUPON_NOT_FOUND`. Audited as `coupon.create`, `coupon.update`, `coupon.delete`.
 
+#### Public contacts
+
+`PUT /v1/super/config` (actor required) with any of `contactEmail` (email, at most 200), `contactDiscord` (a username, or an https link, at most 200), `contactUrl` (https, at most 500) and `waitlistOpen` (boolean); an empty string clears a contact. `400 INVALID_CONFIG` otherwise; audited as `instance.config`. They are stored in `platform-settings.json` (`instance`) and published, with the live public coupons, by `GET /v1/public/info` (API token) for the pricing page: `{waitlistOpen, contacts: {email, discord, url}, promotions: [...]}`. The overview includes them as `config`.
+
 The overview adds `plan` to every guild (stored plan with note and coupon, plus `effectiveTier`), and `coupons` and `planCatalog` at the top level.
 
 ### Worker endpoints

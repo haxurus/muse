@@ -65,8 +65,8 @@ export const homeStructuredData = (locale: Locale, origin: string): string => {
   });
 };
 
-/** Every indexable page: the home page in each language. */
-const indexablePaths = (): string[] => LOCALES.map(locale => localizedPath(locale));
+/** Indexable pages after the language prefix: the home page and the pricing page. */
+export const INDEXABLE_PAGES = ['', '/pricing'] as const;
 
 export const robotsTxt = (origin: string): string => [
   'User-agent: *',
@@ -81,13 +81,18 @@ export const robotsTxt = (origin: string): string => [
   '',
 ].join('\n');
 
-/** Sitemap with hreflang alternates for every language and x-default ("/" redirects by language). */
+/**
+ * Sitemap with hreflang alternates for every language of every page; x-default is "/" for the home
+ * page (it redirects by language) and the English page otherwise.
+ */
 export const sitemapXml = (origin: string): string => {
-  const alternates = [
-    ...LOCALES.map(locale => `    <xhtml:link rel="alternate" hreflang="${locale}" href="${origin}${localizedPath(locale)}"/>`),
-    `    <xhtml:link rel="alternate" hreflang="x-default" href="${origin}/"/>`,
-  ].join('\n');
-  const urls = indexablePaths().map(path => `  <url>\n    <loc>${origin}${path}</loc>\n${alternates}\n  </url>`);
+  const urls = INDEXABLE_PAGES.flatMap(page => {
+    const alternates = [
+      ...LOCALES.map(locale => `    <xhtml:link rel="alternate" hreflang="${locale}" href="${origin}${localizedPath(locale, page)}"/>`),
+      `    <xhtml:link rel="alternate" hreflang="x-default" href="${origin}${page === '' ? '/' : localizedPath('en', page)}"/>`,
+    ].join('\n');
+    return LOCALES.map(locale => `  <url>\n    <loc>${origin}${localizedPath(locale, page)}</loc>\n${alternates}\n  </url>`);
+  });
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',

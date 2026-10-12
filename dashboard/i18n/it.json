@@ -367,6 +367,17 @@
       "deleted": "Coupon eliminato.",
       "invalidCode": "Il codice deve avere 3-32 lettere, cifre, \"_\" o \"-\".",
       "invalidValue": "Inserisci un valore intero (percentuale da 1 a 100, importo in euro da 1)."
+    },
+    "contacts": {
+      "kicker": "RECAPITI",
+      "title": "Recapiti pubblici",
+      "text": "Compaiono nella pagina prezzi, nella sezione “Vuoi attivare un piano?”. Lascia un campo vuoto per nasconderlo; GitHub è sempre elencato.",
+      "email": "Email",
+      "discord": "Discord (username o link https)",
+      "discordPlaceholder": "username o https://discord.gg/…",
+      "url": "Sito o modulo (https)",
+      "save": "Salva recapiti",
+      "saved": "Recapiti salvati."
     }
   },
   "errors": {

@@ -367,6 +367,17 @@
       "deleted": "Coupon deleted.",
       "invalidCode": "The code must have 3-32 letters, digits, \"_\" or \"-\".",
       "invalidValue": "Enter a whole value (percentage 1 to 100, amount from 1 euro)."
+    },
+    "contacts": {
+      "kicker": "CONTACTS",
+      "title": "Public contacts",
+      "text": "Shown on the pricing page, in “Want to activate a plan?”. Leave a field empty to hide it; GitHub is always listed.",
+      "email": "Email",
+      "discord": "Discord (username or https link)",
+      "discordPlaceholder": "username or https://discord.gg/…",
+      "url": "Website or form (https)",
+      "save": "Save contacts",
+      "saved": "Contacts saved."
     }
   },
   "errors": {

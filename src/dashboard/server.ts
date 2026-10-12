@@ -8,6 +8,7 @@ import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send,
 import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
 import OrchestratorClient, {BlockKind, GuildSettingsUpdate, StatusChannelUpdate, SuperActor} from './orchestrator-client.js';
 import {homeStructuredData, robotsTxt, sitemapXml} from './seo.js';
+import {pricingMarkup, type PublicInfo} from './pricing.js';
 import type {DashboardSession} from './session-store.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
@@ -33,6 +34,12 @@ const HTML = 'text/html; charset=utf-8';
 const JSON_TYPE = 'application/json; charset=utf-8';
 
 /** HTML templates (rendered once per language at startup, see i18n.ts). */
+/** Public info (contacts, promotions) is cached briefly, like Sentinel's 30 s public info cache. */
+const PUBLIC_INFO_TTL_MS = 30_000;
+
+/** Rendered per request: promotions and contacts come from the orchestrator. */
+const PRICING_TEMPLATE = readFileSync(path.join(STATIC_ROOT, 'pricing.html'), 'utf8');
+
 const TEMPLATES = {
   home: readFileSync(path.join(STATIC_ROOT, 'home.html'), 'utf8'),
   app: readFileSync(path.join(STATIC_ROOT, 'index.html'), 'utf8'),
@@ -53,6 +60,7 @@ const STATIC_ASSETS = new Map<string, StaticAsset>([
   ['/assets/dashboard.css', staticAsset('dashboard.css', 'text/css; charset=utf-8')],
   ['/assets/dashboard.js', staticAsset('dashboard.js', 'text/javascript; charset=utf-8')],
   ['/assets/home.js', staticAsset('home.js', 'text/javascript; charset=utf-8')],
+  ['/assets/pricing.js', staticAsset('pricing.js', 'text/javascript; charset=utf-8')],
   ['/assets/i18n/it.json', staticAsset('i18n/it.json', JSON_TYPE)],
   ['/assets/i18n/en.json', staticAsset('i18n/en.json', JSON_TYPE)],
   ['/assets/fonts/Geist-Variable.woff2', staticAsset('fonts/Geist-Variable.woff2', 'font/woff2', FONT_CACHE)],
@@ -189,6 +197,7 @@ export default class DashboardServer {
   private readonly pages: Record<PageName, Record<Locale, Buffer>>;
   /** Crawler files (robots.txt, sitemap.xml), generated from the public origin at startup. */
   private readonly crawlerFiles: Map<string, StaticAsset>;
+  private publicInfoCache?: {at: number; info: PublicInfo};
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
     this.orchestrator = dependencies.orchestrator ?? new OrchestratorClient(config);
@@ -392,6 +401,29 @@ export default class DashboardServer {
     });
   }
 
+  /** Contacts and promotions for the pricing page; null when the orchestrator does not answer. */
+  private async publicInfo(): Promise<PublicInfo | null> {
+    const cached = this.publicInfoCache;
+    if (cached && Date.now() - cached.at < PUBLIC_INFO_TTL_MS) {
+      return cached.info;
+    }
+
+    try {
+      const info = await this.orchestrator.publicInfo();
+      this.publicInfoCache = {at: Date.now(), info};
+      return info;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The public pricing page (indexable), rendered with the live contacts and promotions. */
+  private async sendPricing(response: ServerResponse, locale: Locale): Promise<void> {
+    const {origin} = this.config.publicUrl;
+    const html = renderPage(PRICING_TEMPLATE, locale, '/pricing', {origin}, pricingMarkup(locale, origin, await this.publicInfo()));
+    send(response, 200, HTML, Buffer.from(html, 'utf8'), {'cache-control': NO_STORE, 'content-language': locale});
+  }
+
   private sendPage(response: ServerResponse, page: PageName, locale: Locale): void {
     send(response, 200, HTML, this.pages[page][locale], {
       'cache-control': NO_STORE,
@@ -448,7 +480,12 @@ export default class DashboardServer {
     return false;
   }
 
-  private handleLocalizedPage(response: ServerResponse, locale: Locale, rest: string[]): boolean {
+  private async handleLocalizedPage(response: ServerResponse, locale: Locale, rest: string[]): Promise<boolean> {
+    if (rest.length === 1 && rest[0] === 'pricing') {
+      await this.sendPricing(response, locale);
+      return true;
+    }
+
     if (rest.length === 0) {
       // The public home pages are the only indexable HTML views.
       this.sendPage(response, 'home', locale);
@@ -567,6 +604,12 @@ export default class DashboardServer {
 
         return this.orchestrator.superSetGuildPlan(segments[1], body, actor);
       });
+      return;
+    }
+
+    if (request.method === 'PUT' && route === 'config') {
+      await this.superPassThrough(request, response, {action: 'super.config.put'}, async (body, actor) => this.orchestrator.superSetConfig(body, actor));
+      this.publicInfoCache = undefined;
       return;
     }
 
