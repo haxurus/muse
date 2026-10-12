@@ -11,6 +11,27 @@
   <link rel="alternate" hreflang="it" href="{{origin}}/it">
   <link rel="alternate" hreflang="en" href="{{origin}}/en">
   <link rel="alternate" hreflang="x-default" href="{{origin}}/">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Muse">
+  <meta property="og:title" content="{{meta.homeTitle}}">
+  <meta property="og:description" content="{{meta.homeDescription}}">
+  <meta property="og:url" content="{{origin}}/{{lang}}">
+  <meta property="og:locale" content="{{meta.ogLocale}}">
+  <meta property="og:locale:alternate" content="{{meta.ogLocaleAlternate}}">
+  <meta property="og:image" content="{{origin}}/assets/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{meta.ogImageAlt}}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{meta.homeTitle}}">
+  <meta name="twitter:description" content="{{meta.homeDescription}}">
+  <meta name="twitter:image" content="{{origin}}/assets/og-image.png">
+  <meta name="twitter:image:alt" content="{{meta.ogImageAlt}}">
+  <script type="application/ld+json">{{{structuredData}}}</script>
   <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/dashboard.css">
   <script src="/assets/home.js" defer></script>
@@ -32,6 +53,7 @@
           <a href="#funzioni">{{nav.features}}</a>
           <a href="#come-funziona">{{nav.how}}</a>
           <a href="#sicurezza">{{nav.security}}</a>
+          <a href="#faq">{{nav.faq}}</a>
         </nav>
         <div class="site-nav-end">
           {{{languageSwitcher}}}
@@ -46,6 +68,7 @@
             <a href="#funzioni">{{nav.features}}</a>
             <a href="#come-funziona">{{nav.how}}</a>
             <a href="#sicurezza">{{nav.security}}</a>
+            <a href="#faq">{{nav.faq}}</a>
             <div class="site-mobile-actions">
               <a class="button button-secondary" href="{{prefix}}/dashboard">{{nav.login}}</a>
               <a class="button button-primary" href="/add?lang={{lang}}">{{nav.add}}</a>
@@ -252,6 +275,41 @@
               <dd>{{security.permissions.text}}</dd>
             </div>
           </dl>
+        </div>
+      </section>
+
+      <section class="section" id="faq" aria-labelledby="faq-title">
+        <div class="site-container faq-layout">
+          <div class="section-head">
+            <span class="kicker">{{faq.kicker}}</span>
+            <h2 id="faq-title">{{faq.title}}</h2>
+          </div>
+          <div class="faq-list">
+            <details open>
+              <summary><h3>{{faq.voice.question}}</h3></summary>
+              <p>{{faq.voice.answer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{faq.sources.question}}</h3></summary>
+              <p>{{faq.sources.answer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{faq.play.question}}</h3></summary>
+              <p>{{faq.play.answer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{faq.permissions.question}}</h3></summary>
+              <p>{{faq.permissions.answer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{faq.openSource.question}}</h3></summary>
+              <p>{{faq.openSource.answer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{faq.language.question}}</h3></summary>
+              <p>{{faq.language.answer}}</p>
+            </details>
+          </div>
         </div>
       </section>
 

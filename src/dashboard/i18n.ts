@@ -107,8 +107,11 @@ const it = {
     label: 'Lingua',
   },
   meta: {
-    homeTitle: 'Muse · Music bot Discord self-hosted',
-    homeDescription: 'Muse: cinque music bot Discord indipendenti e una dashboard per configurarli. Self-hosted e open source.',
+    homeTitle: 'Muse · Music bot Discord per più canali vocali',
+    homeDescription: 'Cinque music bot Discord e una dashboard: musica da YouTube, Spotify e SoundCloud in fino a cinque canali vocali insieme. Slash command, open source.',
+    ogLocale: 'it_IT',
+    ogLocaleAlternate: 'en_US',
+    ogImageAlt: 'Muse: music bot Discord per cinque canali vocali insieme, con YouTube, Spotify e SoundCloud.',
     developmentTitle: 'Muse · Accesso limitato',
     appNoscript: 'Muse Control richiede JavaScript.',
   },
@@ -119,12 +122,13 @@ const it = {
     features: 'Funzioni',
     how: 'Come funziona',
     security: 'Sicurezza',
+    faq: 'FAQ',
     login: 'Accedi',
     add: 'Aggiungi a Discord',
     openDashboard: 'Apri la dashboard',
   },
   hero: {
-    kicker: 'Music bot · Self-hosted',
+    kicker: 'Music bot Discord · Open source',
     line1: 'Cinque bot.',
     line2: 'Una dashboard.',
     line3: 'La tua musica.',
@@ -254,6 +258,37 @@ const it = {
       text: 'Visualizza canali, Invia messaggi, Incorpora link, Leggi la cronologia, Connetti, Parla. Nessun permesso di moderazione.',
     },
   },
+  faq: {
+    kicker: 'FAQ',
+    title: 'Domande frequenti.',
+    voice: {
+      question: 'Un music bot Discord può suonare in più canali vocali insieme?',
+      answer: 'Un singolo bot può stare in un solo canale vocale per server. Muse usa cinque music bot indipendenti, quindi lo stesso server può avere musica in fino a cinque canali vocali nello stesso momento, ognuno con la propria coda.',
+    },
+    sources: {
+      question: 'Quali sorgenti musicali supporta Muse?',
+      answer: 'Ricerca, link e playlist di YouTube; link Spotify di brani, album e playlist, riprodotti tramite i brani corrispondenti su YouTube; link SoundCloud. Anche le dirette YouTube sono supportate.',
+    },
+    play: {
+      question: 'Come si riproduce musica in un canale vocale Discord?',
+      answer: 'Entra in un canale vocale ed esegui /play con il titolo del brano o un link, scegliendo il bot che vuoi dall’elenco dei comandi di Discord. Poi usa /queue, /skip, /pause, /resume, /volume e gli altri slash command.',
+    },
+    permissions: {
+      question: 'Di quali permessi ha bisogno il bot?',
+      answer: 'Solo sei: Visualizza canali, Invia messaggi, Incorpora link, Leggi la cronologia dei messaggi, Connettiti e Parla. Nessun permesso di moderazione.',
+    },
+    openSource: {
+      question: 'Muse è gratuito e open source?',
+      answer: 'Sì. Muse è un fork open source di museofficial/muse con licenza MIT. Puoi ospitarlo sulla tua infrastruttura con Docker Compose, con cinque applicazioni Discord e una dashboard.',
+    },
+    language: {
+      question: 'In che lingue parla il bot?',
+      answer: 'I messaggi del bot sono in inglese per impostazione predefinita e in italiano con /config set-language; i nomi dei comandi restano in inglese. La dashboard e questo sito sono in inglese e in italiano.',
+    },
+  },
+  seo: {
+    featureList: 'Cinque music bot Discord indipendenti, fino a cinque canali vocali in riproduzione insieme, YouTube, Spotify, SoundCloud, slash command, dashboard con accesso Discord, gruppi di bot per server',
+  },
   cta: {
     title: 'Più vocali, nessun compromesso.',
     text: 'Aggiungi i bot, accedi con Discord e configura il primo server in pochi minuti.',
@@ -286,8 +321,11 @@ const en: Messages = {
     label: 'Language',
   },
   meta: {
-    homeTitle: 'Muse · Self-hosted Discord music bots',
-    homeDescription: 'Muse: five independent Discord music bots and one dashboard to configure them. Self-hosted and open source.',
+    homeTitle: 'Muse · Discord Music Bot for Multiple Voice Channels',
+    homeDescription: 'Five Discord music bots, one dashboard: play YouTube, Spotify and SoundCloud in up to five voice channels at once. Slash commands, open source.',
+    ogLocale: 'en_US',
+    ogLocaleAlternate: 'it_IT',
+    ogImageAlt: 'Muse: Discord music bot for five voice channels at once, with YouTube, Spotify and SoundCloud.',
     developmentTitle: 'Muse · Limited access',
     appNoscript: 'Muse Control requires JavaScript.',
   },
@@ -298,12 +336,13 @@ const en: Messages = {
     features: 'Features',
     how: 'How it works',
     security: 'Security',
+    faq: 'FAQ',
     login: 'Sign in',
     add: 'Add to Discord',
     openDashboard: 'Open the dashboard',
   },
   hero: {
-    kicker: 'Music bot · Self-hosted',
+    kicker: 'Discord music bot · Open source',
     line1: 'Five bots.',
     line2: 'One dashboard.',
     line3: 'Your music.',
@@ -433,6 +472,37 @@ const en: Messages = {
       text: 'View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak. No moderation permissions.',
     },
   },
+  faq: {
+    kicker: 'FAQ',
+    title: 'Frequently asked questions.',
+    voice: {
+      question: 'Can a Discord music bot play in several voice channels at once?',
+      answer: 'A single bot can only be in one voice channel per server. Muse runs five independent music bots, so the same server can have music in up to five voice channels at the same time, each with its own queue.',
+    },
+    sources: {
+      question: 'Which music sources does Muse support?',
+      answer: 'YouTube search, links and playlists; Spotify track, album and playlist links, played through the matching YouTube tracks; SoundCloud links. YouTube livestreams work too.',
+    },
+    play: {
+      question: 'How do I play music in a Discord voice channel?',
+      answer: 'Join a voice channel and run /play with a song name or a link, picking the bot you want from Discord’s command list. Then use /queue, /skip, /pause, /resume, /volume and the other slash commands.',
+    },
+    permissions: {
+      question: 'Which permissions does the bot need?',
+      answer: 'Only six: View Channels, Send Messages, Embed Links, Read Message History, Connect and Speak. No moderation permissions.',
+    },
+    openSource: {
+      question: 'Is Muse free and open source?',
+      answer: 'Yes. Muse is an open source fork of museofficial/muse under the MIT license. You can host it on your own infrastructure with Docker Compose, five Discord applications and one dashboard.',
+    },
+    language: {
+      question: 'Which languages does the bot speak?',
+      answer: 'Bot messages are in English by default and in Italian with /config set-language; command names stay in English. The dashboard and this website are available in English and Italian.',
+    },
+  },
+  seo: {
+    featureList: 'Five independent Discord music bots, up to five voice channels playing at once, YouTube, Spotify, SoundCloud, slash commands, dashboard with Discord sign-in, per-server bot groups',
+  },
   cta: {
     title: 'More voice channels, no compromises.',
     text: 'Add the bots, sign in with Discord and configure your first server in a few minutes.',
@@ -506,6 +576,7 @@ export const renderPage = (
   locale: Locale,
   path: string,
   extra: Readonly<Record<string, string>> = {},
+  markup: Readonly<Record<string, string>> = {},
 ): string => renderTemplate(
   template,
   {
@@ -517,5 +588,6 @@ export const renderPage = (
   {
     languageSwitcher: languageSwitcher(locale, path),
     languageSwitcherMobile: languageSwitcher(locale, path, 'mobile'),
+    ...markup,
   },
 );

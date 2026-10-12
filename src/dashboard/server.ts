@@ -7,6 +7,7 @@ import type {DashboardConfig} from './config.js';
 import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
 import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
 import OrchestratorClient, {BlockKind, GuildSettingsUpdate, StatusChannelUpdate, SuperActor} from './orchestrator-client.js';
+import {homeStructuredData, robotsTxt, sitemapXml} from './seo.js';
 import type {DashboardSession} from './session-store.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
@@ -19,6 +20,8 @@ type StaticAsset = {
 
 const NO_STORE = 'no-store';
 const FONT_CACHE = 'public, max-age=604800';
+/** Icons and the social preview change rarely; a day keeps crawlers and link previews cheap. */
+const IMAGE_CACHE = 'public, max-age=86400';
 
 const staticAsset = (fileName: string, contentType: string, cacheControl = NO_STORE): StaticAsset => ({
   contentType,
@@ -55,6 +58,10 @@ const STATIC_ASSETS = new Map<string, StaticAsset>([
   ['/assets/fonts/Geist-Variable.woff2', staticAsset('fonts/Geist-Variable.woff2', 'font/woff2', FONT_CACHE)],
   ['/assets/fonts/GeistMono-Variable.woff2', staticAsset('fonts/GeistMono-Variable.woff2', 'font/woff2', FONT_CACHE)],
   ['/assets/fonts/OFL.txt', staticAsset('fonts/OFL.txt', 'text/plain; charset=utf-8', FONT_CACHE)],
+  ['/assets/og-image.png', staticAsset('og-image.png', 'image/png', IMAGE_CACHE)],
+  ['/favicon.ico', staticAsset('favicon.ico', 'image/x-icon', IMAGE_CACHE)],
+  ['/favicon.svg', staticAsset('favicon.svg', 'image/svg+xml', IMAGE_CACHE)],
+  ['/apple-touch-icon.png', staticAsset('apple-touch-icon.png', 'image/png', IMAGE_CACHE)],
 ]);
 
 const NOINDEX = {'x-robots-tag': 'noindex, nofollow'};
@@ -178,6 +185,8 @@ export default class DashboardServer {
   private readonly auth: DashboardAuth;
   private readonly orchestrator: OrchestratorClient;
   private readonly pages: Record<PageName, Record<Locale, Buffer>>;
+  /** Crawler files (robots.txt, sitemap.xml), generated from the public origin at startup. */
+  private readonly crawlerFiles: Map<string, StaticAsset>;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
     this.orchestrator = dependencies.orchestrator ?? new OrchestratorClient(config);
@@ -189,7 +198,8 @@ export default class DashboardServer {
     const render = (page: PageName): Record<Locale, Buffer> => {
       const rendered: Partial<Record<Locale, Buffer>> = {};
       for (const locale of LOCALES) {
-        rendered[locale] = Buffer.from(renderPage(TEMPLATES[page], locale, PAGE_PATHS[page], {origin}), 'utf8');
+        const markup = {structuredData: homeStructuredData(locale, origin)};
+        rendered[locale] = Buffer.from(renderPage(TEMPLATES[page], locale, PAGE_PATHS[page], {origin}, markup), 'utf8');
       }
 
       return rendered as Record<Locale, Buffer>;
@@ -200,6 +210,10 @@ export default class DashboardServer {
       app: render('app'),
       development: render('development'),
     };
+    this.crawlerFiles = new Map([
+      ['/robots.txt', {contentType: 'text/plain; charset=utf-8', body: Buffer.from(robotsTxt(origin), 'utf8'), cacheControl: IMAGE_CACHE}],
+      ['/sitemap.xml', {contentType: 'application/xml; charset=utf-8', body: Buffer.from(sitemapXml(origin), 'utf8'), cacheControl: IMAGE_CACHE}],
+    ]);
   }
 
   get port(): number | undefined {
@@ -394,7 +408,7 @@ export default class DashboardServer {
    */
   private async handlePage(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
     const {pathname} = url;
-    const asset = STATIC_ASSETS.get(pathname);
+    const asset = STATIC_ASSETS.get(pathname) ?? this.crawlerFiles.get(pathname);
     if (asset) {
       sendAsset(response, asset);
       return true;
