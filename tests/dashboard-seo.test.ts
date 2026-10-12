@@ -118,8 +118,10 @@ describe('crawler files', () => {
     expect(sitemap.status).toBe(200);
     expect(sitemap.headers['content-type']).toBe('application/xml; charset=utf-8');
     expect(sitemap.text).toBe(sitemapXml(PUBLIC_URL));
-    expect(sitemap.text.match(/<url>/gu)).toHaveLength(LOCALES.length);
+    // Home and pricing page in every language.
+    expect(sitemap.text.match(/<url>/gu)).toHaveLength(LOCALES.length * 2);
     for (const locale of LOCALES) {
+      expect(sitemap.text).toContain(`<loc>${PUBLIC_URL}/${locale}/pricing</loc>`);
       expect(sitemap.text).toContain(`<loc>${PUBLIC_URL}/${locale}</loc>`);
       expect(sitemap.text).toContain(`hreflang="${locale}" href="${PUBLIC_URL}/${locale}"`);
     }

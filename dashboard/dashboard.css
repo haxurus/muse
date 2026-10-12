@@ -353,6 +353,7 @@ select {
 .plan-editor .row-actions { justify-content: flex-end; }
 .coupon-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .coupon-wide { grid-column: 1 / -1; }
+.contacts-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .coupon-tiers { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; border: 0; color: var(--text-2); font-size: .84rem; }
 .coupon-tiers legend { margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: .8rem; font-weight: 500; }
 .coupon-tiers label, .check { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: .84rem; }
@@ -511,6 +512,7 @@ select {
   .super-guild .row-actions, .super-worker .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .block-forms { grid-template-columns: 1fr; }
   .plan-editor-grid, .coupon-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .contacts-form { grid-template-columns: 1fr; }
   .coupon-row { grid-template-columns: minmax(0, 1fr) auto; }
   .coupon-row .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .plan-limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -728,4 +730,55 @@ select {
   .steps li { grid-template-columns: 44px minmax(0, 1fr); }
   .cta { padding: 28px; }
   .footer-main { flex-direction: column; }
+}
+
+/* Pricing page (Sentinel PricingView) */
+.pricing-hero .section-head h1 { margin: 16px 0 0; font-size: clamp(2.2rem, 5vw, 3.4rem); letter-spacing: -.04em; }
+.premium-notice { margin-bottom: 16px; border-left-color: var(--accent); }
+.promo-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.promo-list:empty { display: none; }
+.promo-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 16px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--accent-soft); color: var(--text-2); font-size: .9rem; }
+.promo-banner strong { color: var(--text); font-size: 1.05rem; }
+.billing-toggle { display: inline-flex; gap: 2px; margin: 8px 0 22px; padding: 3px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg-raised); }
+.billing-toggle button { padding: 7px 16px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: transparent; color: var(--text-2); font-weight: 600; cursor: pointer; }
+.billing-toggle button.is-active { background: var(--accent); color: var(--accent-ink, #120c22); }
+.plan-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.plan-grid[data-billing="monthly"] [data-billing-show="yearly"],
+.plan-grid[data-billing="yearly"] [data-billing-show="monthly"] { display: none; }
+.plan-card { display: flex; flex-direction: column; gap: 10px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.plan-card h2 { margin: 0; font-size: 1.5rem; letter-spacing: -.03em; }
+.plan-card-level { color: var(--muted); font-size: .74rem; letter-spacing: .08em; }
+.plan-card-price { display: flex; align-items: baseline; gap: 4px; margin: 4px 0 0; }
+.plan-card-price strong { font-size: 2.2rem; letter-spacing: -.04em; }
+.plan-card-price span { color: var(--muted); }
+.plan-card-sub { margin: 0; min-height: 1.3em; color: var(--ok); font-size: .82rem; }
+.plan-card-desc { margin: 0; color: var(--text-2); font-size: .9rem; line-height: 1.6; }
+.plan-card-features { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; padding: 0; list-style: none; color: var(--text-2); font-size: .88rem; }
+.plan-card-features li { position: relative; padding-left: 22px; }
+.plan-card-features li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+.plan-featured { border-color: var(--accent-line); background: radial-gradient(ellipse 90% 60% at 50% 0%, var(--accent-glow-strong, var(--accent-soft)), transparent 70%), var(--surface); }
+.compare-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg); }
+.compare-table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: .9rem; }
+.compare-table th, .compare-table td { padding: 12px 16px; border-bottom: 1px solid var(--line); text-align: center; }
+.compare-table th[scope="row"], .compare-table thead th:first-child { text-align: left; font-weight: 500; color: var(--text-2); }
+.compare-table thead th { color: var(--text); font-weight: 600; }
+.compare-table tbody tr:last-child th, .compare-table tbody tr:last-child td { border-bottom: 0; }
+.compare-yes { color: var(--accent); font-weight: 700; }
+.compare-no { color: var(--faint); }
+.contact-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 32px; align-items: start; }
+.contact-card { padding: 26px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.contact-card h2 { margin: 14px 0 0; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.035em; }
+.contact-card p { margin: 14px 0 0; color: var(--text-2); line-height: 1.7; }
+.contact-list { display: flex; flex-direction: column; gap: 10px; margin: 20px 0 0; padding: 0; list-style: none; }
+.contact-list li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.contact-list li span:first-child { color: var(--muted); }
+.contact-list a { color: var(--accent); overflow-wrap: anywhere; }
+.faq-list-title { margin: 0; padding: 18px 22px; border-bottom: 1px solid var(--line); font-size: 1.1rem; }
+
+@media (max-width: 1100px) {
+  .plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .plan-grid, .contact-layout { grid-template-columns: 1fr; }
 }

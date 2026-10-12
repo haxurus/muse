@@ -10,7 +10,7 @@ import {
 } from '../control/types.js';
 import type WorkerClient from './worker-client.js';
 import {isPlainObject, isPrintable} from './durable-file.js';
-import type {PlatformSettingsStore} from './platform-store.js';
+import {isContactDiscord, isContactEmail, isHttpsUrl, type PlatformSettingsStore} from './platform-store.js';
 import {mergeGuildMeta, type MergedGuildMeta} from './guild-meta.js';
 import PlanService, {PLAN_SWEEP_INTERVAL_MS} from './plan-service.js';
 import type {PlanStore} from './plan-store.js';
@@ -220,6 +220,15 @@ export default class SuperConsole {
       return {statusCode: 200, body: await this.plans.changeGuildPlan(segments[3], await readJsonBody(request), actor, knownGuildIds)};
     }
 
+    if (request.method === 'PUT' && segments.length === 3 && segments[1] === 'super' && segments[2] === 'config') {
+      const actor = parseActor(request);
+      return {statusCode: 200, body: this.setInstanceConfig(await readJsonBody(request), actor)};
+    }
+
+    if (request.method === 'GET' && segments.length === 3 && segments[1] === 'public' && segments[2] === 'info') {
+      return {statusCode: 200, body: this.publicInfo()};
+    }
+
     if (segments.length >= 3 && segments.length <= 4 && segments[1] === 'super' && segments[2] === 'coupons') {
       return this.couponRoute(request, segments[3]);
     }
@@ -398,7 +407,64 @@ export default class SuperConsole {
       statusChannel: this.platform.statusChannel(),
       coupons: this.plans.coupons(),
       planCatalog: this.plans.catalog(),
+      config: this.platform.instance(),
     };
+  }
+
+  /**
+   * `GET /v1/public/info`: what the public pricing and beta pages show (Sentinel /api/public/info):
+   * whether the waitlist is open, the public contacts and the live public coupons.
+   */
+  publicInfo() {
+    const {waitlistOpen, contactEmail, contactDiscord, contactUrl} = this.platform.instance();
+    return {
+      waitlistOpen,
+      contacts: {email: contactEmail, discord: contactDiscord, url: contactUrl},
+      promotions: this.plans.promotions(),
+    };
+  }
+
+  /** `PUT /v1/super/config`: waitlist switch and public contacts; an empty string clears a contact. */
+  setInstanceConfig(input: unknown, actor: Actor) {
+    const body = objectBody(input);
+    const patch: Parameters<PlatformSettingsStore['setInstance']>[0] = {};
+    if (body.waitlistOpen !== undefined) {
+      if (typeof body.waitlistOpen !== 'boolean') {
+        throw new HttpError(400, 'waitlistOpen must be a boolean', 'INVALID_CONFIG');
+      }
+
+      patch.waitlistOpen = body.waitlistOpen;
+    }
+
+    const contact = (field: 'contactEmail' | 'contactDiscord' | 'contactUrl', isValid: (value: unknown) => boolean, rule: string) => {
+      const value = body[field];
+      if (value === undefined) {
+        return;
+      }
+
+      const text = typeof value === 'string' ? value.trim() : value;
+      if (text === '' || text === null) {
+        patch[field] = null;
+        return;
+      }
+
+      if (!isValid(text)) {
+        throw new HttpError(400, `${field} must be ${rule}, or empty`, 'INVALID_CONFIG');
+      }
+
+      patch[field] = text as string;
+    };
+
+    contact('contactEmail', isContactEmail, 'an email address of at most 200 characters');
+    contact('contactDiscord', isContactDiscord, 'a Discord username or an https link of at most 200 characters');
+    contact('contactUrl', isHttpsUrl, 'an https URL of at most 500 characters');
+    if (Object.keys(patch).length === 0) {
+      throw new HttpError(400, 'nothing to change', 'INVALID_CONFIG');
+    }
+
+    const config = this.platform.setInstance(patch, actor);
+    this.record({actor, action: 'instance.config', subjectType: 'INSTANCE', subjectId: 'config', details: {...patch}, outcome: 'ok'});
+    return config;
   }
 
   /** Full plan of a guild for the super console (with the internal note and coupon). */

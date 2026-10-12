@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0913">
+  <meta name="description" content="{{meta.pricingDescription}}">
+  <title>{{meta.pricingTitle}}</title>
+  <link rel="canonical" href="{{origin}}/{{lang}}/pricing">
+  <link rel="alternate" hreflang="it" href="{{origin}}/it/pricing">
+  <link rel="alternate" hreflang="en" href="{{origin}}/en/pricing">
+  <link rel="alternate" hreflang="x-default" href="{{origin}}/en/pricing">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Muse">
+  <meta property="og:title" content="{{meta.pricingTitle}}">
+  <meta property="og:description" content="{{meta.pricingDescription}}">
+  <meta property="og:url" content="{{origin}}/{{lang}}/pricing">
+  <meta property="og:locale" content="{{meta.ogLocale}}">
+  <meta property="og:image" content="{{origin}}/assets/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">{{{structuredData}}}</script>
+  <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <script src="/assets/pricing.js" defer></script>
+</head>
+<body>
+  <div class="public-site pricing-page">
+    <header class="site-header">
+      <div class="site-container site-nav">
+        <a class="brand" href="{{prefix}}" aria-label="{{nav.homeLabel}}">
+          <svg class="brand-mark" width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="10.9" cy="21" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <circle class="brand-dot" cx="19.4" cy="18.8" r="2.4"/>
+          </svg>
+          <span>Muse</span>
+        </a>
+        <nav class="site-nav-links" aria-label="{{nav.label}}">
+          <a href="{{prefix}}">Home</a>
+          <a href="{{prefix}}/pricing" aria-current="page">{{nav.pricing}}</a>
+          <a href="{{prefix}}/dashboard">{{footer.dashboard}}</a>
+        </nav>
+        <div class="site-nav-end">
+          {{{languageSwitcher}}}
+          <div class="site-nav-actions">
+            <a class="button button-ghost" href="{{prefix}}/dashboard">{{nav.login}}</a>
+            <a class="button button-primary" href="/add?lang={{lang}}">{{nav.add}}</a>
+          </div>
+        </div>
+        <details class="site-mobile-menu">
+          <summary aria-label="{{nav.openMenu}}"><span></span><span></span></summary>
+          <div>
+            <a href="{{prefix}}">Home</a>
+            <a href="{{prefix}}/pricing" aria-current="page">{{nav.pricing}}</a>
+            <div class="site-mobile-actions">
+              <a class="button button-secondary" href="{{prefix}}/dashboard">{{nav.login}}</a>
+              <a class="button button-primary" href="/add?lang={{lang}}">{{nav.add}}</a>
+            </div>
+            {{{languageSwitcherMobile}}}
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main>
+      <section class="section pricing-hero" aria-labelledby="pricing-title">
+        <div class="site-container">
+          <div class="section-head">
+            <span class="kicker">{{pricing.kicker}}</span>
+            <h1 id="pricing-title">{{pricing.title}}</h1>
+            <p>{{pricing.intro}}</p>
+          </div>
+
+          <div class="notice premium-notice">{{pricing.betaNotice}}</div>
+          {{{pricingUnavailable}}}
+          <div class="promo-list">
+            {{{promotions}}}
+          </div>
+
+          <div class="billing-toggle" role="group" aria-label="{{pricing.billingLabel}}">
+            <button type="button" class="is-active" data-billing="monthly" aria-pressed="true">{{pricing.monthly}}</button>
+            <button type="button" data-billing="yearly" aria-pressed="false">{{pricing.yearly}}</button>
+          </div>
+
+          <div class="plan-grid" id="plan-grid" data-billing="monthly">
+            {{{planCards}}}
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-alt" aria-labelledby="compare-title">
+        <div class="site-container">
+          <div class="section-head">
+            <h2 id="compare-title">{{pricing.compareTitle}}</h2>
+          </div>
+          <div class="compare-wrap">
+            {{{comparisonTable}}}
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="contact" aria-labelledby="contact-title">
+        <div class="site-container contact-layout">
+          <div class="contact-card">
+            <span class="kicker">{{pricing.contactKicker}}</span>
+            <h2 id="contact-title">{{pricing.contactTitle}}</h2>
+            <p>{{pricing.contactText}}</p>
+            {{{contactList}}}
+          </div>
+          <div class="faq-list">
+            <h2 class="faq-list-title">{{pricing.faqTitle}}</h2>
+            <details open>
+              <summary><h3>{{pricing.faqExpiryQuestion}}</h3></summary>
+              <p>{{pricing.faqExpiryAnswer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{pricing.faqBotsQuestion}}</h3></summary>
+              <p>{{pricing.faqBotsAnswer}}</p>
+            </details>
+            <details>
+              <summary><h3>{{pricing.faqTrialQuestion}}</h3></summary>
+              <p>{{pricing.faqTrialAnswer}}</p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-container">
+        <div class="footer-main">
+          <p>{{footer.about}} <a href="https://github.com/museofficial/muse" target="_blank" rel="noreferrer noopener">museofficial/muse</a> {{footer.license}}</p>
+          <nav aria-label="{{footer.navLabel}}">
+            <a href="{{prefix}}">Home</a>
+            <a href="{{prefix}}/pricing">{{nav.pricing}}</a>
+            <a href="{{prefix}}/dashboard">{{footer.dashboard}}</a>
+            <a href="https://github.com/haxurus/muse" target="_blank" rel="noreferrer noopener">GitHub</a>
+          </nav>
+        </div>
+        <div class="site-footer-bottom">
+          <span>{{footer.credits}}</span>
+          <span class="mono">{{footer.tagline}}</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

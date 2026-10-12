@@ -255,6 +255,10 @@ The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) 
 
 The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers (the home page's `application/ld+json` block is data, never executed). Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
 
+### Pricing page
+
+`/it/pricing` and `/en/pricing` (indexable, in the sitemap) mirror Sentinel's pricing page: the four plans from `src/plans/plans.ts` with a monthly/yearly toggle (`/assets/pricing.js`), live public coupons as promotion banners, a full comparison table, "Want to activate a plan?" with the public contacts set in the super console (GitHub issues is always listed) and a FAQ, plus JSON-LD offers. Contacts and promotions come from the orchestrator (`GET /v1/public/info`, cached 30 seconds); when it does not answer the page still renders the plans with a notice. Paid plans have no checkout: "Contact me" leads to the contacts, and the super admin assigns the plan by hand.
+
 ### Search engines and link previews
 
 The home pages (`/en`, `/it`) are the only indexable views; English is the default (`/` redirects by `Accept-Language`, anything but Italian goes to `/en`, and `x-default` points at `/`). They carry:

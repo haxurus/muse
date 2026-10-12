@@ -1,5 +1,6 @@
 import got from 'got';
 import type {DashboardConfig} from './config.js';
+import type {PublicInfo} from './pricing.js';
 import {DashboardHttpError, describeUpstreamError} from './http.js';
 
 type OrchestratorGuild = {
@@ -87,6 +88,46 @@ export const actorName = (username: string): string => {
   }
 
   return result === '' ? 'unknown' : result;
+};
+
+const nullableString = (value: unknown, max: number): string | null =>
+  typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
+
+/** Orchestrator answers are validated, not trusted: anything malformed is dropped. */
+export const sanitizePublicInfo = (input: unknown): PublicInfo => {
+  const body = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {};
+  const contacts = typeof body.contacts === 'object' && body.contacts !== null ? body.contacts as Record<string, unknown> : {};
+  const promotions = Array.isArray(body.promotions) ? body.promotions : [];
+  return {
+    waitlistOpen: body.waitlistOpen === true,
+    contacts: {
+      email: nullableString(contacts.email, 200),
+      discord: nullableString(contacts.discord, 200),
+      url: nullableString(contacts.url, 500),
+    },
+    promotions: (promotions as unknown[]).slice(0, 10).flatMap(value => {
+      if (typeof value !== 'object' || value === null) {
+        return [];
+      }
+
+      const promotion = value as Record<string, unknown>;
+      if (typeof promotion.code !== 'string' || !/^[A-Z\d_-]{3,32}$/u.test(promotion.code)) {
+        return [];
+      }
+
+      const percentOff = Number.isSafeInteger(promotion.percentOff) ? promotion.percentOff as number : null;
+      const amountOffCents = Number.isSafeInteger(promotion.amountOffCents) ? promotion.amountOffCents as number : null;
+      return [{
+        code: promotion.code,
+        description: nullableString(promotion.description, 200),
+        percentOff,
+        amountOffCents,
+        tiers: Array.isArray(promotion.tiers) ? promotion.tiers.filter((tier): tier is string => typeof tier === 'string') : [],
+        billing: typeof promotion.billing === 'string' ? promotion.billing : 'ANY',
+        validUntil: typeof promotion.validUntil === 'string' && !Number.isNaN(Date.parse(promotion.validUntil)) ? promotion.validUntil : null,
+      }];
+    }),
+  };
 };
 
 export type StatusChannelUpdate = {
@@ -296,6 +337,23 @@ export default class OrchestratorClient {
     return call(async () => got.get(
       `${this.config.orchestratorUrl}/v1/super/status-channel`,
       actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
+  }
+
+  /** Contacts, waitlist switch and live public coupons for the public pages (validated here). */
+  async publicInfo(): Promise<PublicInfo> {
+    const body = await call(async () => got.get(
+      `${this.config.orchestratorUrl}/v1/public/info`,
+      {...options(this.config.orchestratorToken), timeout: {request: 4000}},
+    ).json<unknown>());
+    return sanitizePublicInfo(body);
+  }
+
+  /** Waitlist switch and public contacts of the super console. */
+  async superSetConfig(body: Record<string, unknown>, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/super/config`,
+      {...actorOptions(this.config.orchestratorToken, actor), json: body},
     ).json<unknown>());
   }
 

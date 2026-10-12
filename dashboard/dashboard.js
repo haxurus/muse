@@ -1122,6 +1122,7 @@ const renderOverviewData = () => {
   $('metric-paid').textContent = formatNumber(guilds.filter(guild => guild.plan && isPaidTier(guild.plan.effectiveTier)).length);
   $('metric-coupons').textContent = formatNumber(activeCoupons().length);
   renderCoupons();
+  renderContacts();
   $('super-guilds-empty').hidden = guilds.length > 0;
   $('super-blocks').replaceChildren(...blocks.map(renderBlock));
   $('super-blocks-empty').hidden = blocks.length > 0;
@@ -1799,6 +1800,23 @@ const renderCoupons = () => {
   $('coupon-empty').hidden = coupons.length > 0;
 };
 
+/** Public contacts of the pricing page; the form keeps what is being typed across reloads. */
+const renderContacts = () => {
+  const form = $('contacts-form');
+  if (form.contains(document.activeElement)) return;
+  const config = (overview && overview.config) || {};
+  for (const name of ['contactEmail', 'contactDiscord', 'contactUrl']) {
+    form.elements[name].value = typeof config[name] === 'string' ? config[name] : '';
+  }
+};
+
+const submitContactsForm = async form => {
+  const data = new FormData(form);
+  const body = {};
+  for (const name of ['contactEmail', 'contactDiscord', 'contactUrl']) body[name] = String(data.get(name) || '').trim();
+  if (await superAction('/api/super/config', 'PUT', body)) toast(t('super.contacts.saved'));
+};
+
 const COUPON_CODE = /^[A-Za-z\d_-]{3,32}$/;
 
 const submitCouponForm = async form => {
@@ -2017,6 +2035,11 @@ const wire = () => {
 
   $('status-channel-test').addEventListener('click', () => {
     void testStatusChannel();
+  });
+
+  $('contacts-form').addEventListener('submit', event => {
+    event.preventDefault();
+    void submitContactsForm(event.currentTarget);
   });
 
   $('coupon-form').addEventListener('submit', event => {

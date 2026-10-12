@@ -241,6 +241,22 @@
               <div class="table-list" id="coupon-list"></div>
             </section>
 
+            <section class="card" id="contacts-card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.contacts.kicker"></span>
+                  <h2 data-i18n="super.contacts.title"></h2>
+                  <p data-i18n="super.contacts.text"></p>
+                </div>
+              </div>
+              <form class="contacts-form" id="contacts-form" novalidate>
+                <label class="field"><span data-i18n="super.contacts.email"></span><input name="contactEmail" type="email" maxlength="200" autocomplete="off"></label>
+                <label class="field"><span data-i18n="super.contacts.discord"></span><input name="contactDiscord" maxlength="200" autocomplete="off" data-i18n-placeholder="super.contacts.discordPlaceholder"></label>
+                <label class="field"><span data-i18n="super.contacts.url"></span><input name="contactUrl" type="url" maxlength="500" autocomplete="off" placeholder="https://"></label>
+                <button class="button button-primary" type="submit" data-i18n="super.contacts.save"></button>
+              </form>
+            </section>
+
             <section class="card">
               <div class="card-head">
                 <div>
