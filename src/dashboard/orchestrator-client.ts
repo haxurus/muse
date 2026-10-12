@@ -463,6 +463,19 @@ export default class OrchestratorClient {
     ).json<unknown>());
   }
 
+  /** Brand plan: one bot's nickname and/or banner in one guild (`PUT /v1/guilds/:guildId/branding`). */
+  async setGuildBranding(guildId: string, body: {workerId: string; nickname?: string | null; banner?: string | null}): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/branding`,
+      {
+        ...options(this.config.orchestratorToken),
+        // The orchestrator waits for the bot, which waits for Discord's image upload.
+        timeout: {request: 20_000},
+        json: body,
+      },
+    ).json<unknown>());
+  }
+
   async updateGuildSettings(guildId: string, body: GuildSettingsUpdate): Promise<unknown> {
     return call(async () => got.patch(
       `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/workers/settings`,

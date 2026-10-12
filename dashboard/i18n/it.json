@@ -34,15 +34,15 @@
     "button": "Accedi con Discord",
     "newServerKicker": "NUOVO SERVER",
     "newServerTitle": "Muse non è ancora nel server?",
-    "newServerText": "Per ora i bot di Muse possono essere aggiunti a nuovi server solo dal proprietario del progetto.",
-    "newServerButton": "Scopri di più",
+    "newServerText": "Accedi con Discord e aggiungi i bot ai server che amministri. Il piano Free include un bot, gratis.",
+    "newServerButton": "Aggiungi i bot",
     "failed": "Accesso con Discord non riuscito o annullato. Riprova.",
     "blocked": "Accesso non consentito."
   },
   "invite": {
     "kicker": "NUOVO SERVER · AGGIUNGI I BOT",
     "title": "Aggiungi i bot a un server.",
-    "text": "Ogni bot ha il proprio invito Discord. Aggiungi solo quelli che servono al server.",
+    "text": "Ogni bot ha il proprio invito Discord. Con il piano Free funziona il primo bot; per usarne di più in canali diversi serve Plus o superiore.",
     "add": "Aggiungi a un server",
     "empty": "Nessun bot disponibile per l’invito.",
     "failed": "Impossibile caricare l’elenco dei bot."
@@ -428,5 +428,25 @@
     "groupsLimit": "Il piano {plan} consente {max} gruppi salvati: eliminane uno o passa a un piano superiore.",
     "errorLimit": "Questa modifica supera i limiti del piano del server. Vedi i piani per sbloccarla.",
     "botsOver": "Il piano include {max} bot: quelli in più ({count}) restano nel server ma rispondono solo con l’avviso del piano."
+  },
+  "brand": {
+    "eyebrow": "BRAND",
+    "title": "Nome e banner dei bot",
+    "text": "Visibili solo in questo server. I bot devono avere il permesso “Cambia nickname”. Il banner viene ritagliato a 600×240 e applicato a tutti i bot.",
+    "locked": "Con il Livello 3 · Brand puoi dare ai bot di Muse un nome e un banner personalizzati, visibili solo in questo server.",
+    "nicknameFor": "Nome di {name} in questo server",
+    "saveName": "Salva nome",
+    "reset": "Ripristina",
+    "banner": "Banner (PNG, JPEG, WebP o GIF)",
+    "bannerUpload": "Carica su tutti i bot",
+    "bannerRemove": "Rimuovi banner",
+    "bannerActive": "banner attivo",
+    "nameSaved": "Nome del bot aggiornato.",
+    "nameReset": "Nome del bot ripristinato.",
+    "bannerSaved": "Banner aggiornato.",
+    "bannerRemoved": "Banner rimosso.",
+    "invalidImage": "Immagine non valida o troppo complessa.",
+    "missingPermission": "il bot non ha il permesso “Cambia nickname” in questo server",
+    "failed": "Discord ha rifiutato la modifica del profilo del bot"
   }
 }

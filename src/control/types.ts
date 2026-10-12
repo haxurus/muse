@@ -38,6 +38,20 @@ export type WorkerLeaveGuildResult = {
   left: true;
 };
 
+/** `POST /v1/guilds/:guildId/branding`: Discord refusals are a 200 with `ok: false`. */
+export type WorkerBrandingResult = {
+  workerId: string;
+  guildId: string;
+  ok: true;
+} | {
+  workerId: string;
+  guildId: string;
+  ok: false;
+  /** MISSING_PERMISSION when the bot lacks Change Nickname, DISCORD_REJECTED otherwise. */
+  error: 'MISSING_PERMISSION' | 'DISCORD_REJECTED';
+  discordStatus: number | null;
+};
+
 export type WorkerBlocklistResult = {
   workerId: string;
   left: string[];

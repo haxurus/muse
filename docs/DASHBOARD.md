@@ -54,7 +54,7 @@ The dashboard does not require a bot user on this OAuth application.
 
 In production it comes from `deploy/.env` (`MUSE_SUPER_ADMIN_USER_ID: ${MUSE_SUPER_ADMIN_USER_ID:-}` in `docker-compose.prod.yml`).
 
-`GET /api/session` returns `superAdmin: true` only for that user. The browser uses it to show the "Super console" link and the invite buttons; the server enforces the check on every super-admin route independently.
+`GET /api/session` returns `superAdmin: true` only for that user. The browser uses it to show the "Super console" link; the server enforces the check on every super-admin route independently.
 
 ### Bot invite links
 
@@ -65,10 +65,13 @@ GET /invite/:workerId[?lang=it|en]        workerId = muse-NN
 The language is `?lang=` when valid, otherwise the `Accept-Language` preference (the dashboard links always pass it).
 
 - no session: `302 /auth/discord?lang=<lang>` (the login starts; afterwards the user lands on `/<lang>/dashboard`);
-- signed in but not the super admin (or no super admin configured): `302 /<lang>/development`, a static "Muse è ancora in sviluppo." / "Muse is still in development." notice with links to the GitHub repository;
-- super admin: the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
-  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=3230720`
-  (View Channels, Send Messages, Read Message History, Connect, Speak).
+- signed in (Muse is public: any Discord user can add the bots): the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
+  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=70338560`
+  (View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak, Change Nickname; the last one is used by the Brand plan).
+
+Which bots answer in a server is decided by its plan (the Free plan includes the first bot); the blocklist still makes the bots leave a blocked server or one added by a blocked user. Servers that added the bots before the Change Nickname permission was part of the invite must grant it by hand to use the Brand plan.
+
+`GET /api/bots` (any session) returns the inviteable bots for the dashboard "Add the bots" card, like `GET /api/super/bots`.
 
 ### "Aggiungi a Discord" / "Add to Discord" (`/add`)
 
@@ -78,8 +81,21 @@ GET /add[?lang=it|en]
 
 Target of the "Add to Discord" buttons on the public home pages (they pass `?lang=`; without it the `Accept-Language` preference is used):
 
-- super admin: `302 /<lang>/dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" / "New server · Add the bots" card with one invite per bot);
-- anybody else (no session, signed-in non-admin, or no super admin configured): `302 /<lang>/development`.
+- signed in: `302 /<lang>/dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" / "New server · Add the bots" card with one invite per bot);
+- no session: `302 /auth/discord?lang=<lang>` (after the login the user lands on the dashboard, where the same card is shown).
+
+The old `/<lang>/development` notice was removed when Muse became public: the path answers `302 /add?lang=<lang>`.
+
+### Brand plan: bot names and banner
+
+```text
+PUT /api/guilds/:guildId/branding   {workerId, nickname?: string|null, banner?: data URI|null}
+                                     -> orchestrator PUT /v1/guilds/:guildId/branding
+                                     -> worker POST /v1/guilds/:guildId/branding {nick?, banner?}
+                                     -> Discord PATCH /guilds/:guildId/members/@me
+```
+
+Same checks as every guild mutation (session, CSRF, Origin, Manage Server, mutation budget, `dashboard_mutation` audit line with action `branding.update`). The body limit is 96 KB; the browser crops the banner to 600×240 and re-encodes it as JPEG under 60 000 characters. `null` restores Discord's default. The orchestrator answers `403 PLAN_REQUIRED` below Level 3 · Brand, `404 WORKER_NOT_IN_GUILD`, `422 BRANDING_MISSING_PERMISSION` (no Change Nickname) or `422 BRANDING_FAILED` (other Discord refusals), and otherwise `{guildId, bot, branding}`. It stores only the nickname and whether a banner is set (`plans.json`, `branding`), never the image. When a plan change or the expiry sweep leaves the server without the Brand plan, every bot's name and banner are reset and an audit entry `branding.reset` is written.
 
 ### Super console API
 
@@ -178,7 +194,7 @@ GET  /it, /en                         public home page (indexable)
 GET  /:lang/dashboard                 app: login view or server list
 GET  /:lang/server/:guildId           app: guild view
 GET  /:lang/super                     app: super console
-GET  /:lang/development               static "Accesso limitato" / "Limited access" notice
+GET  /:lang/development               302 to /add?lang=<lang> (old notice)
 GET  /dashboard, /super, /server/:guildId, /development
                                       302 to the same path under /<lang> (query kept)
 GET  /add                             (see "Add to Discord")
@@ -246,12 +262,11 @@ The web UI is bilingual (Italian and English), following Sentinel:
 | Path | View |
 | --- | --- |
 | `/it`, `/en` | Public home page (`home.html`): hero with an illustrative session console, stat strip, features, "How it works", self-hosting steps, security, call to action. "Sign in" links to `/<lang>/dashboard`, "Add to Discord" to `/add?lang=<lang>` |
-| `/<lang>/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and, for the super admin only, a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
+| `/<lang>/dashboard` | Login (two cards: "Accedi con Discord" and "Nuovo server") or, when signed in, the server list: user card, guild tiles and a "Nuovo server · Aggiungi i bot" card (`#nuovo-server`) with one invite per bot |
 | `/<lang>/server/:guildId` | Guild app shell: 248 px sidebar (server, sections, access level, user, language, logout) and three sections: **Overview** (bots in the server with ready/voice state), **Settings** (bot selection, one switch per field including the bot language, mixed values shown as "Mixed values", only enabled fields are patched) and **Groups** (create, edit, select, delete, keep or drop unavailable members) |
 | `/<lang>/super` | Super console (super admin only): KPI row, worker status with invite buttons, bot status channel (server, channel and role menus; save, disable, test with per-bot results), linked servers with "Fai uscire" / "Blocca ed espelli", blacklist forms and rows, super-admin audit log |
-| `/<lang>/development` | Static "Limited access" notice used by `/add` and the invite links |
 
-The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) and `/<lang>/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
+The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
 
 The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers (the home page's `application/ld+json` block is data, never executed). Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
 

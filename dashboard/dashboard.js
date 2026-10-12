@@ -361,13 +361,11 @@ const renderHome = () => {
   $('guild-empty').hidden = session.guilds.length > 0;
 
   const inviteCard = $(NEW_SERVER_ANCHOR);
-  inviteCard.hidden = !session.superAdmin;
-  if (session.superAdmin) {
-    void loadInvites();
-    // "/add" lands here with #nuovo-server: the card was hidden at load, so scroll once now.
-    if (window.location.hash === `#${NEW_SERVER_ANCHOR}`) {
-      inviteCard.scrollIntoView({block: 'start'});
-    }
+  inviteCard.hidden = false;
+  void loadInvites();
+  // "/add" lands here with #nuovo-server: the card was hidden at load, so scroll once now.
+  if (window.location.hash === `#${NEW_SERVER_ANCHOR}`) {
+    inviteCard.scrollIntoView({block: 'start'});
   }
 };
 
@@ -378,7 +376,7 @@ const loadInvites = async () => {
   showNotice($('invite-message'), '');
 
   try {
-    const {bots} = await api('/api/super/bots');
+    const {bots} = await api('/api/bots');
     if (request !== inviteRequest) return;
 
     const tiles = (Array.isArray(bots) ? bots : []).map(bot => {
@@ -907,6 +905,8 @@ const loadGuild = async (guildId, options = {}) => {
   renderSidebar(details.guild);
   renderOverview();
   renderPlanPanel();
+  if (!options.keepTab) pendingBanner = null;
+  renderBrandPanel();
   renderWorkerSelection();
   renderGroups();
   applyPlanToSettings();
@@ -1542,6 +1542,147 @@ const renderPlanPanel = () => {
   );
 };
 
+/* ---------- Brand plan (Sentinel model): each bot's name and banner in this server ---------- */
+
+const BANNER_WIDTH = 600;
+const BANNER_HEIGHT = 240;
+const BANNER_MAX_CHARS = 60000;
+const MAX_NICKNAME_LENGTH = 32;
+let pendingBanner = null;
+
+/** Cover-crops an image to 600×240 and re-encodes it as JPEG under the server limit. */
+const encodeBanner = async file => {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = BANNER_WIDTH;
+  canvas.height = BANNER_HEIGHT;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('CANVAS_UNAVAILABLE');
+  const scale = Math.max(BANNER_WIDTH / bitmap.width, BANNER_HEIGHT / bitmap.height);
+  const width = bitmap.width * scale;
+  const height = bitmap.height * scale;
+  context.drawImage(bitmap, (BANNER_WIDTH - width) / 2, (BANNER_HEIGHT - height) / 2, width, height);
+  bitmap.close();
+  for (const quality of [0.86, 0.78, 0.7, 0.6, 0.5, 0.4]) {
+    const data = canvas.toDataURL('image/jpeg', quality);
+    if (data.length <= BANNER_MAX_CHARS) return data;
+  }
+
+  throw new Error('BANNER_TOO_LARGE');
+};
+
+const guildBranding = () => {
+  const plan = guildPlan();
+  return plan && plan.branding && typeof plan.branding === 'object' ? plan.branding : {};
+};
+
+const brandingError = error => {
+  if (error instanceof ApiError && error.code === 'BRANDING_MISSING_PERMISSION') return t('brand.missingPermission');
+  if (error instanceof ApiError && error.code === 'BRANDING_FAILED') return t('brand.failed');
+  return errorMessage(error);
+};
+
+const setBrandBusy = busy => {
+  for (const node of $('brand-panel').querySelectorAll('button, input')) node.disabled = busy;
+};
+
+/** Sends one change to each bot in turn; the panel is redrawn from the profiles the server stored. */
+const runBranding = async (workerIds, body, okMessage) => {
+  const guildId = selectedGuildId;
+  showNotice($('brand-message'), '');
+  setBrandBusy(true);
+  const failures = [];
+  for (const workerId of workerIds) {
+    try {
+      const result = await api(`/api/guilds/${encodeURIComponent(guildId)}/branding`, mutation('PUT', {workerId, ...body}));
+      if (selectedGuildId === guildId && guildDetails && guildDetails.plan) guildDetails.plan.branding = result.branding || {};
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        render();
+        return;
+      }
+
+      failures.push(`${workerName(onlineWorkers().find(worker => worker.workerId === workerId)) || workerId}: ${brandingError(error)}`);
+    }
+  }
+
+  if (selectedGuildId !== guildId) return;
+  setBrandBusy(false);
+  if (body.banner !== undefined && failures.length === 0) {
+    pendingBanner = null;
+    $('brand-banner-file').value = '';
+  }
+
+  renderBrandPanel();
+  if (failures.length > 0) showNotice($('brand-message'), failures.join(' · '));
+  else toast(okMessage);
+};
+
+const brandRow = (worker, profile) => {
+  const row = el('form', 'brand-row');
+  const name = el('div', 'brand-row-name');
+  name.append(el('strong', '', workerName(worker)), el('span', 'mono', worker.workerId));
+  if (profile.bannerSet) name.append(tag(t('brand.bannerActive'), 'ok'));
+
+  const input = el('input');
+  input.name = 'nickname';
+  input.maxLength = MAX_NICKNAME_LENGTH;
+  input.autocomplete = 'off';
+  input.placeholder = workerName(worker);
+  input.value = profile.nickname || '';
+  input.setAttribute('aria-label', t('brand.nicknameFor', {name: workerName(worker)}));
+
+  const save = el('button', 'button button-primary button-sm', t('brand.saveName'));
+  save.type = 'submit';
+  const reset = el('button', 'button button-secondary button-sm', t('brand.reset'));
+  reset.type = 'button';
+  reset.disabled = !profile.nickname;
+  reset.addEventListener('click', () => {
+    void runBranding([worker.workerId], {nickname: null}, t('brand.nameReset'));
+  });
+  row.addEventListener('submit', event => {
+    event.preventDefault();
+    const value = input.value.trim();
+    if (value) void runBranding([worker.workerId], {nickname: value}, t('brand.nameSaved'));
+  });
+  row.append(name, input, save, reset);
+  return row;
+};
+
+const renderBrandPanel = () => {
+  const plan = guildPlan();
+  $('brand-panel').hidden = !plan;
+  if (!plan) return;
+
+  const allowed = plan.plan.customBranding === true;
+  $('brand-text').textContent = allowed ? t('brand.text') : t('brand.locked');
+  $('brand-pricing').hidden = allowed;
+  $('brand-pricing').href = pricingPath();
+  $('brand-editor').hidden = !allowed;
+  if (!allowed) return;
+
+  const branding = guildBranding();
+  $('brand-bots').replaceChildren(...onlineWorkers().map(worker => brandRow(worker, branding[worker.workerId] || {nickname: null, bannerSet: false})));
+  $('brand-banner-upload').disabled = !pendingBanner;
+  $('brand-banner-remove').disabled = !Object.values(branding).some(profile => profile && profile.bannerSet);
+  $('brand-banner-preview').hidden = !pendingBanner;
+  if (pendingBanner) $('brand-banner-preview').src = pendingBanner;
+};
+
+const pickBanner = async file => {
+  pendingBanner = null;
+  showNotice($('brand-message'), '');
+  if (file) {
+    try {
+      pendingBanner = await encodeBanner(file);
+    } catch {
+      showNotice($('brand-message'), t('brand.invalidImage'));
+    }
+  }
+
+  renderBrandPanel();
+};
+
 /** Bounds of a numeric setting under the server's plan (the server checks the same rules). */
 const planBounds = definition => {
   const limits = planLimitsNow();
@@ -2035,6 +2176,20 @@ const wire = () => {
 
   $('status-channel-test').addEventListener('click', () => {
     void testStatusChannel();
+  });
+
+  $('brand-banner-file').addEventListener('change', event => {
+    const {files} = event.currentTarget;
+    void pickBanner(files && files[0]);
+  });
+
+  $('brand-banner-upload').addEventListener('click', () => {
+    if (pendingBanner) void runBranding(onlineWorkers().map(worker => worker.workerId), {banner: pendingBanner}, t('brand.bannerSaved'));
+  });
+
+  $('brand-banner-remove').addEventListener('click', () => {
+    const workerIds = Object.entries(guildBranding()).filter(([, profile]) => profile && profile.bannerSet).map(([workerId]) => workerId);
+    if (workerIds.length > 0) void runBranding(workerIds, {banner: null}, t('brand.bannerRemoved'));
   });
 
   $('contacts-form').addEventListener('submit', event => {

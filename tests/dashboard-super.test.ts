@@ -212,28 +212,10 @@ describe('bot invite links', () => {
     expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
   });
 
-  it('sends signed-in users who are not the super admin to the development notice', async () => {
+  it('redirects any signed-in user to the Discord bot authorization for that worker', async () => {
     const dashboard = await startDashboard();
 
     const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.userHeaders().cookie});
-
-    expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
-    expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
-  });
-
-  it('fails closed when no super admin is configured', async () => {
-    const dashboard = await startDashboard({superAdminUserId: null});
-
-    const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.superHeaders().cookie});
-
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
-  });
-
-  it('redirects the super admin to the Discord bot authorization for that worker', async () => {
-    const dashboard = await startDashboard();
-
-    const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.superHeaders().cookie});
 
     expect(result.status).toBe(302);
     expect(result.headers.location).toBe(botInviteUrl(BOT_ID));
@@ -241,7 +223,8 @@ describe('bot invite links', () => {
     expect(location.origin + location.pathname).toBe('https://discord.com/oauth2/authorize');
     expect(location.searchParams.get('client_id')).toBe(BOT_ID);
     expect(location.searchParams.get('scope')).toBe('bot applications.commands');
-    expect(location.searchParams.get('permissions')).toBe('3230720');
+    // 3230720 plus Change Nickname (67108864) for the Brand plan.
+    expect(location.searchParams.get('permissions')).toBe('70338560');
   });
 
   it('returns 404 for malformed or unknown worker ids', async () => {
@@ -305,17 +288,18 @@ describe('super console API', () => {
     expect(dashboard.orchestrator.superOverview).toHaveBeenCalledWith({userId: SUPER_ADMIN_ID, username: 'haxurus'});
   });
 
-  it('lists inviteable bots for the super admin', async () => {
+  it('lists inviteable bots for the super admin and for every signed-in user', async () => {
     const dashboard = await startDashboard();
-
-    const result = await call(dashboard.port, 'GET', '/api/super/bots', {cookie: dashboard.superHeaders().cookie});
-
-    expect(JSON.parse(result.text)).toEqual({
+    const expected = {
       bots: [
         {workerId: 'muse-01', ready: true, bot: {id: BOT_ID, username: 'Muse One'}},
         {workerId: 'muse-02', ready: false, bot: null},
       ],
-    });
+    };
+
+    expect(JSON.parse((await call(dashboard.port, 'GET', '/api/super/bots', {cookie: dashboard.superHeaders().cookie})).text)).toEqual(expected);
+    expect(JSON.parse((await call(dashboard.port, 'GET', '/api/bots', {cookie: dashboard.userHeaders().cookie})).text)).toEqual(expected);
+    expect((await call(dashboard.port, 'GET', '/api/bots')).status).toBe(401);
   });
 
   it('rejects mutations without CSRF token or with a foreign Origin', async () => {
@@ -605,41 +589,26 @@ describe('super console status channel API', () => {
 });
 
 describe('"Aggiungi a Discord" from the home page', () => {
-  it('sends anonymous visitors to the development notice', async () => {
+  it('sends anonymous visitors to the Discord login', async () => {
     const dashboard = await startDashboard();
 
     const result = await call(dashboard.port, 'GET', '/add');
 
     expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=en`);
     expect(result.headers['content-security-policy']).toBeDefined();
   });
 
-  it('sends signed-in users who are not the super admin to the development notice', async () => {
+  it('sends every signed-in user to the dashboard invite card', async () => {
     const dashboard = await startDashboard();
 
-    const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.userHeaders().cookie});
+    for (const headers of [dashboard.userHeaders(), dashboard.superHeaders()]) {
+      const result = await call(dashboard.port, 'GET', '/add', {cookie: headers.cookie});
+      expect(result.status).toBe(302);
+      expect(result.headers.location).toBe(`${PUBLIC_URL}/en${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}`);
+    }
 
-    expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
-  });
-
-  it('sends the super admin to the dashboard invite card', async () => {
-    const dashboard = await startDashboard();
-
-    const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.superHeaders().cookie});
-
-    expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/en${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}`);
     expect(NEW_SERVER_ANCHOR).toBe('nuovo-server');
-  });
-
-  it('never treats anyone as super admin when none is configured', async () => {
-    const dashboard = await startDashboard({superAdminUserId: null});
-
-    const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.superHeaders().cookie});
-
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/development`);
   });
 
   it('only answers GET', async () => {
@@ -776,7 +745,7 @@ describe('dashboard static pages and fonts', () => {
     expect((await call(dashboard.port, 'GET', '/home.html')).status).toBe(404);
   });
 
-  it('serves the SPA views and the development notice with noindex', async () => {
+  it('serves the SPA views with noindex', async () => {
     const dashboard = await startDashboard();
 
     for (const path of [`/it${DASHBOARD_PATH}`, '/en/super', `/it/server/${GUILD_ID}`]) {
@@ -787,11 +756,8 @@ describe('dashboard static pages and fonts', () => {
     }
 
     const development = await call(dashboard.port, 'GET', '/it/development');
-    expect(development.status).toBe(200);
-    expect(development.headers['x-robots-tag']).toBe('noindex, nofollow');
-    expect(development.text).toContain('Muse è ancora in sviluppo.');
-    expect(development.text).toContain('https://github.com/haxurus/muse');
-    expect(development.text).not.toMatch(/\sstyle="|<script/u);
+    expect(development.status).toBe(302);
+    expect(development.headers.location).toBe(`${PUBLIC_URL}/add?lang=it`);
 
     const app = await call(dashboard.port, 'GET', `/en${DASHBOARD_PATH}`);
     expect(app.text).toContain('<script src="/assets/dashboard.js" defer></script>');

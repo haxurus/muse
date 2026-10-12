@@ -152,7 +152,7 @@ describe('template substitution', () => {
   });
 
   it('renders every page template in both languages without leftovers', async () => {
-    for (const file of ['home.html', 'index.html', 'development.html']) {
+    for (const file of ['home.html', 'index.html']) {
       const template = await readFile(new URL(`../dashboard/${file}`, import.meta.url), 'utf8');
       for (const locale of LOCALES) {
         const html = renderPage(template, locale, '', {origin: PUBLIC_URL}, {structuredData: homeStructuredData(locale, PUBLIC_URL)});
@@ -262,11 +262,11 @@ describe('localized routes', () => {
     expect(english.text).toContain('href="/it" lang="it" hreflang="it" data-lang-link="it">IT</a>');
   });
 
-  it('serves the app and the development notice per language with noindex', async () => {
+  it('serves the app per language with noindex', async () => {
     const dashboard = await startDashboard();
 
     for (const locale of LOCALES) {
-      for (const path of [`/${locale}/dashboard`, `/${locale}/super`, `/${locale}/server/${GUILD_ID}`, `/${locale}/development`]) {
+      for (const path of [`/${locale}/dashboard`, `/${locale}/super`, `/${locale}/server/${GUILD_ID}`]) {
         const page = await call(dashboard.port, 'GET', path);
         expect(page.status, path).toBe(200);
         expect(page.headers['x-robots-tag'], path).toBe('noindex, nofollow');
@@ -281,8 +281,8 @@ describe('localized routes', () => {
     expect(app.text).toContain('href="/en/super"');
     expect(app.text).toContain('<script src="/assets/dashboard.js" defer></script>');
 
-    expect((await call(dashboard.port, 'GET', '/en/development')).text).toContain('Muse is still in development.');
-    expect((await call(dashboard.port, 'GET', '/it/development')).text).toContain('Muse è ancora in sviluppo.');
+    // The old development notice now leads to the bot invites.
+    expect((await call(dashboard.port, 'GET', '/it/development')).headers.location).toBe(`${PUBLIC_URL}/add?lang=it`);
 
     for (const path of ['/it/', '/fr', '/fr/dashboard', '/en/dashboard/', '/en/server/123', '/it/add', '/en/en']) {
       expect((await call(dashboard.port, 'GET', path)).status, path).toBe(404);
@@ -389,22 +389,21 @@ describe('language through the Discord login', () => {
 });
 
 describe('localized /add and /invite redirects', () => {
-  it('sends visitors to the localized development notice or invite card', async () => {
+  it('sends anonymous visitors to the Discord login and signed-in users to the invite card', async () => {
     const dashboard = await startDashboard();
 
-    expect((await call(dashboard.port, 'GET', '/add?lang=it')).headers.location).toBe(`${PUBLIC_URL}/it/development`);
-    expect((await call(dashboard.port, 'GET', '/add', {'accept-language': 'it'})).headers.location).toBe(`${PUBLIC_URL}/it/development`);
-    expect((await call(dashboard.port, 'GET', '/add?lang=en', {cookie: dashboard.userCookie})).headers.location).toBe(`${PUBLIC_URL}/en/development`);
+    expect((await call(dashboard.port, 'GET', '/add?lang=it')).headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=it`);
+    expect((await call(dashboard.port, 'GET', '/add', {'accept-language': 'it'})).headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=it`);
+    expect((await call(dashboard.port, 'GET', '/add?lang=en', {cookie: dashboard.userCookie})).headers.location)
+      .toBe(`${PUBLIC_URL}/en/dashboard#${NEW_SERVER_ANCHOR}`);
     expect((await call(dashboard.port, 'GET', '/add?lang=it', {cookie: dashboard.superCookie})).headers.location)
       .toBe(`${PUBLIC_URL}/it/dashboard#${NEW_SERVER_ANCHOR}`);
   });
 
-  it('carries the language into the login and the development notice', async () => {
+  it('carries the language into the login', async () => {
     const dashboard = await startDashboard();
 
     expect((await call(dashboard.port, 'GET', '/invite/muse-01?lang=it')).headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=it`);
-    expect((await call(dashboard.port, 'GET', '/invite/muse-01?lang=it', {cookie: dashboard.userCookie})).headers.location)
-      .toBe(`${PUBLIC_URL}/it/development`);
   });
 });
 
