@@ -353,8 +353,9 @@ export default class PlanService {
         details: {previousTier: plan.tier, expiredAt: plan.expiresAt},
         outcome: 'ok',
       });
-      await this.resetBranding(guildId, SYSTEM_ACTOR);
     }
+
+    await Promise.all(expired.map(async ([guildId]) => this.resetBranding(guildId, SYSTEM_ACTOR)));
 
     if (expired.length > 0) {
       await this.pushAfterChange();
