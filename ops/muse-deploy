@@ -25,6 +25,9 @@ NO_STATE_MARKER=none
 RUNTIME_UID=10001
 RUNTIME_GID=10001
 WORKER_NUMBERS=(01 02 03 04 05)
+# Orchestrator state (each with its .bak): groups, super console blocks and audit,
+# platform settings (status channel) and server plans/coupons.
+ORCHESTRATOR_STATE_FILES=(groups.json blocks.json super-audit.json platform-settings.json plans.json)
 ALLOWED_OVERLAYS=(bot-one-playback bot-two-playback bot-three-playback bot-four-playback bot-five-playback)
 COMPOSE_FILES=()
 FLEET_SERVICES=()
@@ -344,10 +347,10 @@ pull_support_images() {
 
 # --- Fleet state backups ---------------------------------------------------
 
-# Archives worker databases and orchestrator groups. Sets BACKUP_RESULT to the
+# Archives worker databases and orchestrator state. Sets BACKUP_RESULT to the
 # archive path, or to "none" when no state existed yet. Must run while stopped.
 create_backup() {
-  local prefix="$1" stamp backup number file
+  local prefix="$1" stamp backup number file name
   local -a files=()
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup="$BACKUPS/$prefix-$stamp.tar.gz"
@@ -360,9 +363,13 @@ create_backup() {
     done
   done
 
-  if [[ -f "$BASE/data/orchestrator/groups.json" ]]; then
-    files+=("data/orchestrator/groups.json")
-  fi
+  for name in "${ORCHESTRATOR_STATE_FILES[@]}"; do
+    for file in "$name" "$name.bak"; do
+      if [[ -f "$BASE/data/orchestrator/$file" ]]; then
+        files+=("data/orchestrator/$file")
+      fi
+    done
+  done
 
   if [[ "${#files[@]}" -eq 0 ]]; then
     BACKUP_RESULT="$NO_STATE_MARKER"
@@ -377,7 +384,7 @@ create_backup() {
 }
 
 restore_backup() {
-  local backup="$1" number
+  local backup="$1" number name
 
   if [[ "$backup" != "$NO_STATE_MARKER" ]]; then
     [[ -f "$backup" ]] || die 1 "Backup archive not found: $backup"
@@ -389,7 +396,9 @@ restore_backup() {
       "$BASE/data/bot-$number/db.sqlite-wal" \
       "$BASE/data/bot-$number/db.sqlite-shm"
   done
-  rm -f -- "$BASE/data/orchestrator/groups.json"
+  for name in "${ORCHESTRATOR_STATE_FILES[@]}"; do
+    rm -f -- "$BASE/data/orchestrator/$name" "$BASE/data/orchestrator/$name.bak"
+  done
 
   if [[ "$backup" != "$NO_STATE_MARKER" ]]; then
     tar -C "$BASE" --no-same-owner -xzf "$backup"

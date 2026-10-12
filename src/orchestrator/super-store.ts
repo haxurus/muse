@@ -63,6 +63,13 @@ export const isValidActor = (value: unknown): value is Actor => isPlainObject(va
   && typeof value.username === 'string'
   && isPrintable(value.username, 1, MAX_ACTOR_NAME_LENGTH);
 
+/** Author of automatic actions (for example a plan expiring), like Sentinel's "system" audit rows. */
+export const SYSTEM_ACTOR: Actor = {userId: 'system', username: 'Muse'};
+
+const isSystemActor = (value: unknown): boolean => isPlainObject(value)
+  && value.userId === SYSTEM_ACTOR.userId
+  && value.username === SYSTEM_ACTOR.username;
+
 const isValidBlock = (value: unknown): value is Block => isPlainObject(value)
   && isBlockKind(value.kind)
   && isSnowflake(value.subjectId)
@@ -93,7 +100,7 @@ const OUTCOMES = new Set<unknown>(['ok', 'partial', 'failed']);
 const isValidAuditEntry = (value: unknown): value is AuditEntry => isPlainObject(value)
   && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= 64
   && typeof value.at === 'string'
-  && isValidActor(value.actor)
+  && (isValidActor(value.actor) || isSystemActor(value.actor))
   && typeof value.action === 'string' && isPrintable(value.action, 1, 64)
   && typeof value.subjectType === 'string' && isPrintable(value.subjectType, 1, 32)
   && typeof value.subjectId === 'string' && isPrintable(value.subjectId, 1, 64)

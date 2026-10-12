@@ -236,12 +236,18 @@ describe('dashboard mutation checks', () => {
 });
 
 describe('orchestrator error mapping', () => {
-  it('keeps 400/404/409 statuses with the orchestrator message', () => {
-    for (const status of [400, 404, 409]) {
+  it('keeps 400/403/404/409 statuses with the orchestrator message', () => {
+    for (const status of [400, 403, 404, 409]) {
       const error = orchestratorError(upstreamHttpError(status, JSON.stringify({error: 'bad worker'})));
       expect(error.statusCode).toBe(status);
       expect(error.message).toBe('bad worker');
     }
+  });
+
+  it('forwards only well-formed machine-readable codes', () => {
+    expect(orchestratorError(upstreamHttpError(403, JSON.stringify({error: 'plan', code: 'PLAN_LIMIT'}))).details.code).toBe('PLAN_LIMIT');
+    expect(orchestratorError(upstreamHttpError(403, JSON.stringify({error: 'plan', code: 'plan limit'}))).details.code).toBeUndefined();
+    expect(orchestratorError(upstreamHttpError(500, JSON.stringify({error: 'boom', code: 'BOOM'}))).details.code).toBeUndefined();
   });
 
   it('uses a generic message for long, non-JSON, or control-character messages', () => {

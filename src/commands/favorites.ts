@@ -9,6 +9,8 @@ import {Pagination} from 'pagination.djs';
 import {toDiscordAutocompleteChoices, truncate} from '../utils/string.js';
 import {UserError, t} from '../i18n/index.js';
 import {getGuildLocale} from '../i18n/guild-locale.js';
+import {entitlements} from '../plans/entitlements.js';
+import {PLANS} from '../plans/plans.js';
 
 @injectable()
 export default class implements Command {
@@ -190,6 +192,11 @@ export default class implements Command {
 
     if (existingFavorite) {
       throw new UserError('favoriteAlreadyExists');
+    }
+
+    const {tier, limits} = entitlements.get(interaction.guild!.id);
+    if (await prisma.favoriteQuery.count({where: {guildId: interaction.guild!.id}}) >= limits.favorites) {
+      throw new UserError('planFavoritesLimit', {plan: PLANS[tier].name, max: limits.favorites});
     }
 
     await prisma.favoriteQuery.create({

@@ -122,16 +122,46 @@
       "it": "Italiano"
     },
     "fields": {
-      "locale": {"label": "Bot language", "hint": "Language of the bots’ replies and messages · default: English"},
-      "defaultVolume": {"label": "Default volume", "hint": "0–100"},
-      "playlistLimit": {"label": "Playlist limit", "hint": "1–500 tracks"},
-      "secondsToWaitAfterQueueEmpties": {"label": "Auto-disconnect", "hint": "Seconds after the queue empties · 0 = never"},
-      "defaultQueuePageSize": {"label": "Queue page size", "hint": "1–30 items"},
-      "leaveIfNoListeners": {"label": "Leave without listeners", "hint": "Leave the voice channel when left alone"},
-      "queueAddResponseEphemeral": {"label": "Private reply", "hint": "Queue confirmation visible only to whoever asked"},
-      "autoAnnounceNextSong": {"label": "Announce the next track", "hint": "Automatic message when the next track starts"},
-      "turnDownVolumeWhenPeopleSpeak": {"label": "Lower while people speak", "hint": "Turns the music down when someone talks"},
-      "turnDownVolumeWhenPeopleSpeakTarget": {"label": "Volume while people speak", "hint": "0–100"}
+      "locale": {
+        "label": "Bot language",
+        "hint": "Language of the bots’ replies and messages · default: English"
+      },
+      "defaultVolume": {
+        "label": "Default volume",
+        "hint": "0–100"
+      },
+      "playlistLimit": {
+        "label": "Playlist limit",
+        "hint": "1–500 tracks"
+      },
+      "secondsToWaitAfterQueueEmpties": {
+        "label": "Auto-disconnect",
+        "hint": "Seconds after the queue empties · 0 = never"
+      },
+      "defaultQueuePageSize": {
+        "label": "Queue page size",
+        "hint": "1–30 items"
+      },
+      "leaveIfNoListeners": {
+        "label": "Leave without listeners",
+        "hint": "Leave the voice channel when left alone"
+      },
+      "queueAddResponseEphemeral": {
+        "label": "Private reply",
+        "hint": "Queue confirmation visible only to whoever asked"
+      },
+      "autoAnnounceNextSong": {
+        "label": "Announce the next track",
+        "hint": "Automatic message when the next track starts"
+      },
+      "turnDownVolumeWhenPeopleSpeak": {
+        "label": "Lower while people speak",
+        "hint": "Turns the music down when someone talks"
+      },
+      "turnDownVolumeWhenPeopleSpeakTarget": {
+        "label": "Volume while people speak",
+        "hint": "0–100"
+      }
     }
   },
   "groups": {
@@ -279,6 +309,64 @@
       "ok": "OK",
       "partial": "Partial",
       "failed": "Failed"
+    },
+    "metricPaid": "Paid",
+    "metricCoupons": "Active coupons",
+    "plans": {
+      "manage": "Manage plan",
+      "expires": "expires {date}",
+      "expired": "expired",
+      "tier": "Plan",
+      "billing": "Billing",
+      "expiry": "Expiry",
+      "coupon": "Coupon",
+      "plusMonth": "+1 month",
+      "plusYear": "+1 year",
+      "noExpiry": "No expiry",
+      "price": "Price",
+      "note": "Internal note",
+      "notePlaceholder": "E.g. paid by bank transfer on 10/10",
+      "save": "Save plan",
+      "cancel": "Cancel",
+      "saved": "{name} plan updated: {plan}.",
+      "confirmDowngrade": "Lower the plan? Bots outside it stop answering and limits apply immediately."
+    },
+    "coupons": {
+      "kicker": "COUPONS",
+      "title": "Coupons",
+      "text": "Coupons apply when you assign a plan to a server. Public ones appear as promotions on the pricing page.",
+      "code": "Code",
+      "type": "Type",
+      "percent": "Percentage",
+      "amount": "Fixed amount (€)",
+      "value": "Value",
+      "billing": "Billing",
+      "billingAny": "Any",
+      "maxRedemptions": "Maximum uses",
+      "validFrom": "Valid from",
+      "validUntil": "Valid until",
+      "description": "Description",
+      "tiers": "Plans (none = every paid plan)",
+      "public": "Show on the pricing page",
+      "create": "Create coupon",
+      "empty": "No coupons.",
+      "allPlans": "Every paid plan",
+      "uses": "{count} uses / {max}",
+      "unlimited": "unlimited",
+      "active": "Active",
+      "inactive": "Inactive",
+      "publicTag": "Public",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "show": "Show on pricing",
+      "hide": "Hide from pricing",
+      "delete": "Delete",
+      "confirmDelete": "Delete coupon {code}?",
+      "created": "Coupon {code} created.",
+      "updated": "Coupon updated.",
+      "deleted": "Coupon deleted.",
+      "invalidCode": "The code must have 3-32 letters, digits, \"_\" or \"-\".",
+      "invalidValue": "Enter a whole value (percentage 1 to 100, amount from 1 euro)."
     }
   },
   "errors": {
@@ -287,5 +375,47 @@
     "rateLimited": "Too many changes in a short time: try again shortly.",
     "unavailable": "Service temporarily unavailable. Try again shortly.",
     "notFound": "Item not found."
+  },
+  "plans": {
+    "tierLabel": {
+      "FREE": "Free",
+      "TIER1": "Level 1 · Plus",
+      "TIER2": "Level 2 · Pro",
+      "TIER3": "Level 3 · Brand"
+    },
+    "short": {
+      "FREE": "Free",
+      "TIER1": "Plus",
+      "TIER2": "Pro",
+      "TIER3": "Brand"
+    },
+    "billing": {
+      "MONTHLY": "Monthly",
+      "YEARLY": "Yearly",
+      "GIFT": "Gift / trial"
+    }
+  },
+  "plan": {
+    "eyebrow": "PLAN",
+    "seePlans": "See plans",
+    "expired": "The {plan} plan has expired: Free limits apply.",
+    "validUntil": "Valid until {date}.",
+    "free": "Free plan. To use more bots at once, 24/7 and higher limits, contact me from the pricing page.",
+    "noExpiry": "Active plan, no expiry.",
+    "meterBots": "Server bots included in the plan",
+    "meterGroups": "Saved groups",
+    "limitPlaylist": "Tracks imported per playlist",
+    "tracks": "{count} tracks",
+    "limitFavorites": "Favorites",
+    "limitAlwaysOn": "24/7 (stays in voice)",
+    "limitSupport": "Priority support",
+    "notIncluded": "not in the plan",
+    "settingPlaylist": "At most {max} on your plan.",
+    "settingAlwaysOn": "24/7 requires the {plan} plan: without it, the bots leave empty channels and wait at most {max} seconds after the queue ends.",
+    "alwaysOnRequired": "Staying in an empty channel (24/7) requires the {plan} plan.",
+    "groupsNone": "The {plan} plan includes no saved groups: Plus or higher lets you create them.",
+    "groupsLimit": "The {plan} plan allows {max} saved groups: delete one or move to a higher plan.",
+    "errorLimit": "This change goes beyond the server plan. See the plans to unlock it.",
+    "botsOver": "The plan includes {max} bots: the extra ones ({count}) stay in the server but only answer with the plan notice."
   }
 }

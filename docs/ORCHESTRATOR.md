@@ -57,6 +57,7 @@ GET   /v1/guilds/:guildId/settings
 PATCH /v1/guilds/:guildId/settings
 POST  /v1/guilds/:guildId/leave
 PUT   /v1/blocklist
+PUT   /v1/entitlements   (plan of every guild of this worker, pushed by the orchestrator; see SUPER_CONSOLE.md)
 POST  /v1/status-channel/announce
 GET   /v1/guilds/:guildId/meta
 POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "true")

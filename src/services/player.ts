@@ -38,6 +38,8 @@ import {localeOf} from '../i18n/index.js';
 import {getHttpStreamInputOptions} from '../utils/http-stream.js';
 import {getSoundCloudMediaSource, getYouTubeMediaSource, YtDlpMediaUnavailableError} from '../utils/yt-dlp.js';
 import {Setting} from '@prisma/client';
+import {entitlements} from '../plans/entitlements.js';
+import {planAdjustedSettings} from '../plans/plans.js';
 
 export {DEFAULT_VOLUME, MediaSource, STATUS};
 export type {AgeRestrictedFallbackResolver, PlayerEvents, QueuedPlaylist, QueuedSong, SongMetadata};
@@ -1079,7 +1081,7 @@ export default class {
     this.status = STATUS.IDLE;
     this.stopAudioPlayer(true);
 
-    const settings = await getGuildSettings(this.guildId);
+    const settings = planAdjustedSettings(await getGuildSettings(this.guildId), entitlements.get(this.guildId).limits);
 
     const {secondsToWaitAfterQueueEmpties} = settings;
     // A previous queue exhaustion may still have a pending timer.

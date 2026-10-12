@@ -38,6 +38,7 @@ vi.mock('../src/utils/build-embed.js', () => ({
 }));
 
 import Player, {MediaSource, QueuedSong, SongMetadata, STATUS} from '../src/services/player.js';
+import {entitlements} from '../src/plans/entitlements.js';
 import getProgressBar from '../src/utils/get-progress-bar.js';
 import {YtDlpMediaUnavailableError} from '../src/utils/yt-dlp.js';
 
@@ -148,6 +149,8 @@ const installVoiceActivityFakes = (player: Player) => {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  // These tests cover the settings themselves: a Pro plan lifts every plan limit (24/7, playlists).
+  entitlements.set({guilds: [{guildId: GUILD_ID, tier: 'TIER2', allowed: true, allowedBotIds: []}]});
   dependencyMocks.createAudioPlayer.mockImplementation(makeAudioPlayer);
   dependencyMocks.createAudioResource.mockImplementation((sourceStream: Readable) => ({
     sourceStream,

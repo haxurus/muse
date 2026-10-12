@@ -5,6 +5,8 @@ import {TYPES} from '../types.js';
 import PlayerManager from '../managers/player.js';
 import {getSizeWithoutBots} from '../utils/channels.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
+import {entitlements} from '../plans/entitlements.js';
+import {planAdjustedSettings} from '../plans/plans.js';
 
 export default async (oldState: VoiceState, newState: VoiceState): Promise<void> => {
   const playerManager = container.get<PlayerManager>(TYPES.Managers.Player);
@@ -21,7 +23,7 @@ export default async (oldState: VoiceState, newState: VoiceState): Promise<void>
     return;
   }
 
-  const {leaveIfNoListeners} = await getGuildSettings(player.guildId);
+  const {leaveIfNoListeners} = planAdjustedSettings(await getGuildSettings(player.guildId), entitlements.get(player.guildId).limits);
   // A settings lookup can outlive a move, reconnect, or disconnect.
   if (player.voiceConnection !== voiceConnection
     || voiceConnection.state.status !== VoiceConnectionStatus.Ready

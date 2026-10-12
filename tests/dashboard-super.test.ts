@@ -593,7 +593,7 @@ describe('super console status channel API', () => {
     })));
     const notSet = await call(dashboard.port, 'POST', '/api/super/status-channel/test', dashboard.superHeaders(), '{}');
     expect(notSet.status).toBe(400);
-    expect(JSON.parse(notSet.text)).toEqual({error: 'no status channel is configured'});
+    expect(JSON.parse(notSet.text)).toEqual({error: 'no status channel is configured', code: 'STATUS_CHANNEL_NOT_SET'});
 
     const actions = log.mock.calls.map(args => String(args[0])).filter(line => line.includes('dashboard_mutation'))
       .map(line => JSON.parse(line) as {action: string; outcome: string});

@@ -11,6 +11,7 @@ import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklis
 import type {WorkerBlocklistResult, WorkerGuildMeta, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusAnnounceResult} from './types.js';
 import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
 import {buildGuildMeta} from '../status/guild-meta.js';
+import {MAX_ENTITLEMENTS_BODY_BYTES, assertSettingsWithinPlan, entitlements, sanitizeEntitlements} from '../plans/entitlements.js';
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -97,6 +98,12 @@ export default class WorkerControlServer {
         return;
       }
 
+      if (request.method === 'PUT' && segments.join('/') === 'v1/entitlements') {
+        entitlements.set(sanitizeEntitlements(await readJsonBody(request, MAX_ENTITLEMENTS_BODY_BYTES)));
+        sendJson(response, 200, {workerId: this.config.WORKER_ID, guilds: entitlements.size()});
+        return;
+      }
+
       if (request.method === 'POST' && segments.join('/') === 'v1/status-channel/announce') {
         sendJson(response, 200, await this.announceStatus(await readJsonBody(request)));
         return;
@@ -130,6 +137,7 @@ export default class WorkerControlServer {
 
         if (request.method === 'PATCH') {
           const patch = sanitizeGuildSettingsPatch(await readJsonBody(request));
+          assertSettingsWithinPlan(guildId, patch);
           sendJson(response, 200, await updateGuildSettings(guildId, patch));
           return;
         }

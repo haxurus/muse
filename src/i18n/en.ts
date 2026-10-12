@@ -10,6 +10,14 @@ export const EN_MESSAGES = {
   blockedUser: 'You can\'t use this bot.',
   dmNotAllowed: 'you can\'t use this bot in a DM',
   notInVoiceChannel: 'gotta be in a voice channel',
+
+  // Plans
+  planBotNotIncluded: 'This server\'s {plan} plan includes {count} Muse bot(s): use {bots}.{link}',
+  planBotNotIncludedNoList: 'This server\'s {plan} plan includes {count} Muse bot(s), and this one is not among them.{link}',
+  planPricingLink: ' See the plans: {url}',
+  planFavoritesLimit: 'this server\'s {plan} plan allows {max} favorites',
+  planPlaylistLimit: 'this server\'s {plan} plan imports at most {max} tracks per playlist',
+  planAlwaysOnRequired: '24/7 (staying in an empty channel, or waiting more than {max} seconds after the queue ends) requires the {required} plan',
   unknownSubcommand: 'unknown subcommand',
   notConnected: 'not connected',
   nothingIsPlaying: 'nothing is playing',

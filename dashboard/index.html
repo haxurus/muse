@@ -155,6 +155,8 @@
               <div class="metric"><span data-i18n="super.metricGuilds"></span><strong class="mono" id="metric-guilds">0</strong></div>
               <div class="metric"><span data-i18n="super.metricPlayers"></span><strong class="mono" id="metric-players">0</strong></div>
               <div class="metric"><span data-i18n="super.metricBlocks"></span><strong class="mono" id="metric-blocks">0</strong></div>
+              <div class="metric"><span data-i18n="super.metricPaid"></span><strong class="mono" id="metric-paid">0</strong></div>
+              <div class="metric"><span data-i18n="super.metricCoupons"></span><strong class="mono" id="metric-coupons">0</strong></div>
             </div>
 
             <section class="card">
@@ -207,6 +209,36 @@
               </div>
               <div class="empty" id="super-guilds-empty" hidden data-i18n="super.noGuilds"></div>
               <div class="table-list" id="super-guilds"></div>
+            </section>
+
+            <section class="card" id="coupon-card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.coupons.kicker"></span>
+                  <h2 data-i18n="super.coupons.title"></h2>
+                  <p data-i18n="super.coupons.text"></p>
+                </div>
+              </div>
+              <form class="coupon-form" id="coupon-form" novalidate>
+                <label class="field"><span data-i18n="super.coupons.code"></span><input name="code" maxlength="32" autocomplete="off" placeholder="BETA50"></label>
+                <label class="field"><span data-i18n="super.coupons.type"></span><select name="type"><option value="percent" data-i18n="super.coupons.percent"></option><option value="amount" data-i18n="super.coupons.amount"></option></select></label>
+                <label class="field"><span data-i18n="super.coupons.value"></span><input name="value" type="number" min="1" step="1" inputmode="numeric"></label>
+                <label class="field"><span data-i18n="super.coupons.billing"></span><select name="billing"><option value="ANY" data-i18n="super.coupons.billingAny"></option><option value="MONTHLY" data-i18n="plans.billing.MONTHLY"></option><option value="YEARLY" data-i18n="plans.billing.YEARLY"></option></select></label>
+                <label class="field"><span data-i18n="super.coupons.maxRedemptions"></span><input name="maxRedemptions" type="number" min="1" step="1" inputmode="numeric" placeholder="∞"></label>
+                <label class="field"><span data-i18n="super.coupons.validFrom"></span><input name="validFrom" type="date"></label>
+                <label class="field"><span data-i18n="super.coupons.validUntil"></span><input name="validUntil" type="date"></label>
+                <label class="field coupon-wide"><span data-i18n="super.coupons.description"></span><input name="description" maxlength="200" autocomplete="off"></label>
+                <fieldset class="coupon-tiers coupon-wide">
+                  <legend data-i18n="super.coupons.tiers"></legend>
+                  <label><input type="checkbox" name="tier" value="TIER1"> <span data-i18n="plans.tierLabel.TIER1"></span></label>
+                  <label><input type="checkbox" name="tier" value="TIER2"> <span data-i18n="plans.tierLabel.TIER2"></span></label>
+                  <label><input type="checkbox" name="tier" value="TIER3"> <span data-i18n="plans.tierLabel.TIER3"></span></label>
+                </fieldset>
+                <label class="check coupon-wide"><input type="checkbox" name="public"> <span data-i18n="super.coupons.public"></span></label>
+                <div class="coupon-actions coupon-wide"><button class="button button-primary" type="submit" data-i18n="super.coupons.create"></button></div>
+              </form>
+              <div class="empty" id="coupon-empty" hidden data-i18n="super.coupons.empty"></div>
+              <div class="table-list" id="coupon-list"></div>
             </section>
 
             <section class="card">
@@ -322,6 +354,18 @@
             <div class="stat-card"><span data-i18n="overview.statVoice"></span><strong id="stat-voice">0</strong></div>
             <div class="stat-card"><span data-i18n="overview.statGroups"></span><strong id="stat-groups">0</strong></div>
           </div>
+          <section class="panel plan-panel" id="plan-panel" hidden>
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="plan.eyebrow"></p>
+                <h2 id="plan-title"></h2>
+                <p class="muted" id="plan-status"></p>
+              </div>
+              <a class="button button-secondary button-sm" id="plan-pricing" data-i18n="plan.seePlans"></a>
+            </div>
+            <div class="plan-meters" id="plan-meters"></div>
+            <dl class="plan-limits" id="plan-limits"></dl>
+          </section>
           <section class="panel">
             <div class="panel-title">
               <div>
@@ -385,6 +429,7 @@
             </div>
             <div class="empty" id="group-empty" hidden data-i18n="groups.empty"></div>
             <div class="table-list" id="group-list"></div>
+            <div class="notice notice-warn" id="group-plan-notice" hidden></div>
           </section>
 
           <section class="panel">

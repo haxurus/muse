@@ -6,6 +6,8 @@ type OrchestratorGuild = {
   id: string;
   name: string;
   availableWorkers: number;
+  /** Effective plan tier (FREE when the orchestrator predates plans). */
+  planTier?: string;
 };
 
 export type OrchestratorGuildList = {
@@ -135,8 +137,10 @@ const parseOptionalJson = (body: string): unknown => {
   }
 };
 
-// Orchestrator client errors that are meaningful to the browser keep their status.
-const FORWARDED_CLIENT_STATUSES = new Set([400, 404, 409, 413, 422]);
+// Orchestrator client errors that are meaningful to the browser keep their status
+// (403 is a plan limit: PLAN_LIMIT / PLAN_REQUIRED).
+const FORWARDED_CLIENT_STATUSES = new Set([400, 403, 404, 409, 413, 422]);
+const ERROR_CODE = /^[A-Z][A-Z\d_]{1,63}$/u;
 const MAX_FORWARDED_MESSAGE_LENGTH = 200;
 
 const isPrintable = (value: string): boolean =>
@@ -145,7 +149,7 @@ const isPrintable = (value: string): boolean =>
     return code >= 32 && code !== 127;
   });
 
-const forwardedMessage = (body: unknown): string | undefined => {
+const parseBody = (body: unknown): unknown => {
   let parsed = body;
   if (Buffer.isBuffer(parsed)) {
     parsed = parsed.toString('utf8');
@@ -159,6 +163,18 @@ const forwardedMessage = (body: unknown): string | undefined => {
     }
   }
 
+  return parsed;
+};
+
+/** Machine-readable `code` of an orchestrator 4xx answer (UPPER_SNAKE_CASE only). */
+const forwardedCode = (body: unknown): string | undefined => {
+  const parsed = parseBody(body);
+  const code = typeof parsed === 'object' && parsed !== null ? (parsed as {code?: unknown}).code : undefined;
+  return typeof code === 'string' && ERROR_CODE.test(code) ? code : undefined;
+};
+
+const forwardedMessage = (body: unknown): string | undefined => {
+  const parsed = parseBody(body);
   if (typeof parsed !== 'object' || parsed === null) {
     return undefined;
   }
@@ -186,9 +202,11 @@ export const orchestratorError = (error: unknown): DashboardHttpError => {
   const {statusCode} = failure;
 
   if (statusCode !== undefined && FORWARDED_CLIENT_STATUSES.has(statusCode)) {
+    const code = forwardedCode(failure.body);
     return new DashboardHttpError(
       statusCode,
       forwardedMessage(failure.body) ?? 'orchestrator rejected the request',
+      code === undefined ? {} : {code},
     );
   }
 
@@ -277,6 +295,40 @@ export default class OrchestratorClient {
   async superStatusChannel(actor: SuperActor): Promise<unknown> {
     return call(async () => got.get(
       `${this.config.orchestratorUrl}/v1/super/status-channel`,
+      actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
+  }
+
+  /** Assign a server's plan (tier, billing, expiry, coupon, internal note). */
+  async superSetGuildPlan(guildId: string, body: Record<string, unknown>, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/super/guilds/${encodeURIComponent(guildId)}/plan`,
+      {
+        ...actorOptions(this.config.orchestratorToken, actor),
+        // The orchestrator pushes the new entitlements to every bot before answering.
+        timeout: {request: 15_000},
+        json: body,
+      },
+    ).json<unknown>());
+  }
+
+  async superCreateCoupon(body: Record<string, unknown>, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.post(
+      `${this.config.orchestratorUrl}/v1/super/coupons`,
+      {...actorOptions(this.config.orchestratorToken, actor), json: body},
+    ).json<unknown>());
+  }
+
+  async superUpdateCoupon(code: string, body: Record<string, unknown>, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/super/coupons/${encodeURIComponent(code)}`,
+      {...actorOptions(this.config.orchestratorToken, actor), json: body},
+    ).json<unknown>());
+  }
+
+  async superDeleteCoupon(code: string, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.delete(
+      `${this.config.orchestratorUrl}/v1/super/coupons/${encodeURIComponent(code)}`,
       actorOptions(this.config.orchestratorToken, actor),
     ).json<unknown>());
   }

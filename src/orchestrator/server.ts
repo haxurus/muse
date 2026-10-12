@@ -10,6 +10,8 @@ import {assertGuildId} from '../control/snowflake.js';
 import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS} from './super-console.js';
 import {AuditStore, BlockStore} from './super-store.js';
 import {PlatformSettingsStore} from './platform-store.js';
+import {PlanStore} from './plan-store.js';
+import {PLANS} from '../plans/plans.js';
 import type {WorkerPlatformConfig} from '../control/types.js';
 
 type WorkerResult<T> = {
@@ -44,6 +46,7 @@ export default class OrchestratorServer {
       new BlockStore(config.blocksFile ?? path.join(stateDirectory, 'blocks.json')),
       new AuditStore(config.auditFile ?? path.join(stateDirectory, 'super-audit.json')),
       this.platform,
+      new PlanStore(config.plansFile ?? path.join(stateDirectory, 'plans.json')),
     );
   }
 
@@ -152,6 +155,7 @@ export default class OrchestratorServer {
         && segments[1] === 'guilds'
         && segments[3] === 'groups'
         && request.method === 'POST') {
+        this.assertGroupAllowed(segments[2]);
         sendJson(response, 201, {
           guildId: segments[2],
           group: this.groups.create(segments[2], await readJsonBody(request)),
@@ -221,7 +225,7 @@ export default class OrchestratorServer {
 
   private async guilds() {
     const statuses = await this.workerStatuses();
-    const guilds = new Map<string, {id: string; name: string; availableWorkers: number}>();
+    const guilds = new Map<string, {id: string; name: string; availableWorkers: number; planTier: string}>();
 
     for (const result of statuses) {
       if (!result.ok) {
@@ -234,6 +238,7 @@ export default class OrchestratorServer {
           id: guild.id,
           name: guild.name,
           availableWorkers: (existing?.availableWorkers ?? 0) + 1,
+          planTier: this.superConsole.plans.effectiveTier(guild.id),
         });
       }
     }
@@ -258,11 +263,23 @@ export default class OrchestratorServer {
       })));
     }));
 
+    const groups = this.groups.list(guildId);
     return {
       guildId,
       workers,
-      groups: this.groups.list(guildId),
+      groups,
+      plan: this.superConsole.plans.guildUsage(guildId, statuses, groups.length),
     };
+  }
+
+  /** A new saved group must fit the guild's plan (`403 PLAN_LIMIT`). */
+  private assertGroupAllowed(guildId: string): void {
+    assertGuildId(guildId);
+    const tier = this.superConsole.plans.effectiveTier(guildId);
+    const max = PLANS[tier].limits.groups;
+    if (this.groups.list(guildId).length >= max) {
+      throw new HttpError(403, `this server's ${PLANS[tier].name} plan allows ${max} saved groups`, 'PLAN_LIMIT');
+    }
   }
 
   private async updateGuildWorkers(guildId: string, input: unknown) {

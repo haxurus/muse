@@ -12,6 +12,8 @@ import type WorkerClient from './worker-client.js';
 import {isPlainObject, isPrintable} from './durable-file.js';
 import type {PlatformSettingsStore} from './platform-store.js';
 import {mergeGuildMeta, type MergedGuildMeta} from './guild-meta.js';
+import PlanService, {PLAN_SWEEP_INTERVAL_MS} from './plan-service.js';
+import type {PlanStore} from './plan-store.js';
 import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {
   MAX_ACTOR_NAME_LENGTH,
@@ -137,17 +139,26 @@ const objectBody = (input: unknown): Record<string, unknown> => {
 
 /** Super-console routes, durable block/audit state and the blocklist reconcile loop. */
 export default class SuperConsole {
+  /** Server plans and coupons; shares this console's audit log and worker statuses. */
+  readonly plans: PlanService;
   private pushQueue: Promise<unknown> = Promise.resolve();
   private reconcileTimer?: NodeJS.Timeout;
+  private sweepTimer?: NodeJS.Timeout;
   private reconciling = false;
   private lastReconcileFailures = '';
+  private lastEntitlementFailures = '';
 
   constructor(
     private readonly workers: WorkerClient[],
     private readonly blocks: BlockStore,
     private readonly audit: AuditStore,
     private readonly platform: PlatformSettingsStore,
-  ) {}
+    planStore: PlanStore,
+  ) {
+    this.plans = new PlanService(workers, planStore, entry => {
+      this.record(entry);
+    }, async () => this.statuses());
+  }
 
   // eslint-disable-next-line complexity
   async route(request: IncomingMessage, segments: string[]): Promise<SuperRouteResult | undefined> {
@@ -198,6 +209,21 @@ export default class SuperConsole {
       return {statusCode: 200, body: await this.guildMeta(segments[3])};
     }
 
+    if (request.method === 'PUT'
+      && segments.length === 5
+      && segments[1] === 'super'
+      && segments[2] === 'guilds'
+      && segments[4] === 'plan') {
+      const actor = parseActor(request);
+      assertGuildId(segments[3]);
+      const knownGuildIds = new Set((await this.statuses()).flatMap(result => result.ok ? result.value.guilds.map(guild => guild.id) : []));
+      return {statusCode: 200, body: await this.plans.changeGuildPlan(segments[3], await readJsonBody(request), actor, knownGuildIds)};
+    }
+
+    if (segments.length >= 3 && segments.length <= 4 && segments[1] === 'super' && segments[2] === 'coupons') {
+      return this.couponRoute(request, segments[3]);
+    }
+
     if (segments.length >= 3 && segments[1] === 'super' && segments[2] === 'status-channel') {
       return this.statusChannelRoute(request, segments.slice(3));
     }
@@ -216,20 +242,45 @@ export default class SuperConsole {
     return undefined;
   }
 
-  /** Push the blocklist now and then every `intervalMs`; workers lose it when they restart. */
-  startReconcile(intervalMs = DEFAULT_RECONCILE_INTERVAL_MS): void {
+  /**
+   * Push the blocklist and the plan entitlements now and then every `intervalMs` (workers lose
+   * both when they restart), and sweep expired plans back to Free at start and every 10 minutes.
+   */
+  startReconcile(intervalMs = DEFAULT_RECONCILE_INTERVAL_MS, sweepIntervalMs = PLAN_SWEEP_INTERVAL_MS): void {
     this.stopReconcile();
+    void this.sweepPlans();
     void this.reconcile();
     this.reconcileTimer = setInterval(() => {
       void this.reconcile();
     }, intervalMs);
     this.reconcileTimer.unref();
+    this.sweepTimer = setInterval(() => {
+      void this.sweepPlans();
+    }, sweepIntervalMs);
+    this.sweepTimer.unref();
   }
 
   stopReconcile(): void {
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer);
       this.reconcileTimer = undefined;
+    }
+
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = undefined;
+    }
+  }
+
+  /** One expiry sweep; failures are only logged. */
+  async sweepPlans(): Promise<void> {
+    try {
+      const expired = await this.plans.sweepExpired();
+      if (expired.length > 0) {
+        console.log(`Plans expired back to Free: ${expired.join(', ')}`);
+      }
+    } catch (error: unknown) {
+      console.error(`Plan expiry sweep failed: ${errorLabel(error)}`);
     }
   }
 
@@ -255,6 +306,22 @@ export default class SuperConsole {
       }
     } catch (error: unknown) {
       console.error(`Blocklist reconcile failed: ${errorLabel(error)}`);
+    }
+
+    try {
+      const {failed} = await this.plans.pushEntitlements();
+      const summary = failed.map(failure => `${failure.workerId} (${failure.error})`).join(', ');
+      if (summary !== this.lastEntitlementFailures) {
+        if (summary) {
+          console.warn(`Plan entitlements reconcile failed for: ${summary}`);
+        } else {
+          console.log('Plan entitlements reconcile succeeded for all workers');
+        }
+
+        this.lastEntitlementFailures = summary;
+      }
+    } catch (error: unknown) {
+      console.error(`Plan entitlements reconcile failed: ${errorLabel(error)}`);
     } finally {
       this.reconciling = false;
     }
@@ -300,6 +367,7 @@ export default class SuperConsole {
       ownerId: string | null;
       workerIds: string[];
       blocked: boolean;
+      plan: ReturnType<SuperConsole['overviewPlan']>;
     };
     const guilds = new Map<string, OverviewGuild>();
     for (const result of statuses) {
@@ -317,6 +385,7 @@ export default class SuperConsole {
           ownerId: existing?.ownerId ?? guild.ownerId ?? null,
           workerIds: [...(existing?.workerIds ?? []), result.workerId].sort(),
           blocked: blockedGuilds.has(guild.id),
+          plan: this.overviewPlan(guild.id),
         });
       }
     }
@@ -327,7 +396,35 @@ export default class SuperConsole {
       blocks: this.blocks.list(),
       audit: this.audit.list(OVERVIEW_AUDIT_LIMIT),
       statusChannel: this.platform.statusChannel(),
+      coupons: this.plans.coupons(),
+      planCatalog: this.plans.catalog(),
     };
+  }
+
+  /** Full plan of a guild for the super console (with the internal note and coupon). */
+  overviewPlan(guildId: string) {
+    const plan = this.plans.plan(guildId);
+    return {...plan, effectiveTier: this.plans.effectiveTier(guildId)};
+  }
+
+  /** `POST /v1/super/coupons`, `PUT|DELETE /v1/super/coupons/:code`. */
+  async couponRoute(request: IncomingMessage, code: string | undefined): Promise<SuperRouteResult | undefined> {
+    if (code === undefined && request.method === 'POST') {
+      const actor = parseActor(request);
+      return {statusCode: 201, body: {coupon: this.plans.createCoupon(await readJsonBody(request), actor)}};
+    }
+
+    if (code !== undefined && request.method === 'PUT') {
+      const actor = parseActor(request);
+      return {statusCode: 200, body: {coupon: this.plans.updateCoupon(code, await readJsonBody(request), actor)}};
+    }
+
+    if (code !== undefined && request.method === 'DELETE') {
+      const actor = parseActor(request);
+      return {statusCode: 200, body: {coupon: this.plans.deleteCoupon(code, actor)}};
+    }
+
+    return undefined;
   }
 
   /** `GET|PUT /v1/super/status-channel` and `POST /v1/super/status-channel/test`. */

@@ -17,6 +17,8 @@ import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
 import {handlePlaybackInteraction} from './playback/controller.js';
 import {blockedUserMessage, blocklist} from './control/blocklist.js';
+import {entitlements} from './plans/entitlements.js';
+import {planBotRefusal} from './plans/messages.js';
 import {DEFAULT_LOCALE, UserError, localeFromDiscord, localizeEnglishMessage, t, type Locale} from './i18n/index.js';
 import {getGuildLocale} from './i18n/guild-locale.js';
 import StatusAnnouncer from './status/startup-announcer.js';
@@ -137,6 +139,21 @@ export default class {
             await interaction.respond([]);
           } else if (interaction.isRepliable()) {
             await interaction.reply({content: blockedUserMessage(await resolveLocale()), ephemeral: true});
+          }
+
+          return;
+        }
+
+        // A bot that the server's plan does not include answers nothing but the refusal.
+        if (interaction.guildId && !entitlements.get(interaction.guildId).allowed) {
+          if (interaction.isAutocomplete()) {
+            await interaction.respond([]);
+          } else if (interaction.isRepliable()) {
+            await interaction.reply({
+              content: planBotRefusal(interaction.guildId, await resolveLocale()),
+              ephemeral: true,
+              allowedMentions: {parse: []},
+            });
           }
 
           return;

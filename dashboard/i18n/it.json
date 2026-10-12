@@ -122,16 +122,46 @@
       "it": "Italiano"
     },
     "fields": {
-      "locale": {"label": "Lingua del bot", "hint": "Lingua delle risposte e dei messaggi dei bot · predefinita: English"},
-      "defaultVolume": {"label": "Volume predefinito", "hint": "0–100"},
-      "playlistLimit": {"label": "Limite playlist", "hint": "1–500 tracce"},
-      "secondsToWaitAfterQueueEmpties": {"label": "Auto-disconnect", "hint": "Secondi dopo la coda vuota · 0 = mai"},
-      "defaultQueuePageSize": {"label": "Pagina coda", "hint": "1–30 elementi"},
-      "leaveIfNoListeners": {"label": "Esci senza ascoltatori", "hint": "Lascia la vocale quando resta da solo"},
-      "queueAddResponseEphemeral": {"label": "Risposta privata", "hint": "Conferma di accodamento visibile solo a chi la richiede"},
-      "autoAnnounceNextSong": {"label": "Annuncia il prossimo brano", "hint": "Messaggio automatico alla traccia successiva"},
-      "turnDownVolumeWhenPeopleSpeak": {"label": "Abbassa al parlato", "hint": "Riduce la musica quando qualcuno parla"},
-      "turnDownVolumeWhenPeopleSpeakTarget": {"label": "Volume durante il parlato", "hint": "0–100"}
+      "locale": {
+        "label": "Lingua del bot",
+        "hint": "Lingua delle risposte e dei messaggi dei bot · predefinita: English"
+      },
+      "defaultVolume": {
+        "label": "Volume predefinito",
+        "hint": "0–100"
+      },
+      "playlistLimit": {
+        "label": "Limite playlist",
+        "hint": "1–500 tracce"
+      },
+      "secondsToWaitAfterQueueEmpties": {
+        "label": "Auto-disconnect",
+        "hint": "Secondi dopo la coda vuota · 0 = mai"
+      },
+      "defaultQueuePageSize": {
+        "label": "Pagina coda",
+        "hint": "1–30 elementi"
+      },
+      "leaveIfNoListeners": {
+        "label": "Esci senza ascoltatori",
+        "hint": "Lascia la vocale quando resta da solo"
+      },
+      "queueAddResponseEphemeral": {
+        "label": "Risposta privata",
+        "hint": "Conferma di accodamento visibile solo a chi la richiede"
+      },
+      "autoAnnounceNextSong": {
+        "label": "Annuncia il prossimo brano",
+        "hint": "Messaggio automatico alla traccia successiva"
+      },
+      "turnDownVolumeWhenPeopleSpeak": {
+        "label": "Abbassa al parlato",
+        "hint": "Riduce la musica quando qualcuno parla"
+      },
+      "turnDownVolumeWhenPeopleSpeakTarget": {
+        "label": "Volume durante il parlato",
+        "hint": "0–100"
+      }
     }
   },
   "groups": {
@@ -279,6 +309,64 @@
       "ok": "OK",
       "partial": "Parziale",
       "failed": "Fallita"
+    },
+    "metricPaid": "A pagamento",
+    "metricCoupons": "Coupon attivi",
+    "plans": {
+      "manage": "Gestisci piano",
+      "expires": "scade il {date}",
+      "expired": "scaduto",
+      "tier": "Piano",
+      "billing": "Fatturazione",
+      "expiry": "Scadenza",
+      "coupon": "Coupon",
+      "plusMonth": "+1 mese",
+      "plusYear": "+1 anno",
+      "noExpiry": "Nessuna scadenza",
+      "price": "Prezzo",
+      "note": "Nota interna",
+      "notePlaceholder": "Es. pagato con bonifico il 10/10",
+      "save": "Salva piano",
+      "cancel": "Annulla",
+      "saved": "Piano di {name} aggiornato: {plan}.",
+      "confirmDowngrade": "Ridurre il piano? I bot non inclusi smettono di rispondere e i limiti si applicano subito."
+    },
+    "coupons": {
+      "kicker": "COUPON",
+      "title": "Coupon",
+      "text": "I coupon si applicano quando assegni un piano a un server. Quelli pubblici compaiono come promozione nella pagina prezzi.",
+      "code": "Codice",
+      "type": "Tipo",
+      "percent": "Percentuale",
+      "amount": "Importo fisso (€)",
+      "value": "Valore",
+      "billing": "Fatturazione",
+      "billingAny": "Qualsiasi",
+      "maxRedemptions": "Utilizzi massimi",
+      "validFrom": "Valido dal",
+      "validUntil": "Valido fino al",
+      "description": "Descrizione",
+      "tiers": "Piani (nessuno = tutti i piani a pagamento)",
+      "public": "Mostra nella pagina prezzi",
+      "create": "Crea coupon",
+      "empty": "Nessun coupon.",
+      "allPlans": "Tutti i piani a pagamento",
+      "uses": "{count} utilizzi / {max}",
+      "unlimited": "illimitati",
+      "active": "Attivo",
+      "inactive": "Disattivato",
+      "publicTag": "Pubblico",
+      "activate": "Attiva",
+      "deactivate": "Disattiva",
+      "show": "Mostra nei prezzi",
+      "hide": "Nascondi dai prezzi",
+      "delete": "Elimina",
+      "confirmDelete": "Eliminare il coupon {code}?",
+      "created": "Coupon {code} creato.",
+      "updated": "Coupon aggiornato.",
+      "deleted": "Coupon eliminato.",
+      "invalidCode": "Il codice deve avere 3-32 lettere, cifre, \"_\" o \"-\".",
+      "invalidValue": "Inserisci un valore intero (percentuale da 1 a 100, importo in euro da 1)."
     }
   },
   "errors": {
@@ -287,5 +375,47 @@
     "rateLimited": "Troppe modifiche ravvicinate: riprova tra poco.",
     "unavailable": "Servizio momentaneamente non disponibile. Riprova tra poco.",
     "notFound": "Elemento non trovato."
+  },
+  "plans": {
+    "tierLabel": {
+      "FREE": "Free",
+      "TIER1": "Livello 1 · Plus",
+      "TIER2": "Livello 2 · Pro",
+      "TIER3": "Livello 3 · Brand"
+    },
+    "short": {
+      "FREE": "Free",
+      "TIER1": "Plus",
+      "TIER2": "Pro",
+      "TIER3": "Brand"
+    },
+    "billing": {
+      "MONTHLY": "Mensile",
+      "YEARLY": "Annuale",
+      "GIFT": "Omaggio / prova"
+    }
+  },
+  "plan": {
+    "eyebrow": "PIANO",
+    "seePlans": "Vedi i piani",
+    "expired": "Il piano {plan} è scaduto: valgono i limiti Free.",
+    "validUntil": "Valido fino al {date}.",
+    "free": "Piano gratuito. Per usare più bot insieme, il 24/7 e limiti più alti contattami dalla pagina prezzi.",
+    "noExpiry": "Piano attivo, senza scadenza.",
+    "meterBots": "Bot del server inclusi nel piano",
+    "meterGroups": "Gruppi salvati",
+    "limitPlaylist": "Brani importati per playlist",
+    "tracks": "{count} brani",
+    "limitFavorites": "Preferiti",
+    "limitAlwaysOn": "24/7 (resta in vocale)",
+    "limitSupport": "Supporto prioritario",
+    "notIncluded": "non incluso nel piano",
+    "settingPlaylist": "Massimo {max} con il tuo piano.",
+    "settingAlwaysOn": "Il 24/7 richiede il piano {plan}: senza, i bot escono dai canali vuoti e attendono al massimo {max} secondi a fine coda.",
+    "alwaysOnRequired": "Restare in un canale vuoto (24/7) richiede il piano {plan}.",
+    "groupsNone": "Il piano {plan} non include gruppi salvati: con Plus o superiore puoi crearne.",
+    "groupsLimit": "Il piano {plan} consente {max} gruppi salvati: eliminane uno o passa a un piano superiore.",
+    "errorLimit": "Questa modifica supera i limiti del piano del server. Vedi i piani per sbloccarla.",
+    "botsOver": "Il piano include {max} bot: quelli in più ({count}) restano nel server ma rispondono solo con l’avviso del piano."
   }
 }

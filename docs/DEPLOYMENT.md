@@ -320,7 +320,7 @@ snapshot the currently installed configuration
   |
 stop every container of the project and verify none is running
   |
-back up worker SQLite databases + orchestrator groups (pre-deploy backup)
+back up worker SQLite databases + orchestrator state (pre-deploy backup)
   |
 install the new configuration, set MUSE_IMAGE, compose up
   |
@@ -373,7 +373,7 @@ Backups are stored in:
 
 They are root-only. Archives older than 14 days are removed automatically, except the ones referenced by `.deploy-state/previous-backup` and `.deploy-state/last-backup`.
 
-The audio cache is intentionally excluded. The orchestrator group file is included so X+Y layouts are restored together with a rollback.
+The audio cache is intentionally excluded. Every orchestrator state file (`groups.json`, `blocks.json`, `super-audit.json`, `platform-settings.json`, `plans.json` and their `.bak` copies) is included, so X+Y layouts, blocks, the status channel and server plans are restored together with a rollback.
 
 ## 13. Status and rollback
 
@@ -405,7 +405,7 @@ Rollback can also be launched through GitHub Actions -> **Rollback production** 
 sudo docker compose --project-name muse --project-directory /srv/docker/muse \
   --env-file /srv/docker/muse/.env -f /srv/docker/muse/docker-compose.yml stop
 sudo docker ps --filter label=com.docker.compose.project=muse   # must be empty
-sudo sh -c 'cd /srv/docker/muse && tar -czf "backups/muse-manual-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" data/bot-0*/db.sqlite* data/orchestrator/groups.json'
+sudo sh -c 'cd /srv/docker/muse && tar -czf "backups/muse-manual-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" data/bot-0*/db.sqlite* data/orchestrator/*.json*'
 # Optional: restore a chosen archive (removes newer state):
 #   sudo tar -C /srv/docker/muse --no-same-owner -xzf /srv/docker/muse/backups/muse-<timestamp>.tar.gz
 #   sudo chown -R 10001:10001 /srv/docker/muse/data

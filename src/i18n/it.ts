@@ -9,6 +9,14 @@ export const IT_MESSAGES: MessageDictionary = {
   blockedUser: 'Non puoi usare questo bot.',
   dmNotAllowed: 'non puoi usare questo bot nei messaggi privati',
   notInVoiceChannel: 'devi essere in un canale vocale',
+
+  // Plans
+  planBotNotIncluded: 'Il piano {plan} di questo server include {count} bot Muse: usa {bots}.{link}',
+  planBotNotIncludedNoList: 'Il piano {plan} di questo server include {count} bot Muse e questo non è tra quelli.{link}',
+  planPricingLink: ' Vedi i piani: {url}',
+  planFavoritesLimit: 'il piano {plan} di questo server consente {max} preferiti',
+  planPlaylistLimit: 'il piano {plan} di questo server importa al massimo {max} brani per playlist',
+  planAlwaysOnRequired: 'la modalità 24/7 (restare in un canale vuoto o attendere più di {max} secondi a fine coda) richiede il piano {required}',
   unknownSubcommand: 'sottocomando sconosciuto',
   notConnected: 'non sono connesso',
   nothingIsPlaying: 'non c\'è niente in riproduzione',
