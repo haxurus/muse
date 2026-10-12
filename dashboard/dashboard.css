@@ -671,6 +671,18 @@ select {
 .security-list dt .icon { color: var(--ok); }
 .security-list dd { margin: 6px 0 0 26px; color: var(--muted); font-size: .9rem; line-height: 1.6; }
 
+.faq-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 64px; align-items: start; }
+.faq-layout .section-head { margin-bottom: 0; }
+.faq-list { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); }
+.faq-list details + details { border-top: 1px solid var(--line); }
+.faq-list summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; cursor: pointer; list-style: none; }
+.faq-list summary::-webkit-details-marker { display: none; }
+.faq-list summary::after { content: "+"; flex: 0 0 auto; color: var(--accent); font-size: 1.2rem; line-height: 1; }
+.faq-list details[open] summary::after { content: "\2212"; }
+.faq-list summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+.faq-list h3 { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.45; letter-spacing: -.01em; }
+.faq-list p { margin: 0; padding: 0 22px 20px; color: var(--muted); font-size: .92rem; line-height: 1.65; }
+
 .cta-section { border-bottom: 0; }
 .cta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 40px; align-items: center; padding: 48px; border: 1px solid var(--accent-line); border-radius: var(--radius-lg); background: radial-gradient(ellipse 70% 120% at 100% 0%, var(--accent-glow-strong), transparent 60%), radial-gradient(ellipse 50% 90% at 0% 100%, var(--fuchsia-glow), transparent 65%), var(--surface); }
 .cta h2 { font-size: clamp(1.8rem, 3.4vw, 2.6rem); letter-spacing: -.035em; }
@@ -697,7 +709,7 @@ select {
   .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pipeline { grid-template-columns: repeat(2, 1fr); row-gap: 36px; }
   .pipeline::before { display: none; }
-  .steps-layout, .security-layout { grid-template-columns: 1fr; gap: 36px; }
+  .steps-layout, .security-layout, .faq-layout { grid-template-columns: 1fr; gap: 36px; }
   .steps-layout .section-head { position: static; }
   .cta { grid-template-columns: 1fr; }
 }

@@ -253,7 +253,18 @@ The web UI is bilingual (Italian and English), following Sentinel:
 
 The app views (`/<lang>/dashboard`, `/<lang>/server/:guildId`, `/<lang>/super`) and `/<lang>/development` are served with `X-Robots-Tag: noindex, nofollow` and a `robots` meta tag; only the public home pages `/it` and `/en` are indexable. All HTML responses carry the same security headers and CSP. Navigation between views uses the History API; unknown paths are `404`. Responses that arrive after the user switched server are ignored.
 
-The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers. Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
+The CSP stays strict: `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `img-src 'self' https://cdn.discordapp.com data:`, no inline scripts, styles or event handlers (the home page's `application/ld+json` block is data, never executed). Every Discord-provided value is rendered with `textContent`; images are only loaded from `https://cdn.discordapp.com/`.
+
+### Search engines and link previews
+
+The home pages (`/en`, `/it`) are the only indexable views; English is the default (`/` redirects by `Accept-Language`, anything but Italian goes to `/en`, and `x-default` points at `/`). They carry:
+
+- a keyword title and description per language (Discord music bot, multiple voice channels, YouTube / Spotify / SoundCloud), canonical and `hreflang` alternates;
+- Open Graph and Twitter card tags with `dashboard/og-image.png` (1200x630) and the language as `og:locale`;
+- JSON-LD (`src/dashboard/seo.ts`): `WebSite`, `SoftwareApplication` and a `FAQPage` built from the same dictionary entries as the visible FAQ section;
+- favicons: `/favicon.ico`, `/favicon.svg`, `/apple-touch-icon.png`.
+
+`/robots.txt` allows everything except `/api/`, `/auth/`, `/add` and `/invite/` and points at `/sitemap.xml`, which lists both home pages with their `hreflang` alternates. Both are generated from `MUSE_DASHBOARD_PUBLIC_URL` at startup. App views stay `noindex` through `X-Robots-Tag`. After a deploy, submit `https://<public host>/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
 
 ### Fonts
 

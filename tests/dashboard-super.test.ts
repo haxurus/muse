@@ -737,7 +737,7 @@ describe('dashboard static pages and fonts', () => {
       expect(csp, path).not.toContain('unsafe-inline');
       expect(page.headers['x-frame-options'], path).toBe('DENY');
       // No inline scripts, inline styles or inline event handlers.
-      expect(page.text, path).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>|\sstyle="|\son[a-z]+="/u);
+      expect(page.text, path).not.toMatch(/<script(?![^>]*\b(?:src=|type="application\/ld\+json"))[^>]*>|\sstyle="|\son[a-z]+="/u);
     }
   });
 

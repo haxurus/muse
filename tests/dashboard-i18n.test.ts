@@ -15,6 +15,7 @@ import {
   renderTemplate,
 } from '../src/dashboard/i18n.js';
 import type OrchestratorClient from '../src/dashboard/orchestrator-client.js';
+import {homeStructuredData} from '../src/dashboard/seo.js';
 import DashboardServer, {NEW_SERVER_ANCHOR} from '../src/dashboard/server.js';
 import SessionStore from '../src/dashboard/session-store.js';
 
@@ -154,9 +155,11 @@ describe('template substitution', () => {
     for (const file of ['home.html', 'index.html', 'development.html']) {
       const template = await readFile(new URL(`../dashboard/${file}`, import.meta.url), 'utf8');
       for (const locale of LOCALES) {
-        const html = renderPage(template, locale, '', {origin: PUBLIC_URL});
+        const html = renderPage(template, locale, '', {origin: PUBLIC_URL}, {structuredData: homeStructuredData(locale, PUBLIC_URL)});
         expect(html, `${file} ${locale}`).toContain(`<html lang="${locale}">`);
-        expect(html, `${file} ${locale}`).not.toMatch(/\{\{|\}\}/u);
+        // JSON-LD legitimately contains "}}" (nested objects); only the template text is checked.
+        const templateText = html.replace(/<script type="application\/ld\+json">[^<]*<\/script>/u, '');
+        expect(templateText, `${file} ${locale}`).not.toMatch(/\{\{|\}\}/u);
       }
     }
   });
@@ -247,14 +250,14 @@ describe('localized routes', () => {
       expect(page.text).toContain(`href="/add?lang=${locale}"`);
       expect(page.text).toContain(`href="/${locale}/dashboard"`);
       expect(page.text).toContain(`href="/${locale}" lang="${locale}" hreflang="${locale}" data-lang-link="${locale}" class="is-active" aria-current="page"`);
-      expect(page.text).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>|\sstyle="|\son[a-z]+="/u);
+      expect(page.text).not.toMatch(/<script(?![^>]*\b(?:src=|type="application\/ld\+json"))[^>]*>|\sstyle="|\son[a-z]+="/u);
     }
 
     expect(italian.text).toContain('<span>Cinque bot.</span><span>Una dashboard.</span><span>La tua musica.</span>');
     expect(italian.text).toContain('Aggiungi a Discord');
     expect(english.text).toContain('<span>Five bots.</span><span>One dashboard.</span><span>Your music.</span>');
     expect(english.text).toContain('Add to Discord');
-    expect(english.text).toContain('<title>Muse · Self-hosted Discord music bots</title>');
+    expect(english.text).toContain('<title>Muse · Discord Music Bot for Multiple Voice Channels</title>');
     expect(english.text).not.toContain('Cinque bot.');
     expect(english.text).toContain('href="/it" lang="it" hreflang="it" data-lang-link="it">IT</a>');
   });
