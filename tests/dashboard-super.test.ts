@@ -224,7 +224,7 @@ describe('bot invite links', () => {
     expect(location.searchParams.get('client_id')).toBe(BOT_ID);
     expect(location.searchParams.get('scope')).toBe('bot applications.commands');
     // 3230720 plus Change Nickname (67108864) for the Brand plan.
-    expect(location.searchParams.get('permissions')).toBe('70338560');
+    expect(location.searchParams.get('permissions')).toBe('70339584');
   });
 
   it('returns 404 for malformed or unknown worker ids', async () => {
