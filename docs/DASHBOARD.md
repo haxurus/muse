@@ -66,7 +66,7 @@ The language is `?lang=` when valid, otherwise the `Accept-Language` preference 
 
 - no session: `302 /auth/discord?lang=<lang>` (the login starts; afterwards the user lands on `/<lang>/dashboard`);
 - signed in (Muse is public: any Discord user can add the bots): the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
-  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=70338560`
+  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=70339584`
   (View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak, Change Nickname; the last one is used by the Brand plan).
 
 Which bots answer in a server is decided by its plan (the Free plan includes the first bot); the blocklist still makes the bots leave a blocked server or one added by a blocked user. Servers that added the bots before the Change Nickname permission was part of the invite must grant it by hand to use the Brand plan.

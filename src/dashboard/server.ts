@@ -98,7 +98,7 @@ const COUPON_PATH = /^[\w-]{3,32}$/u;
  * Bot invite permissions: View Channels, Send Messages, Embed Links, Read Message History,
  * Connect, Speak and Change Nickname (Brand plan: the bot's own name and banner).
  */
-export const BOT_INVITE_PERMISSIONS = '70338560';
+export const BOT_INVITE_PERMISSIONS = '70339584';
 
 export const botInviteUrl = (botId: string): string =>
   `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(botId)}&scope=bot+applications.commands&permissions=${BOT_INVITE_PERMISSIONS}`;
