@@ -20,13 +20,26 @@ Implemented:
 - Discord OAuth dashboard with guild-level authorization;
 - one/subset/all worker settings management from the dashboard;
 - persistent per-guild worker groups with arbitrary overlapping membership;
-- super console backend: fleet overview, forced guild leave, guild/user blocks and an audit log (see `SUPER_CONSOLE.md`).
+- super console backend: fleet overview, forced guild leave, guild/user blocks and an audit log (see `SUPER_CONSOLE.md`);
+- per-guild plans (bots, groups and limits; see `SUPER_CONSOLE.md`);
+- playback pool: automatic voice-channel bot assignment with short reservations (below).
+
+## Playback pool
+
+Enabled by `MUSE_PLAYBACK_POOL=true` on the orchestrator and on every worker (the production Compose file sets it, `MUSE_PLAYBACK_POOL=false` in `.env` turns it off). It supersedes the per-bot playback pilots.
+
+One voice channel, one bot: a player command (`/play`, `/pause`, `/skip`, `/queue`, `/shuffle`, ...) sent to **any** Muse bot of a server is served by the bot of the requester's voice channel.
+
+1. The command-receiving bot handles it locally when it is already in that channel.
+2. Otherwise it asks `POST /v1/playback/assign {guildId, voiceChannelId, intent}` (its own control token). The orchestrator answers with, in order: the bot connected to that channel; a bot reserved for it; for `/play` only, a free bot that is in the server and included in its plan (the receiving bot first, then configuration order). No free bot gives `409 ALL_BOTS_BUSY` and the user is told every bot is busy.
+3. If the answer is the receiving bot, it runs the command locally with every feature. If it is another bot, `/play`, `/pause`, `/resume`, `/skip`/`/next`, `/stop`, `/disconnect`, `/queue` and `/volume` are relayed through `POST /v1/playback` (the orchestrator routes to the same assignment and checks which bot answers); the other player commands reply with a mention of the bot to use. A bot playing in another channel never applies a command from a user in a different channel.
+4. If the orchestrator cannot answer, the receiving bot falls back to local handling (the previous behaviour).
+
+Reservations last 90 seconds (enough for the chosen bot to join; afterwards its voice state is the truth), are refreshed by each `/play` and end when a relayed `/stop` or `/disconnect` leaves the bot free. They live only in the orchestrator's memory. Worker statuses used for assignment are cached for 1.5 seconds.
 
 Not implemented yet:
 
-- automatic voice-channel worker assignment;
-- player reservations/leases;
-- per-guild quotas.
+- per-guild quotas beyond the plan limits.
 
 ## Container topology
 

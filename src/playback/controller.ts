@@ -1,7 +1,15 @@
-import type {Interaction} from 'discord.js';
+import type {ChatInputCommandInteraction, Interaction} from 'discord.js';
 import type Config from '../services/config.js';
 import {HttpError} from '../control/http.js';
-import {PLAYBACK_ACTIONS, isPlaybackWorkerEnabled, parsePlaybackRequest, resolveOrchestratorPlaybackUrl} from './protocol.js';
+import {
+  PLAYBACK_ACTIONS,
+  isPlaybackPoolEnabled,
+  isPlaybackWorkerEnabled,
+  parsePlaybackRequest,
+  resolveOrchestratorPlaybackUrl,
+  type PlaybackAction,
+  type PlaybackRequest,
+} from './protocol.js';
 import {sendPlayback} from './transport.js';
 import {DEFAULT_LOCALE, localizeEnglishMessage, t, type Locale} from '../i18n/index.js';
 
@@ -9,13 +17,34 @@ export type PlaybackLocaleResolver = (guildId: string | null) => Promise<Locale>
 
 const englishOnly: PlaybackLocaleResolver = async () => DEFAULT_LOCALE;
 
+/** The relay request for a slash command run in a guild by a user in `voiceChannelId`. */
+export const buildPlaybackRequest = (interaction: ChatInputCommandInteraction, action: PlaybackAction, voiceChannelId: string): PlaybackRequest => parsePlaybackRequest({
+  requestId: interaction.id,
+  guildId: interaction.guildId,
+  userId: interaction.user.id,
+  voiceChannelId,
+  textChannelId: interaction.channelId,
+  action,
+  ...(action === 'play' ? {
+    query: interaction.options.getString('query'),
+    immediate: interaction.options.getBoolean('immediate') ?? false,
+    shuffle: interaction.options.getBoolean('shuffle') ?? false,
+    split: interaction.options.getBoolean('split') ?? false,
+    skip: interaction.options.getBoolean('skip') ?? false,
+  } : {}),
+  ...(action === 'skip' ? {amount: interaction.options.getInteger('number') ?? 1} : {}),
+  ...(action === 'queue' ? {page: interaction.options.getInteger('page') ?? 1, ...(interaction.options.getInteger('page-size') === null ? {} : {pageSize: interaction.options.getInteger('page-size')})} : {}),
+  ...(action === 'volume' ? {volume: interaction.options.getInteger('level') ?? 100} : {}),
+});
+
 /** Keep the real Discord interaction and its token inside the command-receiving worker. */
 export const handlePlaybackInteraction = async (
   interaction: Interaction,
   config: Config,
   resolveLocale: PlaybackLocaleResolver = englishOnly,
 ): Promise<boolean> => {
-  if (!isPlaybackWorkerEnabled(config.WORKER_ID)) {
+  // The playback pool (MUSE_PLAYBACK_POOL) supersedes the per-bot pilots.
+  if (!isPlaybackWorkerEnabled(config.WORKER_ID) || isPlaybackPoolEnabled()) {
     return false;
   }
 
@@ -45,24 +74,7 @@ export const handlePlaybackInteraction = async (
     return true;
   }
 
-  const request = parsePlaybackRequest({
-    requestId: interaction.id,
-    guildId: interaction.guildId,
-    userId: interaction.user.id,
-    voiceChannelId,
-    textChannelId: interaction.channelId,
-    action,
-    ...(action === 'play' ? {
-      query: interaction.options.getString('query'),
-      immediate: interaction.options.getBoolean('immediate') ?? false,
-      shuffle: interaction.options.getBoolean('shuffle') ?? false,
-      split: interaction.options.getBoolean('split') ?? false,
-      skip: interaction.options.getBoolean('skip') ?? false,
-    } : {}),
-    ...(action === 'skip' ? {amount: interaction.options.getInteger('number') ?? 1} : {}),
-    ...(action === 'queue' ? {page: interaction.options.getInteger('page') ?? 1, ...(interaction.options.getInteger('page-size') === null ? {} : {pageSize: interaction.options.getInteger('page-size')})} : {}),
-    ...(action === 'volume' ? {volume: interaction.options.getInteger('level') ?? 100} : {}),
-  });
+  const request = buildPlaybackRequest(interaction, action as PlaybackAction, voiceChannelId);
   try {
     const result = await sendPlayback(resolveOrchestratorPlaybackUrl(), config.CONTROL_TOKEN, request, config.WORKER_ID);
     await interaction.editReply({content: localizeEnglishMessage(locale, result.message), allowedMentions: {parse: []}});

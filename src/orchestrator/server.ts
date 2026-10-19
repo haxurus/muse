@@ -13,6 +13,8 @@ import {PlatformSettingsStore} from './platform-store.js';
 import {PlanStore} from './plan-store.js';
 import {PLANS} from '../plans/plans.js';
 import {MAX_BRANDING_BODY_BYTES} from '../plans/branding.js';
+import {isPlaybackPoolEnabled} from '../playback/protocol.js';
+import PlaybackPool from './playback-pool.js';
 import type {WorkerPlatformConfig} from '../control/types.js';
 
 type WorkerResult<T> = {
@@ -33,6 +35,7 @@ export default class OrchestratorServer {
   private readonly groups: GuildGroupStore;
   private readonly superConsole: SuperConsole;
   private readonly platform: PlatformSettingsStore;
+  private readonly pool?: PlaybackPool;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
@@ -49,6 +52,13 @@ export default class OrchestratorServer {
       this.platform,
       new PlanStore(config.plansFile ?? path.join(stateDirectory, 'plans.json')),
     );
+    if (isPlaybackPoolEnabled()) {
+      this.pool = new PlaybackPool(
+        config.workers,
+        async () => this.workerStatuses(),
+        (guildId, statuses) => this.superConsole.plans.allowedWorkerIds(guildId, statuses),
+      );
+    }
   }
 
   async start(): Promise<void> {
@@ -93,6 +103,10 @@ export default class OrchestratorServer {
     try {
       if (request.method === 'GET' && request.url === '/health') {
         sendJson(response, 200, {ok: true, workersConfigured: this.workers.length});
+        return;
+      }
+
+      if (this.pool && await this.pool.handle(request, response)) {
         return;
       }
 

@@ -10,6 +10,8 @@ x-worker-environment: &worker-environment
   YT_DLP_AUTO_UPDATE: "false"
   YT_DLP_COOKIES_PATH: /run/secrets/youtube_cookies
   YT_DLP_POT_PROVIDER_URL: http://muse-pot:4416
+  # Playback pool: player commands follow the bot of the user's voice channel.
+  MUSE_PLAYBACK_POOL: ${MUSE_PLAYBACK_POOL:-true}
 
 x-worker-common: &worker-common
   image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
@@ -136,6 +138,7 @@ services:
       MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       MUSE_WORKERS_FILE: /config/workers.json
       MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json
+      MUSE_PLAYBACK_POOL: ${MUSE_PLAYBACK_POOL:-true}
     secrets:
       - orchestrator_api_token
       - control_token_01
