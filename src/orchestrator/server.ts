@@ -12,6 +12,7 @@ import {AuditStore, BlockStore} from './super-store.js';
 import {PlatformSettingsStore} from './platform-store.js';
 import {PlanStore} from './plan-store.js';
 import {PLANS} from '../plans/plans.js';
+import {MAX_BRANDING_BODY_BYTES} from '../plans/branding.js';
 import type {WorkerPlatformConfig} from '../control/types.js';
 
 type WorkerResult<T> = {
@@ -138,6 +139,21 @@ export default class OrchestratorServer {
         && segments[4] === 'settings'
         && request.method === 'PATCH') {
         sendJson(response, 200, await this.updateGuildWorkers(segments[2], await readJsonBody(request)));
+        return;
+      }
+
+      if (segments.length === 4
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'branding'
+        && request.method === 'PUT') {
+        assertGuildId(segments[2]);
+        const body = await readJsonBody(request, MAX_BRANDING_BODY_BYTES);
+        sendJson(response, 200, {
+          guildId: segments[2],
+          bot: await this.superConsole.plans.updateBranding(segments[2], body, await this.workerStatuses()),
+          branding: this.superConsole.plans.branding(segments[2]),
+        });
         return;
       }
 

@@ -5,6 +5,7 @@ import {HttpError} from '../control/http.js';
 import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
 import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
+import {MAX_BRANDING_BODY_BYTES, sanitizeBrandingProfile} from '../plans/branding.js';
 import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
 import OrchestratorClient, {BlockKind, GuildSettingsUpdate, StatusChannelUpdate, SuperActor} from './orchestrator-client.js';
 import {homeStructuredData, robotsTxt, sitemapXml} from './seo.js';
@@ -43,7 +44,6 @@ const PRICING_TEMPLATE = readFileSync(path.join(STATIC_ROOT, 'pricing.html'), 'u
 const TEMPLATES = {
   home: readFileSync(path.join(STATIC_ROOT, 'home.html'), 'utf8'),
   app: readFileSync(path.join(STATIC_ROOT, 'index.html'), 'utf8'),
-  development: readFileSync(path.join(STATIC_ROOT, 'development.html'), 'utf8'),
 };
 
 type PageName = keyof typeof TEMPLATES;
@@ -52,7 +52,6 @@ type PageName = keyof typeof TEMPLATES;
 const PAGE_PATHS: Record<PageName, string> = {
   home: '',
   app: '/dashboard',
-  development: '/development',
 };
 
 /** Every file the dashboard serves is loaded once at startup from this fixed allowlist. */
@@ -92,9 +91,11 @@ const MAX_MENTION_ROLES = 10;
 /** Coupon codes in URLs (normalized to upper case by the orchestrator). */
 const COUPON_PATH = /^[\w-]{3,32}$/u;
 
-/** Bot invite permissions: View Channels, Send Messages, Read Message History, Connect, Speak. */
-// View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak.
-export const BOT_INVITE_PERMISSIONS = '3230720';
+/**
+ * Bot invite permissions: View Channels, Send Messages, Embed Links, Read Message History,
+ * Connect, Speak and Change Nickname (Brand plan: the bot's own name and banner).
+ */
+export const BOT_INVITE_PERMISSIONS = '70338560';
 
 export const botInviteUrl = (botId: string): string =>
   `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(botId)}&scope=bot+applications.commands&permissions=${BOT_INVITE_PERMISSIONS}`;
@@ -117,6 +118,7 @@ const isAppRoute = (segments: string[]): boolean =>
   (segments.length === 1 && (segments[0] === 'dashboard' || segments[0] === 'super'))
   || (segments.length === 2 && segments[0] === 'server' && SNOWFLAKE.test(segments[1]));
 
+/** The old "still in development" notice; its links now lead to the bot invites. */
 const isDevelopmentRoute = (segments: string[]): boolean =>
   segments.length === 1 && segments[0] === 'development';
 
@@ -219,7 +221,6 @@ export default class DashboardServer {
     this.pages = {
       home: render('home'),
       app: render('app'),
-      development: render('development'),
     };
     this.crawlerFiles = new Map([
       ['/robots.txt', {contentType: 'text/plain; charset=utf-8', body: Buffer.from(robotsTxt(origin), 'utf8'), cacheControl: IMAGE_CACHE}],
@@ -295,6 +296,12 @@ export default class DashboardServer {
         return;
       }
 
+      if (request.method === 'GET' && pathname === '/api/bots') {
+        this.auth.requireSession(request);
+        sendJson(response, 200, {bots: await this.inviteBots()});
+        return;
+      }
+
       if (request.method === 'GET' && pathname === '/api/session') {
         await this.sessionResponse(request, response);
         return;
@@ -316,6 +323,11 @@ export default class DashboardServer {
 
         if (segments.length === 3 && request.method === 'PATCH') {
           await this.updateGuild(request, response, guildId);
+          return;
+        }
+
+        if (segments.length === 4 && segments[3] === 'branding' && request.method === 'PUT') {
+          await this.updateBranding(request, response, guildId);
           return;
         }
 
@@ -498,7 +510,7 @@ export default class DashboardServer {
     }
 
     if (isDevelopmentRoute(rest)) {
-      this.sendPage(response, 'development', locale);
+      redirect(response, new URL(`/add?lang=${locale}`, this.config.publicUrl).toString());
       return true;
     }
 
@@ -506,33 +518,25 @@ export default class DashboardServer {
   }
 
   /**
-   * "Add to Discord" from the public home page. Only the super admin can add the
-   * bots to new servers, so they land on the dashboard invite card; everybody else
-   * (anonymous or signed in) sees the development notice.
+   * "Add to Discord" from the public pages: signed-in users land on the dashboard invite
+   * card, anonymous visitors sign in with Discord first.
    */
   private add(request: IncomingMessage, response: ServerResponse, locale: Locale): void {
-    const session = this.auth.currentSession(request);
-    const superAdmin = session !== undefined && this.auth.isSuperAdmin(session);
-    const target = superAdmin
+    const target = this.auth.currentSession(request)
       ? `${localizedPath(locale, DASHBOARD_PATH)}#${NEW_SERVER_ANCHOR}`
-      : localizedPath(locale, '/development');
+      : `/auth/discord?lang=${locale}`;
     redirect(response, new URL(target, this.config.publicUrl).toString());
   }
 
   /**
-   * Bot invite links. Anonymous visitors start the Discord login, signed-in users who
-   * are not the super admin see the development notice, and the super admin is sent
-   * to Discord's bot authorization page for the requested worker's application.
+   * Bot invite links. Anonymous visitors start the Discord login; signed-in users are sent
+   * to Discord's bot authorization page for the requested worker's application (the
+   * blocklist still makes a bot leave a blocked server or one added by a blocked user).
    */
   private async invite(request: IncomingMessage, response: ServerResponse, workerId: string, locale: Locale): Promise<void> {
     const session = this.auth.currentSession(request);
     if (!session) {
       redirect(response, new URL(`/auth/discord?lang=${locale}`, this.config.publicUrl).toString());
-      return;
-    }
-
-    if (!this.auth.isSuperAdmin(session)) {
-      redirect(response, new URL(localizedPath(locale, '/development'), this.config.publicUrl).toString());
       return;
     }
 
@@ -582,7 +586,7 @@ export default class DashboardServer {
 
     if (request.method === 'GET' && route === 'bots') {
       this.requireSuperAdmin(request);
-      sendJson(response, 200, {bots: await this.superBots()});
+      sendJson(response, 200, {bots: await this.inviteBots()});
       return;
     }
 
@@ -666,7 +670,8 @@ export default class DashboardServer {
     sendJson(response, 404, {error: 'not found'});
   }
 
-  private async superBots() {
+  /** Bots that can be invited (dashboard "Add the bots" card). */
+  private async inviteBots() {
     const {workers} = await this.orchestrator.workers();
     return workers
       .filter(worker => WORKER_ID.test(worker.workerId))
@@ -966,6 +971,33 @@ export default class DashboardServer {
         body: await this.orchestrator.updateGuildGroup(guildId, groupId, {
           ...(body.name === undefined ? {} : {name: body.name}),
           ...(workerIds === undefined ? {} : {workerIds}),
+        }),
+      };
+    });
+  }
+
+  /** Brand plan: one bot's nickname and/or banner; the orchestrator checks the plan. */
+  private async updateBranding(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
+    await this.mutate(request, response, {action: 'branding.update', guildId}, async audit => {
+      const input = await readJsonBody(request, MAX_BRANDING_BODY_BYTES);
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        throw new HttpError(400, 'branding body must be an object');
+      }
+
+      const body = input as {workerId?: unknown; nickname?: unknown; banner?: unknown};
+      if (typeof body.workerId !== 'string' || !WORKER_ID.test(body.workerId)) {
+        throw new HttpError(400, 'workerId must be a bot id');
+      }
+
+      // Same rules as the worker: the browser gets a clear 400 before any upstream call.
+      const profile = sanitizeBrandingProfile({nick: body.nickname, banner: body.banner});
+      audit.workerIds = [body.workerId];
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.setGuildBranding(guildId, {
+          workerId: body.workerId,
+          ...(profile.nick === undefined ? {} : {nickname: profile.nick}),
+          ...(profile.banner === undefined ? {} : {banner: profile.banner}),
         }),
       };
     });

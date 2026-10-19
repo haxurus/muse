@@ -90,7 +90,7 @@
               <span class="kicker" data-i18n="login.newServerKicker"></span>
               <h2 data-i18n="login.newServerTitle"></h2>
               <p data-i18n="login.newServerText"></p>
-              <a class="button button-secondary button-lg" href="{{prefix}}/development" data-i18n="login.newServerButton"></a>
+              <a class="button button-secondary button-lg" href="/add?lang={{lang}}" data-i18n="login.newServerButton"></a>
             </div>
           </div>
         </div>
@@ -381,6 +381,29 @@
             </div>
             <div class="plan-meters" id="plan-meters"></div>
             <dl class="plan-limits" id="plan-limits"></dl>
+          </section>
+          <section class="panel brand-panel" id="brand-panel" hidden>
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="brand.eyebrow"></p>
+                <h2 data-i18n="brand.title"></h2>
+                <p class="muted" id="brand-text"></p>
+              </div>
+              <span class="tag tag-premium" data-i18n="plans.short.TIER3"></span>
+            </div>
+            <div class="notice" id="brand-message" hidden></div>
+            <a class="button button-secondary button-sm" id="brand-pricing" hidden data-i18n="plan.seePlans"></a>
+            <div class="brand-editor" id="brand-editor" hidden>
+              <div class="table-list" id="brand-bots"></div>
+              <div class="brand-banner">
+                <label class="field"><span data-i18n="brand.banner"></span><input type="file" id="brand-banner-file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+                <img class="brand-banner-preview" id="brand-banner-preview" alt="" hidden>
+                <div class="brand-actions">
+                  <button class="button button-primary button-sm" type="button" id="brand-banner-upload" data-i18n="brand.bannerUpload" disabled></button>
+                  <button class="button button-secondary button-sm" type="button" id="brand-banner-remove" data-i18n="brand.bannerRemove" disabled></button>
+                </div>
+              </div>
+            </div>
           </section>
           <section class="panel">
             <div class="panel-title">

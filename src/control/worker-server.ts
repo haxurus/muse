@@ -1,5 +1,5 @@
 import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
-import {Client} from 'discord.js';
+import {Client, DiscordAPIError, Routes} from 'discord.js';
 import Config from '../services/config.js';
 import PlayerManager from '../managers/player.js';
 import {getGuildSettings} from '../utils/get-guild-settings.js';
@@ -8,10 +8,18 @@ import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.
 import type PlaybackWorker from '../playback/worker.js';
 import {assertGuildId} from './snowflake.js';
 import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklist.js';
-import type {WorkerBlocklistResult, WorkerGuildMeta, WorkerLeaveGuildResult, WorkerStatus, WorkerStatusAnnounceResult} from './types.js';
+import type {
+  WorkerBlocklistResult,
+  WorkerBrandingResult,
+  WorkerGuildMeta,
+  WorkerLeaveGuildResult,
+  WorkerStatus,
+  WorkerStatusAnnounceResult,
+} from './types.js';
 import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
 import {buildGuildMeta} from '../status/guild-meta.js';
 import {MAX_ENTITLEMENTS_BODY_BYTES, assertSettingsWithinPlan, entitlements, sanitizeEntitlements} from '../plans/entitlements.js';
+import {MAX_BRANDING_BODY_BYTES, sanitizeBrandingProfile, type BrandingProfile} from '../plans/branding.js';
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -118,6 +126,11 @@ export default class WorkerControlServer {
         return;
       }
 
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'branding' && request.method === 'POST') {
+        sendJson(response, 200, await this.setBranding(segments[2], sanitizeBrandingProfile(await readJsonBody(request, MAX_BRANDING_BODY_BYTES))));
+        return;
+      }
+
       if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'meta' && request.method === 'GET') {
         sendJson(response, 200, this.guildMeta(segments[2]));
         return;
@@ -180,6 +193,49 @@ export default class WorkerControlServer {
     }
 
     return {workerId: this.config.WORKER_ID, guildId: guild.id, ...buildGuildMeta(guild)};
+  }
+
+  /**
+   * Brand plan: this bot's own nickname and banner in one guild (the plan is checked by the
+   * orchestrator). Only `PATCH /guilds/:guildId/members/@me` with `nick` and `banner` is sent.
+   */
+  private async setBranding(guildId: string, profile: BrandingProfile): Promise<WorkerBrandingResult> {
+    assertGuildId(guildId);
+    if (!this.client.isReady()) {
+      throw new HttpError(503, 'worker is not connected to Discord', 'NOT_READY');
+    }
+
+    if (!this.client.guilds.cache.has(guildId)) {
+      throw new HttpError(404, 'worker is not a member of that guild', 'NOT_IN_GUILD');
+    }
+
+    const body: BrandingProfile = {};
+    if (profile.nick !== undefined) {
+      body.nick = profile.nick;
+    }
+
+    if (profile.banner !== undefined) {
+      body.banner = profile.banner;
+    }
+
+    try {
+      await this.client.rest.patch(Routes.guildMember(guildId, '@me'), {body});
+    } catch (error: unknown) {
+      if (error instanceof DiscordAPIError) {
+        console.warn(`Worker ${this.config.WORKER_ID} could not update its profile in guild ${guildId} (${error.status} ${String(error.code)})`);
+        return {
+          workerId: this.config.WORKER_ID,
+          guildId,
+          ok: false,
+          error: error.status === 403 ? 'MISSING_PERMISSION' : 'DISCORD_REJECTED',
+          discordStatus: error.status,
+        };
+      }
+
+      throw error;
+    }
+
+    return {workerId: this.config.WORKER_ID, guildId, ok: true};
   }
 
   private async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {

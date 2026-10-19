@@ -112,14 +112,14 @@ export const redirect = (
   });
 };
 
-export const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
+export const readJsonBody = async (request: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> => {
   const chunks: Buffer[] = [];
   let size = 0;
 
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       throw new HttpError(413, 'request body too large');
     }
 

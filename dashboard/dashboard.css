@@ -265,14 +265,6 @@ select {
 .site-nav-lang { margin-left: auto; }
 .sidebar-foot .language-switcher { align-self: flex-start; }
 
-/* Development notice */
-.development-hero { flex: 1; display: grid; align-items: center; padding: 72px 0; }
-.development-card > * { max-width: 760px; }
-.development-card h1 { margin: 18px 0 20px; font-size: clamp(2.4rem, 5.5vw, 4.2rem); letter-spacing: -.045em; }
-.development-card p { max-width: 620px; margin-bottom: 10px; color: var(--text-2); font-size: 1.02rem; line-height: 1.7; }
-.development-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
-.development-home-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 32px; color: var(--muted); font-size: .86rem; }
-.development-home-link:hover { color: var(--text); }
 
 /* ==========================================================================
    Landing, server list & super console
@@ -353,6 +345,13 @@ select {
 .plan-editor .row-actions { justify-content: flex-end; }
 .coupon-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .coupon-wide { grid-column: 1 / -1; }
+.brand-editor { display: flex; flex-direction: column; gap: 16px; }
+.brand-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto auto; gap: 10px; align-items: center; padding: 12px 14px; }
+.brand-row-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.brand-row-name .mono { color: var(--muted); font-size: .76rem; }
+.brand-banner { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.brand-banner-preview { width: 100%; max-width: 600px; aspect-ratio: 5 / 2; object-fit: cover; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.brand-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .contacts-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .coupon-tiers { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; border: 0; color: var(--text-2); font-size: .84rem; }
 .coupon-tiers legend { margin-bottom: 6px; padding: 0; color: var(--text-2); font-size: .8rem; font-weight: 500; }
@@ -513,6 +512,8 @@ select {
   .block-forms { grid-template-columns: 1fr; }
   .plan-editor-grid, .coupon-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .contacts-form { grid-template-columns: 1fr; }
+  .brand-row { grid-template-columns: 1fr 1fr; }
+  .brand-row-name, .brand-row input { grid-column: 1 / -1; }
   .coupon-row { grid-template-columns: minmax(0, 1fr) auto; }
   .coupon-row .row-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .plan-limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -549,7 +550,6 @@ select {
 @media (max-width: 640px) {
   body { font-size: 14px; }
   .site-container { width: min(calc(100% - 32px), var(--site-max)); }
-  .development-actions .button { width: 100%; }
   .site-footer-bottom { flex-direction: column; }
   .page { padding: 44px 0 72px; }
   .card { padding: 20px; }

@@ -1,5 +1,5 @@
 import {HttpError} from '../control/http.js';
-import type {WorkerStatus} from '../control/types.js';
+import type {WorkerBrandingResult, WorkerStatus} from '../control/types.js';
 import type {GuildEntitlement} from '../plans/entitlements.js';
 import {
   COUPON_BILLINGS,
@@ -14,6 +14,7 @@ import {
   type CouponBilling,
   type PlanTier,
 } from '../plans/plans.js';
+import {sanitizeBrandingProfile, type BotBranding} from '../plans/branding.js';
 import {isPlainObject, isPrintable} from './durable-file.js';
 import {
   COUPON_CODE,
@@ -131,6 +132,11 @@ export default class PlanService {
     return effectiveTier(this.plan(guildId, now), now);
   }
 
+  /** Brand profiles of a guild by worker id. */
+  branding(guildId: string): Record<string, BotBranding> {
+    return this.store.branding(guildId);
+  }
+
   coupons(): Coupon[] {
     return this.store.coupons();
   }
@@ -210,7 +216,49 @@ export default class PlanService {
       plan: PLANS[tier],
       usage: {bots: present, groups},
       allowedWorkerIds: this.allowedWorkerIds(guildId, statuses, now),
+      branding: this.store.branding(guildId),
     };
+  }
+
+  /**
+   * `PUT /v1/guilds/:guildId/branding` (Sentinel: Brand plan): one bot's nickname and/or banner
+   * in one guild. Body `{workerId, nickname?, banner?}`; `null` restores Discord's default.
+   */
+  async updateBranding(guildId: string, input: unknown, statuses: SettledStatus[], now: Date = new Date()): Promise<BotBranding & {workerId: string}> {
+    const body = objectBody(input);
+    const tier = this.effectiveTier(guildId, now);
+    if (!PLANS[tier].customBranding) {
+      throw new HttpError(403, `this server's ${PLANS[tier].name} plan does not include a custom bot name and banner`, 'PLAN_REQUIRED');
+    }
+
+    const {workerId} = body;
+    const worker = this.workers.find(candidate => candidate.id === workerId);
+    const present = statuses.some(result => result.workerId === workerId && result.ok && result.value.guilds.some(guild => guild.id === guildId));
+    if (typeof workerId !== 'string' || !worker || !present) {
+      throw new HttpError(404, 'that bot is not in this server', 'WORKER_NOT_IN_GUILD');
+    }
+
+    const profile = sanitizeBrandingProfile({nick: body.nickname, banner: body.banner});
+    let result: WorkerBrandingResult;
+    try {
+      result = await worker.setBranding(guildId, profile);
+    } catch (error: unknown) {
+      throw new HttpError(503, `bot ${workerId} is unavailable (${errorLabel(error)})`, 'WORKER_UNAVAILABLE');
+    }
+
+    if (!result.ok) {
+      throw result.error === 'MISSING_PERMISSION'
+        ? new HttpError(422, 'the bot lacks the Change Nickname permission in this server', 'BRANDING_MISSING_PERMISSION')
+        : new HttpError(422, 'Discord rejected the bot profile change', 'BRANDING_FAILED');
+    }
+
+    const previous = this.store.branding(guildId)[workerId] ?? {nickname: null, bannerSet: false};
+    const next: BotBranding = {
+      nickname: profile.nick === undefined ? previous.nickname : profile.nick,
+      bannerSet: profile.banner === undefined ? previous.bannerSet : profile.banner !== null,
+    };
+    this.store.setBotBranding(guildId, workerId, next.nickname === null && !next.bannerSet ? null : next);
+    return {workerId, ...next};
   }
 
   /** `PUT /v1/super/guilds/:guildId/plan` (Sentinel: changeGuildPlan). */
@@ -266,6 +314,9 @@ export default class PlanService {
       updatedAt: now.toISOString(),
     };
     this.store.setPlan(guildId, plan, redeem);
+    if (!PLANS[effectiveTier(plan, now)].customBranding) {
+      await this.resetBranding(guildId, actor);
+    }
 
     this.record({
       actor,
@@ -303,6 +354,8 @@ export default class PlanService {
         outcome: 'ok',
       });
     }
+
+    await Promise.all(expired.map(async ([guildId]) => this.resetBranding(guildId, SYSTEM_ACTOR)));
 
     if (expired.length > 0) {
       await this.pushAfterChange();
@@ -425,6 +478,44 @@ export default class PlanService {
       active: coupon.active,
       public: coupon.public,
     };
+  }
+
+  /**
+   * Without the Brand plan every bot gets Discord's default name and banner back (Sentinel resets
+   * on downgrade). The stored profiles are forgotten even when a bot cannot be reached.
+   */
+  private async resetBranding(guildId: string, actor: Actor): Promise<void> {
+    const workerIds = Object.keys(this.store.branding(guildId));
+    if (workerIds.length === 0) {
+      return;
+    }
+
+    const failed: string[] = [];
+    await Promise.all(workerIds.map(async workerId => {
+      const worker = this.workers.find(candidate => candidate.id === workerId);
+      if (!worker) {
+        return;
+      }
+
+      try {
+        const result = await worker.setBranding(guildId, {nick: null, banner: null});
+        if (!result.ok) {
+          failed.push(workerId);
+        }
+      } catch {
+        failed.push(workerId);
+      }
+    }));
+
+    this.store.clearBranding(guildId);
+    this.record({
+      actor,
+      action: 'branding.reset',
+      subjectType: 'GUILD',
+      subjectId: guildId,
+      details: {workerIds, failed},
+      outcome: failed.length === 0 ? 'ok' : (failed.length === workerIds.length ? 'failed' : 'partial'),
+    });
   }
 
   /** A plan change applies right away; a failed push is retried by the next reconcile pass. */
