@@ -16,6 +16,8 @@ import {REST} from '@discordjs/rest';
 import {Routes} from 'discord-api-types/v10';
 import registerCommandsOnGuild from './utils/register-commands-on-guild.js';
 import {handlePlaybackInteraction} from './playback/controller.js';
+import {routePoolInteraction} from './playback/pool.js';
+import type PlayerManager from './managers/player.js';
 import {blockedUserMessage, blocklist} from './control/blocklist.js';
 import {entitlements} from './plans/entitlements.js';
 import {planBotRefusal} from './plans/messages.js';
@@ -141,6 +143,15 @@ export default class {
             await interaction.reply({content: blockedUserMessage(await resolveLocale()), ephemeral: true});
           }
 
+          return;
+        }
+
+        // Playback pool: player commands follow the bot of the user's voice channel, also when this
+        // bot is not one the plan includes (the orchestrator only assigns included bots).
+        if (await routePoolInteraction(interaction, this.config, {
+          ownVoiceChannel: guildId => container.get<PlayerManager>(TYPES.Managers.Player).get(guildId).voiceConnection?.joinConfig.channelId ?? null,
+          resolveLocale: getGuildLocale,
+        })) {
           return;
         }
 

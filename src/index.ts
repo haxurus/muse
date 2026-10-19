@@ -13,7 +13,7 @@ import {Client} from 'discord.js';
 import WorkerControlServer from './control/worker-server.js';
 import AddQueryToQueue from './services/add-query-to-queue.js';
 import PlaybackWorker from './playback/worker.js';
-import {isPlaybackWorkerEnabled} from './playback/protocol.js';
+import {isPlaybackExecutorEnabled} from './playback/protocol.js';
 
 const bot = container.get<Bot>(TYPES.Bot);
 let shuttingDown = false;
@@ -108,7 +108,7 @@ const startBot = async () => {
   if (config.WORKER_ID) {
     const client = container.get<Client>(TYPES.Client);
     const players = container.get<PlayerManager>(TYPES.Managers.Player);
-    const playback = isPlaybackWorkerEnabled(config.WORKER_ID)
+    const playback = isPlaybackExecutorEnabled(config.WORKER_ID)
       ? new PlaybackWorker(
         client,
         players,
