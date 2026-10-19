@@ -6,6 +6,7 @@ import type {
   WorkerGuildMeta,
   WorkerGuildSettings,
   WorkerLeaveGuildResult,
+  WorkerLogs,
   WorkerStatus,
   StatusAnnounceRequest,
   WorkerStatusAnnounceResult,
@@ -64,6 +65,14 @@ export default class WorkerClient {
       `${this.worker.baseUrl}/v1/status`,
       requestOptions(this.worker.token),
     )).json<WorkerStatus>();
+  }
+
+  /** Recent console lines of the bot (`GET /v1/logs`, read-only); the answer is re-validated by the caller. */
+  async logs(limit: number): Promise<WorkerLogs> {
+    return capResponseSize(got.get(
+      `${this.worker.baseUrl}/v1/logs?limit=${limit}`,
+      requestOptions(this.worker.token),
+    )).json<WorkerLogs>();
   }
 
   async guildSettings(guildId: string): Promise<WorkerGuildSettings> {

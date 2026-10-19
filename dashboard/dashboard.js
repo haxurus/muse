@@ -989,6 +989,7 @@ const renderSuperWorker = worker => {
   if (!worker.reachable) tags.append(state(t('super.offline'), 'danger'));
   else if (worker.ready) tags.append(state(t('super.ready'), 'ok'));
   else tags.append(state(t('super.notReady'), 'warn'));
+  if (worker.downSince) tags.append(tag(t('super.downSince', {time: formatClock(worker.downSince)}), 'danger'));
 
   const meta = el('div', 'row-meta');
   meta.append(
@@ -997,6 +998,7 @@ const renderSuperWorker = worker => {
   );
 
   const actions = el('div', 'row-actions');
+  actions.append(button(t('super.logs.open'), 'button-ghost button-sm', () => openWorkerLogs(worker.id, name)));
   if (worker.bot) {
     const invite = el('a', 'button button-secondary button-sm', t('invite.add'));
     invite.href = `/invite/${encodeURIComponent(worker.id)}?lang=${LOCALE}`;
@@ -1743,6 +1745,93 @@ const renderGroupPlanNotice = () => {
   $('save-group').disabled = full && editingGroupId === null;
 };
 
+/* ---------- Super console: worker logs ---------- */
+
+/** Level filter: a minimum level, so "warn" shows warnings and errors. */
+const LOG_LEVEL_RANK = {debug: 0, info: 1, warn: 2, error: 3};
+const LOG_LINES = 200;
+let logsSource = null;
+let logsEntries = [];
+let logsRequest = 0;
+
+const formatClock = value => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat(INTL_LOCALE, {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(date);
+};
+
+const formatLogTime = value => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat(INTL_LOCALE, {hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'}).format(date);
+};
+
+/** One line: time, level and message, all as text. */
+const renderLogLine = entry => {
+  const line = el('div', `log-line level-${entry.level}`);
+  const time = el('time', '', formatLogTime(entry.at));
+  time.dateTime = entry.at;
+  line.append(time, el('span', 'log-level', entry.level.toUpperCase()), el('span', 'log-message', entry.message));
+  return line;
+};
+
+const renderLogLines = () => {
+  const choice = $('super-logs-level').value;
+  const threshold = choice === 'all' ? 0 : LOG_LEVEL_RANK[choice];
+  const visible = logsEntries.filter(entry => LOG_LEVEL_RANK[entry.level] >= threshold);
+  const lines = $('super-logs-lines');
+  lines.replaceChildren(...visible.map(renderLogLine));
+  $('super-logs-empty').hidden = visible.length > 0 || logsSource === null;
+  // The newest line is at the bottom, as in a terminal.
+  lines.scrollTop = lines.scrollHeight;
+};
+
+const loadWorkerLogs = async () => {
+  if (!logsSource) return;
+  const source = logsSource;
+  logsRequest += 1;
+  const request = logsRequest;
+  setMessage($('super-logs-message'), t('super.logs.loading'));
+  $('super-logs-empty').hidden = true;
+  try {
+    const data = await api(`/api/super/workers/${encodeURIComponent(source.workerId)}/logs?limit=${LOG_LINES}`);
+    if (request !== logsRequest || logsSource !== source) return;
+    logsEntries = list(data.entries);
+    setMessage($('super-logs-message'), '');
+    renderLogLines();
+  } catch (error) {
+    if (request !== logsRequest || logsSource !== source) return;
+    logsEntries = [];
+    renderLogLines();
+    if (error instanceof ApiError && error.code === 'WORKER_UNAVAILABLE') {
+      setMessage($('super-logs-message'), t('super.logs.unavailable'), 'error');
+      return;
+    }
+
+    handleFailure(error, message => setMessage($('super-logs-message'), message, 'error'));
+  }
+};
+
+const openWorkerLogs = (workerId, label) => {
+  logsSource = {workerId, label};
+  logsEntries = [];
+  $('super-logs-title').textContent = t('super.logs.title', {name: label});
+  $('super-logs').hidden = false;
+  renderLogLines();
+  $('super-logs').scrollIntoView({block: 'start'});
+  void loadWorkerLogs();
+};
+
+const closeWorkerLogs = () => {
+  logsSource = null;
+  logsEntries = [];
+  logsRequest += 1;
+  $('super-logs-lines').replaceChildren();
+  $('super-logs-empty').hidden = true;
+  setMessage($('super-logs-message'), '');
+  $('super-logs').hidden = true;
+};
+
 /* ---------- Super console: plans and coupons ---------- */
 
 let planEditorGuildId = null;
@@ -2136,6 +2225,22 @@ const wire = () => {
 
   $('super-refresh').addEventListener('click', () => {
     void loadOverview();
+  });
+
+  $('super-logs-orchestrator').addEventListener('click', () => {
+    openWorkerLogs('orchestrator', t('super.logs.orchestratorName'));
+  });
+
+  $('super-logs-close').addEventListener('click', () => {
+    closeWorkerLogs();
+  });
+
+  $('super-logs-refresh').addEventListener('click', () => {
+    void loadWorkerLogs();
+  });
+
+  $('super-logs-level').addEventListener('change', () => {
+    renderLogLines();
   });
 
   $('status-guild').addEventListener('change', event => {

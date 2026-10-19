@@ -2,6 +2,7 @@ import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
 import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {HttpError} from '../control/http.js';
+import {parseLogLimit} from '../utils/log-buffer.js';
 import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
 import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
@@ -85,6 +86,8 @@ export const NEW_SERVER_ANCHOR = 'nuovo-server';
 
 const SNOWFLAKE = /^\d{17,20}$/u;
 const WORKER_ID = /^muse-\d{2}$/u;
+/** Log sources of the super console: a bot, or the orchestrator itself. */
+const LOG_SOURCE = /^(?:muse-\d{2}|orchestrator)$/u;
 const MAX_BLOCK_REASON_LENGTH = 500;
 const MAX_LEAVE_WORKERS = 32;
 const MAX_MENTION_ROLES = 10;
@@ -663,6 +666,16 @@ export default class DashboardServer {
         statusCode: 200,
         body: await this.orchestrator.superTestStatusChannel(actor),
       }));
+      return;
+    }
+
+    if (request.method === 'GET' && segments.length === 3 && segments[0] === 'workers' && segments[2] === 'logs') {
+      this.requireSuperAdmin(request);
+      if (!LOG_SOURCE.test(segments[1])) {
+        throw new HttpError(400, 'worker id must be muse-NN or orchestrator');
+      }
+
+      sendJson(response, 200, await this.orchestrator.superWorkerLogs(segments[1], parseLogLimit(request.url)));
       return;
     }
 

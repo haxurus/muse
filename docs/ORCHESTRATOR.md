@@ -66,6 +66,7 @@ Endpoints:
 ```text
 GET   /health
 GET   /v1/status
+GET   /v1/logs?limit=N    (last console lines, redacted; see SUPER_CONSOLE.md)
 GET   /v1/guilds/:guildId/settings
 PATCH /v1/guilds/:guildId/settings
 POST  /v1/guilds/:guildId/leave
@@ -84,7 +85,7 @@ POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "t
 
 `GET /v1/guilds/:guildId/meta` lists, for the super console pickers, the guild's text and announcement channels in Discord sidebar order (`{id, name, type: 'text' | 'announcement', parentName, position, canPost}`, `canPost` meaning this bot has View Channel, Send Messages and Embed Links there) and its roles by position, without `@everyone` and managed roles (`{id, name, color, mentionable, position}`): `200 {workerId, guildId, channels, roles}`, `404 NOT_IN_GUILD`, `503 NOT_READY`.
 
-`POST /v1/status-channel/announce` with `{guildId?: string | null, channelId: string, test: boolean, mentionRoleIds?: string[]}` makes the bot post its status embed (the "Bot started" message, or the super console test message when `test` is `true`) in that channel, pinging exactly those roles (0-10, default none; invalid lists are `400 INVALID_ROLE_IDS`). Discord-side failures are not HTTP errors: the answer is always `200 {workerId, ok: true}` or `200 {workerId, ok: false, error}` with `error` one of `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR` (see `SUPER_CONSOLE.md`). When `guildId` is set, a channel of any other server is refused with `CHANNEL_NOT_FOUND`. A malformed body is `400` with `INVALID_CHANNEL_ID`, `INVALID_GUILD_ID` or `INVALID_BODY`.
+`POST /v1/status-channel/announce` with `{guildId?: string | null, channelId: string, test: boolean, mentionRoleIds?: string[]}` makes the bot post its status embed (the "Bot started" message, or the super console test message when `test` is `true`) in that channel, pinging exactly those roles (0-10, default none; invalid lists are `400 INVALID_ROLE_IDS`). Discord-side failures are not HTTP errors: the answer is always `200 {workerId, ok: true}` or `200 {workerId, ok: false, error}` with `error` one of `NOT_READY`, `CHANNEL_NOT_FOUND`, `INVALID_CHANNEL`, `MISSING_PERMISSIONS`, `DISCORD_ERROR` (see `SUPER_CONSOLE.md`). When `guildId` is set, a channel of any other server is refused with `CHANNEL_NOT_FOUND`. A malformed body is `400` with `INVALID_CHANNEL_ID`, `INVALID_GUILD_ID` or `INVALID_BODY`. Health alerts use the same route with `test: false`, `kind` (`worker-down` or `worker-recovered`) and `worker: {workerId, botName, since}` (see `SUPER_CONSOLE.md`).
 
 The settings endpoint only accepts the existing Muse guild settings:
 

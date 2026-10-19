@@ -47,8 +47,9 @@ type AuditEntry = {
   at: string;                   // ISO 8601
   actor: {userId: string; username: string};
   action: 'guild.leave' | 'block.upsert' | 'block.delete'
-    | 'status_channel.set' | 'status_channel.clear' | 'status_channel.test';
-  subjectType: 'GUILD' | 'USER' | 'CHANNEL';
+    | 'status_channel.set' | 'status_channel.clear' | 'status_channel.test'
+    | 'worker.down' | 'worker.recovered';
+  subjectType: 'GUILD' | 'USER' | 'CHANNEL' | 'WORKER';
   subjectId: string;
   details: Record<string, unknown>;   // small; replaced by {truncated: true} above 4 KiB
   outcome: 'ok' | 'partial' | 'failed';
@@ -83,6 +84,7 @@ All responses are JSON. Errors are `{"error": "<message>", "code"?: "<CODE>"}`.
     activePlayers: number;             // guilds with a voice connection
     uptimeSeconds: number | null;      // null when unreachable
     error?: string;                    // only when unreachable (error class name)
+    downSince: string | null;          // ISO 8601: a "bot offline" alert is outstanding since then (see Health alerts)
   }>;
   guilds: Array<{                      // merged across reachable workers, sorted by name
     id: string;
@@ -216,6 +218,24 @@ Headers: actor (required). No body. Every configured worker is asked (`POST /v1/
 - Audited as `status_channel.test` (subject the channel, details `{mentionRoleCount, results}`), outcome `ok` (every bot posted), `partial` or `failed` (none did).
 - `400 STATUS_CHANNEL_NOT_SET` when no channel is configured; `400 INVALID_ACTOR`.
 
+### Worker logs
+
+Every process keeps its last **1000** console lines in memory (`src/utils/log-buffer.ts`, installed when the worker and the orchestrator start; printing is unchanged). A line is `{at, level: 'debug' | 'info' | 'warn' | 'error', message}`, the message at most 2000 characters. Before a line is stored, Discord bot tokens, `Bearer` tokens, `Authorization` and `Cookie` values, `token`, `secret`, `password` and `key` values, and URL query strings are replaced with `[redacted]`. The buffer is lost when the process restarts. The console only reads logs: there is no restart action and no access to the Docker socket.
+
+- **Worker**: `GET /v1/logs?limit=N` (control token; `N` from 1 to 1000, default 200) answers `{workerId, entries}`, oldest first. The answer is capped at about 512 KiB, so the newest lines win when the limit is large.
+- **Orchestrator**: `GET /v1/super/workers/:workerId/logs?limit=N` (API token). `:workerId` is a bot id, or `orchestrator` for the orchestrator's own buffer. `404 WORKER_NOT_FOUND` for an unknown id, `503 WORKER_UNAVAILABLE` when the bot does not answer, `400 INVALID_LIMIT` for a bad limit. The lines of a bot are validated and redacted again before they are returned.
+- **Dashboard**: `GET /api/super/workers/:workerId/logs?limit=N` (super admin only). The super console shows the last 200 lines of a bot, or of the orchestrator, in a monospace panel with a minimum-level filter and a refresh button.
+
+### Health alerts
+
+The reconcile loop (every 60 seconds, the same pass as the blocklist push) checks every bot. A bot is **healthy** when it is reachable and connected to Discord.
+
+- A bot that has been healthy since the orchestrator started and fails **two checks in a row** is reported down. A bot that was never healthy since start never alerts, so a fleet that is down at start-up stays quiet.
+- When that bot is healthy again, a recovery alert is sent.
+- The alert is a status message (red "Bot offline" / green "Bot back online", the outage start shown as a Discord time). It is posted in the status channel by the first healthy bot that is a member of the status server. Only the down alert pings the configured roles. Without a status channel, or with a status channel but no server stored, nothing is posted.
+- Every alert is audited with the system actor `{userId: "system", username: "Muse"}`: action `worker.down` or `worker.recovered`, subject type `WORKER`, subject the bot id. Details: `{since, notified, postedBy?, reason?, error?, downtimeSeconds?}`. `reason` is `NO_STATUS_CHANNEL` or `NO_STATUS_GUILD` when nothing was posted; `error` is a status error code (see the table above) or `NO_HEALTHY_POSTER`. Outcome `failed` when a channel was set but the post failed.
+- The alert state lives in memory. After an orchestrator restart it starts again from scratch. The overview carries `downSince` per bot, and the worker list shows it as "Down since HH:MM".
+
 ### Plans and coupons
 
 Muse uses the same plan model as Sentinel: four tiers, prices in euro, billing `MONTHLY`, `YEARLY` or `GIFT` (trial / complimentary), and **no online payments**. The pricing page asks people to get in touch; the super admin assigns the plan by hand ("Gestisci piano") and coupons only change the price shown in the editor and count redemptions. The catalog lives in `src/plans/plans.ts`, shared by the workers, the orchestrator and (through the API) the dashboard.
@@ -273,7 +293,7 @@ Layout (Sentinel super console style):
 
 - kicker `SUPER CONSOLE`, title "Controllo globale di Muse.";
 - KPI row: Bot online (ready / total), Server collegati, Player attivi (sum of `activePlayers`), Blacklist;
-- **BOT · Stato dei worker**: avatar, username, worker id and bot id, Pronto / Non pronto / Offline, server and player counts, uptime, "Aggiungi a un server" (`/invite/:id`);
+- **BOT · Stato dei worker**: avatar, username, worker id and bot id, Pronto / Non pronto / Offline, "Offline dal HH:MM" while a down alert is outstanding, server and player counts, uptime, "Log" (worker logs panel, also one for the orchestrator), "Aggiungi a un server" (`/invite/:id`);
 - **STATO · Canale di log dei bot** (EN "STATUS · Bot status channel"): a server menu (the servers of the overview), a channel menu grouped by category (loaded from the meta route; channels where some bot cannot post are marked "⚠ non può scrivere: …" with a warning naming those bots), and a role menu with removable colored chips (at most 10; roles that are not mentionable get a warning). Changing server clears the channel and the roles. "Salva", "Invia messaggio di prova" and "Disattiva" (asks for confirmation); the current server and channel, number of mentioned roles and who changed it and when; after a test, one row per bot with "Pubblicato" or the translated error code;
 - **DISCORD · Server collegati**: icon, name, id, owner id, members, chips of the bots present, "Bloccato" tag, "Fai uscire" (all bots) and "Blocca ed espelli" (both ask for confirmation);
 - **POLICY · Blacklist**: forms to block a user or a server (client-side 17-20 digit check, optional reason up to 500 characters) and rows with "Sblocca";

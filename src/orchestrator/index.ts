@@ -1,5 +1,9 @@
 import OrchestratorServer from './server.js';
 import {loadOrchestratorConfig} from './config.js';
+import {installLogCapture} from '../utils/log-buffer.js';
+
+// Keep the console lines for the super console log view (redacted); printing is unchanged.
+installLogCapture();
 
 const server = new OrchestratorServer(loadOrchestratorConfig());
 let shuttingDown = false;

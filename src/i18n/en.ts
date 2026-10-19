@@ -225,6 +225,13 @@ export const EN_MESSAGES = {
   statusTestDescription: 'Status channel test sent by {tag}.',
   statusFieldAuthor: 'Action author',
   statusFieldDetails: 'Details',
+  // Health alerts of a bot (see docs/SUPER_CONSOLE.md)
+  statusDownTitle: 'Bot offline',
+  statusDownDescription: '{bot} is offline or not connected to Discord.',
+  statusRecoveredTitle: 'Bot back online',
+  statusRecoveredDescription: '{bot} is connected to Discord again.',
+  statusFieldWorker: 'Worker',
+  statusFieldDownSince: 'Down since',
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;

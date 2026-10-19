@@ -9,6 +9,10 @@ import logBanner from '../utils/log-banner.js';
 import createDatabaseUrl, {createDatabasePathFromUrl} from '../utils/create-database-url.js';
 import {DATA_DIR} from '../services/config.js';
 import {runMigrationsAndStart} from '../utils/run-migrations-and-start.js';
+import {installLogCapture} from '../utils/log-buffer.js';
+
+// Keep the console lines for the super console log view (redacted); printing is unchanged.
+installLogCapture();
 
 const databaseUrl = process.env.DATABASE_URL ?? createDatabaseUrl(DATA_DIR);
 process.env.DATABASE_URL = databaseUrl;

@@ -166,9 +166,28 @@
                   <h2 data-i18n="super.botsTitle"></h2>
                   <p data-i18n="super.botsText"></p>
                 </div>
+                <button class="button button-secondary button-sm" type="button" id="super-logs-orchestrator" data-i18n="super.logs.orchestrator"></button>
               </div>
               <div class="empty" id="super-workers-empty" hidden data-i18n="super.noBots"></div>
               <div class="table-list" id="super-workers"></div>
+            </section>
+
+            <section class="card log-panel" id="super-logs" hidden aria-labelledby="super-logs-title">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.logs.kicker"></span>
+                  <h2 id="super-logs-title"></h2>
+                  <p data-i18n="super.logs.text"></p>
+                </div>
+                <button class="button button-ghost button-sm" type="button" id="super-logs-close" data-i18n="super.logs.close"></button>
+              </div>
+              <div class="log-toolbar">
+                <label class="field"><span data-i18n="super.logs.level"></span><select id="super-logs-level"><option value="all" data-i18n="super.logs.levelAll"></option><option value="info" data-i18n="super.logs.levelInfo"></option><option value="warn" data-i18n="super.logs.levelWarn"></option><option value="error" data-i18n="super.logs.levelError"></option></select></label>
+                <button class="button button-secondary button-sm" type="button" id="super-logs-refresh" data-i18n="super.logs.refresh"></button>
+              </div>
+              <p class="form-message" id="super-logs-message" role="status"></p>
+              <div class="empty" id="super-logs-empty" hidden data-i18n="super.logs.empty"></div>
+              <div class="log-console" id="super-logs-lines" role="log" aria-live="off"></div>
             </section>
 
             <section class="card" id="status-channel-card">

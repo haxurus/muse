@@ -13,9 +13,11 @@ import type {
   WorkerBrandingResult,
   WorkerGuildMeta,
   WorkerLeaveGuildResult,
+  WorkerLogs,
   WorkerStatus,
   WorkerStatusAnnounceResult,
 } from './types.js';
+import {logBuffer, parseLogLimit} from '../utils/log-buffer.js';
 import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
 import {buildGuildMeta} from '../status/guild-meta.js';
 import {MAX_ENTITLEMENTS_BODY_BYTES, assertSettingsWithinPlan, entitlements, sanitizeEntitlements} from '../plans/entitlements.js';
@@ -97,6 +99,11 @@ export default class WorkerControlServer {
       const segments = getPathSegments(request);
       if (request.method === 'GET' && segments.join('/') === 'v1/status') {
         sendJson(response, 200, this.status());
+        return;
+      }
+
+      if (request.method === 'GET' && segments.join('/') === 'v1/logs') {
+        sendJson(response, 200, this.logs(request.url));
         return;
       }
 
@@ -272,6 +279,11 @@ export default class WorkerControlServer {
     }
 
     return {workerId: this.config.WORKER_ID, left: left.sort(), failed: failed.sort()};
+  }
+
+  /** Recent console lines of this process (already redacted when captured); `?limit=` is 1..1000. */
+  private logs(url: string | undefined): WorkerLogs {
+    return {workerId: this.config.WORKER_ID, entries: logBuffer.recent(parseLogLimit(url))};
   }
 
   private status(): WorkerStatus {
