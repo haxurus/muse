@@ -151,7 +151,7 @@ const CONSOLE_LEVELS: Record<ConsoleMethod, LogLevel> = {
   error: 'error',
 };
 
-const installedTargets = new WeakSet<object>();
+const installedTargets = new WeakSet<Console>();
 
 /**
  * Wraps the console methods so every line is also kept in `buffer`. The original methods still
@@ -164,7 +164,7 @@ export const installLogCapture = (target: Console = console, buffer: LogBuffer =
 
   installedTargets.add(target);
   for (const method of Object.keys(CONSOLE_LEVELS) as ConsoleMethod[]) {
-    const original = target[method];
+    const original: (...data: unknown[]) => void = target[method];
     target[method] = (...args: unknown[]) => {
       try {
         buffer.record(CONSOLE_LEVELS[method], formatLogArguments(args));

@@ -40,7 +40,7 @@ export class WorkerHealthTracker {
         state.everHealthy = true;
         state.failedChecks = 0;
         state.firstFailedAt = null;
-        const downSince = state.downSince;
+        const {downSince} = state;
         if (downSince !== null) {
           state.downSince = null;
           transitions.push({type: 'recovered', workerId, since: downSince});

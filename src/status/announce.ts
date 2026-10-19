@@ -241,7 +241,7 @@ export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceReques
     throw new HttpError(400, 'kind must be worker-down or worker-recovered', 'INVALID_BODY');
   }
 
-  if (test !== false) {
+  if (test) {
     throw new HttpError(400, 'health alerts cannot be test messages', 'INVALID_BODY');
   }
 
