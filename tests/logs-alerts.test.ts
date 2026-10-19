@@ -355,11 +355,15 @@ describe('worker health tracker', () => {
 
   it('never alerts for a bot that was not healthy since start, nor for a single failed check', () => {
     const tracker = new WorkerHealthTracker();
-    expect(tracker.observe([{workerId: 'muse-02', healthy: false}, {workerId: 'muse-03', healthy: true}], 't0')).toEqual([]);
-    expect(tracker.observe([{workerId: 'muse-02', healthy: false}, {workerId: 'muse-03', healthy: false}], 't1')).toEqual([]);
+    expect(tracker.observe([{workerId: 'muse-02', healthy: false}], 't0')).toEqual([]);
+    expect(tracker.observe([{workerId: 'muse-02', healthy: false}], 't1')).toEqual([]);
     expect(tracker.downSince('muse-02')).toBeNull();
-    expect(tracker.observe([{workerId: 'muse-03', healthy: false}], 't2')).toEqual([]);
-    expect(tracker.observe([{workerId: 'muse-03', healthy: true}], 't3')).toEqual([]);
+
+    // Healthy at start, one failed check, then healthy again: no alert at any point.
+    expect(tracker.observe([{workerId: 'muse-03', healthy: true}], 't0')).toEqual([]);
+    expect(tracker.observe([{workerId: 'muse-03', healthy: false}], 't1')).toEqual([]);
+    expect(tracker.observe([{workerId: 'muse-03', healthy: true}], 't2')).toEqual([]);
+    expect(tracker.downSince('muse-03')).toBeNull();
   });
 });
 

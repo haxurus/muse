@@ -28,7 +28,8 @@ const DISCORD_TOKEN = /[\w-]{23,28}\.[\w-]{6,7}\.[\w-]{27,40}/gu;
 const AUTHORIZATION_HEADER = /(authorization["']?\s*[:=]\s*["']?)(?:(?:bearer|basic|token)\s+)?[^\s,;"'}]+/giu;
 const BEARER_TOKEN = /\bbearer\s+[^\s,;"'}]+/giu;
 const COOKIE_LINE = /\b((?:set-)?cookie["']?\s*[:=]\s*)[^\r\n]+/giu;
-const SECRET_KEY_VALUE = /([\w.-]*(?:token|secret|password|passwd|cookie|apikey|api[_-]?key|credential)[\w.-]*["']?\s*[:=]\s*["']?)([^\s,;&"'}]+)/giu;
+// Anchored at the start of each word run: an unanchored run pattern is quadratic on long strings.
+const SECRET_KEY_VALUE = /((?<![\w.-])[\w.-]*(?:token|secret|password|passwd|cookie|apikey|api[_-]?key|credential)[\w.-]*["']?\s*[:=]\s*["']?)([^\s,;&"'}]+)/giu;
 const URL_QUERY = /\b([a-z][\da-z+.-]*:\/\/[^\s?#"'<>]+)\?[^\s#"'<>]*/giu;
 
 /**
