@@ -46,6 +46,13 @@ export const isPlaybackWorkerId = (workerId: string): workerId is PlaybackWorker
 export const isPlaybackWorkerEnabled = (workerId: string): workerId is PlaybackWorkerId =>
   isPlaybackWorkerId(workerId) && process.env[PLAYBACK_FLAG_BY_WORKER[workerId]] === 'true';
 
+/** Playback pool: every bot follows the user's voice channel (`MUSE_PLAYBACK_POOL=true` on the orchestrator and the workers). */
+export const isPlaybackPoolEnabled = (): boolean => process.env.MUSE_PLAYBACK_POOL === 'true';
+
+/** Whether this worker executes relayed playback requests (pilot or pool). */
+export const isPlaybackExecutorEnabled = (workerId: string): workerId is PlaybackWorkerId =>
+  isPlaybackWorkerEnabled(workerId) || (isPlaybackWorkerId(workerId) && isPlaybackPoolEnabled());
+
 /** Shared by every hop so an unknown outcome is never mistaken for a retryable "not ready" error. */
 export const PLAYBACK_OUTCOME_UNKNOWN_STATUS = 504;
 /** English on the wire; the command-receiving bot translates it for the guild. */

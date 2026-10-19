@@ -5,6 +5,7 @@ import {
   PLAYBACK_OUTCOME_UNKNOWN_MESSAGE,
   PLAYBACK_OUTCOME_UNKNOWN_STATUS,
   isPlaybackWorkerEnabled,
+  isPlaybackWorkerId,
   parsePlaybackRequest,
   type PlaybackRequest,
   type PlaybackResult,
@@ -47,8 +48,11 @@ const errorMessageFor = (status: number, text: string): string => {
   return SAFE_STATUS_MESSAGES[status] ?? EN_MESSAGES.playbackRequestFailed;
 };
 
-/** Fixed internal destinations only. Never retry a timed-out audio mutation locally. */
-export const sendPlayback = async (url: string, token: string, body: PlaybackRequest, expectedWorkerId: PlaybackWorkerId = 'muse-01'): Promise<PlaybackResult> => {
+/**
+ * Fixed internal destinations only. Never retry a timed-out audio mutation locally.
+ * `expectedWorkerId` null accepts any Muse worker (the pool picks the bot that answers).
+ */
+export const sendPlayback = async (url: string, token: string, body: PlaybackRequest, expectedWorkerId: PlaybackWorkerId | null = 'muse-01'): Promise<PlaybackResult> => {
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -88,7 +92,10 @@ export const sendPlayback = async (url: string, token: string, body: PlaybackReq
     }
 
     const payload = JSON.parse(text) as Partial<PlaybackResult>;
-    if (payload.workerId !== expectedWorkerId || payload.guildId !== body.guildId || payload.requestId !== body.requestId
+    const workerMatches = expectedWorkerId === null
+      ? typeof payload.workerId === 'string' && isPlaybackWorkerId(payload.workerId)
+      : payload.workerId === expectedWorkerId;
+    if (!workerMatches || payload.guildId !== body.guildId || payload.requestId !== body.requestId
       || typeof payload.message !== 'string' || payload.message.length > 1900
       || !['FREE', 'PLAYING', 'PAUSED', 'IDLE'].includes(payload.state ?? '')
       || (payload.channelId !== null && typeof payload.channelId !== 'string')) {
