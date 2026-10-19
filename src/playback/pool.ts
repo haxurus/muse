@@ -17,8 +17,26 @@ import {localizeEnglishMessage, t, type Locale} from '../i18n/index.js';
 
 /** Player commands that follow the bot of the user's voice channel (`/config` and `/favorites` stay local). */
 export const POOL_COMMANDS: ReadonlySet<string> = new Set([
-  'play', 'pause', 'resume', 'skip', 'next', 'stop', 'disconnect', 'queue', 'volume',
-  'clear', 'fseek', 'loop', 'loop-queue', 'move', 'now-playing', 'remove', 'replay', 'seek', 'shuffle', 'unskip',
+  'play',
+  'pause',
+  'resume',
+  'skip',
+  'next',
+  'stop',
+  'disconnect',
+  'queue',
+  'volume',
+  'clear',
+  'fseek',
+  'loop',
+  'loop-queue',
+  'move',
+  'now-playing',
+  'remove',
+  'replay',
+  'seek',
+  'shuffle',
+  'unskip',
 ]);
 
 export type PoolAnswer =
