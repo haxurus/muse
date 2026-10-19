@@ -221,4 +221,11 @@ export const IT_MESSAGES: MessageDictionary = {
   statusTestDescription: 'Prova del canale di stato inviata da {tag}.',
   statusFieldAuthor: 'Autore azione',
   statusFieldDetails: 'Dettagli',
+  // Avvisi di stato di un bot
+  statusDownTitle: 'Bot offline',
+  statusDownDescription: '{bot} è offline o non è connesso a Discord.',
+  statusRecoveredTitle: 'Bot di nuovo online',
+  statusRecoveredDescription: '{bot} è di nuovo connesso a Discord.',
+  statusFieldWorker: 'Worker',
+  statusFieldDownSince: 'Offline dal',
 };

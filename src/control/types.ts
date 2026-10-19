@@ -1,4 +1,5 @@
 import type {Setting} from '@prisma/client';
+import type {LogEntry} from '../utils/log-buffer.js';
 
 /** Fields added after the first release are optional so mixed-version fleets keep working. */
 export type WorkerGuild = {
@@ -58,6 +59,12 @@ export type WorkerBlocklistResult = {
   failed: string[];
 };
 
+/** `GET /v1/logs` on a worker: the newest log lines, oldest first (see docs/SUPER_CONSOLE.md). */
+export type WorkerLogs = {
+  workerId: string;
+  entries: LogEntry[];
+};
+
 /** Why a worker could not post a status message (see src/status/announce.ts). */
 export const STATUS_ANNOUNCE_ERRORS = [
   'NOT_READY',
@@ -74,6 +81,22 @@ export const isStatusAnnounceError = (value: unknown): value is StatusAnnounceEr
 
 export type StatusAnnounceResult = {ok: true} | {ok: false; error: StatusAnnounceError};
 
+/** Health alerts the orchestrator posts when a bot goes down or comes back (see docs/SUPER_CONSOLE.md). */
+export const WORKER_ALERT_KINDS = ['worker-down', 'worker-recovered'] as const;
+
+export type WorkerAlertKind = typeof WORKER_ALERT_KINDS[number];
+
+export const isWorkerAlertKind = (value: unknown): value is WorkerAlertKind =>
+  typeof value === 'string' && (WORKER_ALERT_KINDS as readonly string[]).includes(value);
+
+/** The worker an alert is about. `botName` is the bot's last known username (the worker id when never seen). */
+export type WorkerAlertSubject = {
+  workerId: string;
+  botName: string;
+  /** ISO 8601: when the outage began (first failed check). */
+  since: string;
+};
+
 /** Body of `POST /v1/status-channel/announce` on a worker. */
 export type StatusAnnounceRequest = {
   /** Server the channel must belong to; `null` only for settings saved before the server was stored. */
@@ -83,6 +106,10 @@ export type StatusAnnounceRequest = {
   test: boolean;
   /** Roles pinged by the message (0-10). */
   mentionRoleIds: string[];
+  /** Health alert instead of the online or test message (then `test` is `false`). Absent for those. */
+  kind?: WorkerAlertKind;
+  /** The worker the alert is about; required with `kind`. */
+  worker?: WorkerAlertSubject;
 };
 
 /** Answer of `POST /v1/status-channel/announce` on a worker. */

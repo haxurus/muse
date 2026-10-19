@@ -389,6 +389,19 @@ select {
 .log-row strong { font-weight: 500; color: var(--accent); overflow-wrap: anywhere; }
 .log-row span, .log-row time { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 
+/* Worker log view (super console): monospace lines, colored by level, text only. */
+.log-panel .log-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: 4px; }
+.log-console { max-height: 460px; overflow: auto; margin-top: 12px; padding: 10px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; line-height: 1.55; }
+.log-console:empty { display: none; }
+.log-line { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 10px; padding: 1px 14px; }
+.log-line time { color: var(--faint); white-space: nowrap; }
+.log-line .log-level { min-width: 5ch; font-weight: 600; color: var(--muted); }
+.log-line .log-message { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-line.level-debug .log-level { color: var(--faint); }
+.log-line.level-info .log-level { color: var(--info); }
+.log-line.level-warn .log-level, .log-line.level-warn .log-message { color: var(--warn); }
+.log-line.level-error .log-level, .log-line.level-error .log-message { color: #ff9da0; }
+
 /* ==========================================================================
    Guild dashboard (app shell)
    ========================================================================== */

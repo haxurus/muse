@@ -242,9 +242,9 @@ describe('super console overview', () => {
     const {status, body} = await call('GET', '/v1/super/overview');
     expect(status).toBe(200);
     expect(body.workers).toEqual([
-      {id: 'muse-01', reachable: true, ready: true, bot: {id: '900000000000000001', username: 'muse-01', avatarUrl: 'https://cdn.discordapp.com/avatars/muse-01.png'}, guildCount: 2, activePlayers: 1, uptimeSeconds: 120},
-      {id: 'muse-02', reachable: true, ready: true, bot: {id: '900000000000000002', username: 'muse-02', avatarUrl: 'https://cdn.discordapp.com/avatars/muse-02.png'}, guildCount: 1, activePlayers: 1, uptimeSeconds: 120},
-      {id: 'muse-03', reachable: false, ready: false, bot: null, guildCount: 0, activePlayers: 0, uptimeSeconds: null, error: expect.any(String)},
+      {id: 'muse-01', reachable: true, ready: true, bot: {id: '900000000000000001', username: 'muse-01', avatarUrl: 'https://cdn.discordapp.com/avatars/muse-01.png'}, guildCount: 2, activePlayers: 1, uptimeSeconds: 120, downSince: null},
+      {id: 'muse-02', reachable: true, ready: true, bot: {id: '900000000000000002', username: 'muse-02', avatarUrl: 'https://cdn.discordapp.com/avatars/muse-02.png'}, guildCount: 1, activePlayers: 1, uptimeSeconds: 120, downSince: null},
+      {id: 'muse-03', reachable: false, ready: false, bot: null, guildCount: 0, activePlayers: 0, uptimeSeconds: null, error: expect.any(String), downSince: null},
     ]);
     expect(body.guilds).toEqual([
       {id: guildA, name: 'Alpha', iconUrl: 'https://cdn.discordapp.com/icons/a.png', memberCount: 10, ownerId: actorId, workerIds: ['muse-01', 'muse-02'], blocked: false, plan: expect.objectContaining({tier: 'FREE', effectiveTier: 'FREE'})},

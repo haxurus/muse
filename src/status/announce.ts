@@ -2,7 +2,14 @@ import {ChannelType, EmbedBuilder, PermissionFlagsBits, type Channel, type Clien
 import {HttpError} from '../control/http.js';
 import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {isSnowflake} from '../control/snowflake.js';
-import type {StatusAnnounceError, StatusAnnounceRequest, StatusAnnounceResult} from '../control/types.js';
+import {
+  isWorkerAlertKind,
+  type StatusAnnounceError,
+  type StatusAnnounceRequest,
+  type StatusAnnounceResult,
+  type WorkerAlertKind,
+  type WorkerAlertSubject,
+} from '../control/types.js';
 import {t, type Locale} from '../i18n/index.js';
 import {getGuildLocale} from '../i18n/guild-locale.js';
 
@@ -10,6 +17,8 @@ import {getGuildLocale} from '../i18n/guild-locale.js';
 export const STATUS_ONLINE_COLOR = 0x3ccf8e;
 /** Left bar of the super console test embed (Muse violet, the dashboard accent). */
 export const STATUS_TEST_COLOR = 0xa78bfa;
+/** Left bar of the "Bot offline" alert (Muse danger red). */
+export const STATUS_DOWN_COLOR = 0xf2555a;
 /** Footer when MUSE_DASHBOARD_PUBLIC_URL is missing or invalid. */
 export const DEFAULT_STATUS_FOOTER = 'Muse';
 
@@ -60,6 +69,31 @@ export const buildStatusEmbed = (input: StatusEmbedInput): EmbedBuilder => {
     .addFields(
       {name: t(locale, 'statusFieldAuthor'), value: `**${bot.username}** · ${identity}`},
       {name: t(locale, 'statusFieldDetails'), value: `**Guild Count:** ${input.guildCount}\n**Bot:** ${bot.username} · ${identity}`},
+    )
+    .setFooter({text: input.footer})
+    .setTimestamp(input.now);
+};
+
+export type WorkerAlertEmbedInput = {
+  kind: WorkerAlertKind;
+  worker: WorkerAlertSubject;
+  locale: Locale;
+  now: Date;
+  footer: string;
+};
+
+/** Health alert of one bot: red when it goes down, green when it is back. The outage start is shown as a Discord time. */
+export const buildWorkerAlertEmbed = (input: WorkerAlertEmbedInput): EmbedBuilder => {
+  const {kind, worker, locale} = input;
+  const down = kind === 'worker-down';
+  const since = Math.floor(Date.parse(worker.since) / 1000);
+  return new EmbedBuilder()
+    .setColor(down ? STATUS_DOWN_COLOR : STATUS_ONLINE_COLOR)
+    .setTitle(t(locale, down ? 'statusDownTitle' : 'statusRecoveredTitle'))
+    .setDescription(t(locale, down ? 'statusDownDescription' : 'statusRecoveredDescription', {bot: worker.botName}))
+    .addFields(
+      {name: t(locale, 'statusFieldWorker'), value: `**${worker.botName}** · \`${worker.workerId}\``},
+      {name: t(locale, 'statusFieldDownSince'), value: `<t:${since}:t>`},
     )
     .setFooter({text: input.footer})
     .setTimestamp(input.now);
@@ -127,16 +161,22 @@ export const postStatusMessage = async (
   }
 
   const {user} = client;
-  const embed = buildStatusEmbed({
-    bot: {id: user.id, username: user.username, tag: user.tag},
-    guildCount: client.guilds.cache.size,
-    test: input.test,
-    locale: await resolveLocale(channel.guild.id),
-    now: new Date(),
-    footer: statusFooter(process.env.MUSE_DASHBOARD_PUBLIC_URL),
-  });
+  const locale = await resolveLocale(channel.guild.id);
+  const footer = statusFooter(process.env.MUSE_DASHBOARD_PUBLIC_URL);
+  const alert = input.kind !== undefined && input.worker !== undefined ? {kind: input.kind, worker: input.worker} : undefined;
+  const embed = alert === undefined
+    ? buildStatusEmbed({
+      bot: {id: user.id, username: user.username, tag: user.tag},
+      guildCount: client.guilds.cache.size,
+      test: input.test,
+      locale,
+      now: new Date(),
+      footer,
+    })
+    : buildWorkerAlertEmbed({kind: alert.kind, worker: alert.worker, locale, now: new Date(), footer});
 
-  const roles = [...new Set(input.mentionRoleIds)];
+  // Only the "down" alert pings the configured roles: a recovery message never does.
+  const roles = alert?.kind === 'worker-recovered' ? [] : [...new Set(input.mentionRoleIds)];
   const content = roleMentions(roles);
   try {
     await channel.send({
@@ -151,13 +191,27 @@ export const postStatusMessage = async (
   return {ok: true};
 };
 
+const WORKER_ID = /^[a-z\d][a-z\d-]{0,31}$/u;
+
+/** The worker of an alert: a worker id, a bot name of 1-64 characters and the ISO 8601 time the outage began. */
+const parseWorkerAlertSubject = (input: unknown): WorkerAlertSubject => {
+  const {workerId, botName, since} = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+  if (typeof workerId !== 'string' || !WORKER_ID.test(workerId)
+    || typeof botName !== 'string' || botName.length < 1 || botName.length > 64
+    || typeof since !== 'string' || since.length > 40 || Number.isNaN(Date.parse(since))) {
+    throw new HttpError(400, 'worker must name the worker id, its bot name and the time it went down', 'INVALID_BODY');
+  }
+
+  return {workerId, botName, since};
+};
+
 /** Body of the worker control route `POST /v1/status-channel/announce`. */
 export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceRequest => {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     throw new HttpError(400, 'request body must be an object', 'INVALID_BODY');
   }
 
-  const {guildId, channelId, test, mentionRoleIds} = input as Record<string, unknown>;
+  const {guildId, channelId, test, mentionRoleIds, kind, worker} = input as Record<string, unknown>;
   // Optional for settings saved before the server was stored.
   if (guildId !== undefined && guildId !== null && !isSnowflake(guildId)) {
     throw new HttpError(400, 'guildId must be a Discord server id or null', 'INVALID_GUILD_ID');
@@ -171,11 +225,25 @@ export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceReques
     throw new HttpError(400, 'test must be a boolean', 'INVALID_BODY');
   }
 
-  // Optional for callers that predate role mentions.
-  return {
+  const request: StatusAnnounceRequest = {
     guildId: isSnowflake(guildId) ? guildId : null,
     channelId,
     test,
+    // Optional for callers that predate role mentions.
     mentionRoleIds: mentionRoleIds === undefined ? [] : parseMentionRoleIds(mentionRoleIds),
   };
+  if (kind === undefined) {
+    return request;
+  }
+
+  // Health alerts are never test messages; `worker` names the bot they are about.
+  if (!isWorkerAlertKind(kind)) {
+    throw new HttpError(400, 'kind must be worker-down or worker-recovered', 'INVALID_BODY');
+  }
+
+  if (test !== false) {
+    throw new HttpError(400, 'health alerts cannot be test messages', 'INVALID_BODY');
+  }
+
+  return {...request, kind, worker: parseWorkerAlertSubject(worker)};
 };

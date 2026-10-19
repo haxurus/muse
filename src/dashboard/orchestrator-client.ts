@@ -2,6 +2,13 @@ import got from 'got';
 import type {DashboardConfig} from './config.js';
 import type {PublicInfo} from './pricing.js';
 import {DashboardHttpError, describeUpstreamError} from './http.js';
+import {sanitizeLogEntries, type LogEntry} from '../utils/log-buffer.js';
+
+/** Log lines of one bot (or of the orchestrator), validated again: the browser only ever gets clean entries. */
+export type SuperWorkerLogs = {
+  workerId: string;
+  entries: LogEntry[];
+};
 
 type OrchestratorGuild = {
   id: string;
@@ -331,6 +338,30 @@ export default class OrchestratorClient {
       actorOptions(this.config.orchestratorToken, actor),
     ).text());
     return parseOptionalJson(body);
+  }
+
+  /**
+   * Recent log lines of one bot or of the orchestrator (read-only: no actor headers). An unreachable bot
+   * keeps its `WORKER_UNAVAILABLE` code (503) for the browser; other failures use the shared mapping.
+   */
+  async superWorkerLogs(workerId: string, limit: number): Promise<SuperWorkerLogs> {
+    let body: unknown;
+    try {
+      body = await got.get(
+        `${this.config.orchestratorUrl}/v1/super/workers/${encodeURIComponent(workerId)}/logs?limit=${limit}`,
+        options(this.config.orchestratorToken),
+      ).json<unknown>();
+    } catch (error: unknown) {
+      const failure = describeUpstreamError(error);
+      if (failure.statusCode === 503 && forwardedCode(failure.body) === 'WORKER_UNAVAILABLE') {
+        throw new DashboardHttpError(503, 'bot is unavailable', {code: 'WORKER_UNAVAILABLE'});
+      }
+
+      throw orchestratorError(error);
+    }
+
+    const entries = typeof body === 'object' && body !== null ? (body as {entries?: unknown}).entries : undefined;
+    return {workerId, entries: sanitizeLogEntries(entries)};
   }
 
   async superStatusChannel(actor: SuperActor): Promise<unknown> {

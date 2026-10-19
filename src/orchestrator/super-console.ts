@@ -4,19 +4,25 @@ import {assertGuildId, isSnowflake} from '../control/snowflake.js';
 import {
   isStatusAnnounceError,
   type StatusAnnounceError,
+  type WorkerAlertKind,
+  type WorkerAlertSubject,
   type WorkerBlocklistResult,
+  type WorkerLogs,
   type WorkerStatus,
   type WorkerStatusAnnounceResult,
 } from '../control/types.js';
+import {logBuffer, parseLogLimit, sanitizeLogEntries} from '../utils/log-buffer.js';
 import type WorkerClient from './worker-client.js';
 import {isPlainObject, isPrintable} from './durable-file.js';
 import {isContactDiscord, isContactEmail, isHttpsUrl, type PlatformSettingsStore} from './platform-store.js';
+import {WorkerHealthTracker, type WorkerHealthTransition} from './worker-health.js';
 import {mergeGuildMeta, type MergedGuildMeta} from './guild-meta.js';
 import PlanService, {PLAN_SWEEP_INTERVAL_MS} from './plan-service.js';
 import type {PlanStore} from './plan-store.js';
 import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {
   MAX_ACTOR_NAME_LENGTH,
+  SYSTEM_ACTOR,
   isBlockKind,
   normalizeReason,
   type Actor,
@@ -32,6 +38,8 @@ export const ACTOR_ID_HEADER = 'x-muse-actor-id';
 export const ACTOR_NAME_HEADER = 'x-muse-actor-name';
 export const OVERVIEW_AUDIT_LIMIT = 200;
 export const DEFAULT_RECONCILE_INTERVAL_MS = 60_000;
+/** Log source of the orchestrator's own buffer in `GET /v1/super/workers/:workerId/logs`. */
+export const ORCHESTRATOR_LOGS_ID = 'orchestrator';
 
 export type WorkerFailure = {
   workerId: string;
@@ -53,6 +61,12 @@ type PushResult = {
   failed: WorkerFailure[];
   results: Array<Settled<WorkerBlocklistResult>>;
 };
+
+/** What became of one health alert: not sent (and why), posted by a bot, or failed. */
+type AlertDelivery =
+  | {status: 'skipped'; reason: string}
+  | {status: 'posted'; postedBy: string}
+  | {status: 'failed'; error: string; postedBy: string | null};
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
 
@@ -88,6 +102,19 @@ const statusTestResult = (result: Settled<WorkerStatusAnnounceResult>): StatusTe
 
   const error = isPlainObject(answer) ? answer.error : undefined;
   return {workerId: result.workerId, ok: false, error: isStatusAnnounceError(error) ? error : 'DISCORD_ERROR'};
+};
+
+/** Audit details of one health alert: who posted it, or why it was not posted. */
+const deliveryDetails = (delivery: AlertDelivery): Record<string, unknown> => {
+  if (delivery.status === 'posted') {
+    return {notified: true, postedBy: delivery.postedBy};
+  }
+
+  if (delivery.status === 'skipped') {
+    return {notified: false, reason: delivery.reason};
+  }
+
+  return {notified: false, error: delivery.error, ...(delivery.postedBy === null ? {} : {postedBy: delivery.postedBy})};
 };
 
 /**
@@ -147,6 +174,9 @@ export default class SuperConsole {
   private reconciling = false;
   private lastReconcileFailures = '';
   private lastEntitlementFailures = '';
+  private readonly health = new WorkerHealthTracker();
+  /** Last username seen per bot, named in the alerts about a bot that is down. */
+  private readonly botNames = new Map<string, string>();
 
   constructor(
     private readonly workers: WorkerClient[],
@@ -238,6 +268,14 @@ export default class SuperConsole {
     }
 
     if (request.method === 'GET'
+      && segments.length === 5
+      && segments[1] === 'super'
+      && segments[2] === 'workers'
+      && segments[4] === 'logs') {
+      return {statusCode: 200, body: await this.workerLogs(segments[3], request.url)};
+    }
+
+    if (request.method === 'GET'
       && segments.length === 4
       && segments[1] === 'blocks'
       && segments[2] === 'users') {
@@ -317,6 +355,8 @@ export default class SuperConsole {
       console.error(`Blocklist reconcile failed: ${errorLabel(error)}`);
     }
 
+    await this.observeWorkerHealth();
+
     try {
       const {failed} = await this.plans.pushEntitlements();
       const summary = failed.map(failure => `${failure.workerId} (${failure.error})`).join(', ');
@@ -341,6 +381,8 @@ export default class SuperConsole {
     const blockedGuilds = new Set(this.blocks.blocklist().guildIds);
 
     const workers = statuses.map(result => {
+      // Set while a "bot offline" alert is outstanding (as of the last reconcile pass).
+      const downSince = this.health.downSince(result.workerId);
       if (!result.ok) {
         return {
           id: result.workerId,
@@ -351,6 +393,7 @@ export default class SuperConsole {
           activePlayers: 0,
           uptimeSeconds: null,
           error: result.error,
+          downSince,
         };
       }
 
@@ -365,6 +408,7 @@ export default class SuperConsole {
         guildCount: status.guilds.length,
         activePlayers: status.players.filter(player => player.connected).length,
         uptimeSeconds: status.uptimeSeconds,
+        downSince,
       };
     });
 
@@ -465,6 +509,32 @@ export default class SuperConsole {
     const config = this.platform.setInstance(patch, actor);
     this.record({actor, action: 'instance.config', subjectType: 'INSTANCE', subjectId: 'config', details: {...patch}, outcome: 'ok'});
     return config;
+  }
+
+  /**
+   * `GET /v1/super/workers/:workerId/logs`: the orchestrator's own buffer, or one bot's buffer fetched from
+   * it. An unknown id is `404 WORKER_NOT_FOUND`; a bot that does not answer is `503 WORKER_UNAVAILABLE`.
+   */
+  async workerLogs(workerId: string, url: string | undefined): Promise<WorkerLogs> {
+    const limit = parseLogLimit(url);
+    if (workerId === ORCHESTRATOR_LOGS_ID) {
+      return {workerId, entries: logBuffer.recent(limit)};
+    }
+
+    const worker = this.workers.find(candidate => candidate.id === workerId);
+    if (!worker) {
+      throw new HttpError(404, 'unknown worker', 'WORKER_NOT_FOUND');
+    }
+
+    let answer: unknown;
+    try {
+      answer = await worker.logs(limit);
+    } catch {
+      throw new HttpError(503, 'worker is unavailable', 'WORKER_UNAVAILABLE');
+    }
+
+    // The bot's answer is validated and redacted again before it reaches the super console.
+    return {workerId, entries: sanitizeLogEntries(isPlainObject(answer) ? answer.entries : undefined).slice(-limit)};
   }
 
   /** Full plan of a guild for the super console (with the internal note and coupon). */
@@ -752,6 +822,81 @@ export default class SuperConsole {
 
   private async statuses(): Promise<Array<Settled<WorkerStatus>>> {
     return Promise.all(this.workers.map(async worker => settle(worker.id, worker.status())));
+  }
+
+  /**
+   * One health check of every bot (healthy = reachable and Discord ready), then the alerts it makes due.
+   * Runs inside the reconcile loop; failures are logged, never thrown, so the loop keeps going.
+   */
+  private async observeWorkerHealth(): Promise<void> {
+    try {
+      const statuses = await this.statuses();
+      for (const result of statuses) {
+        if (result.ok && result.value.bot) {
+          this.botNames.set(result.workerId, result.value.bot.username);
+        }
+      }
+
+      const transitions = this.health.observe(statuses.map(result => ({
+        workerId: result.workerId,
+        healthy: result.ok && result.value.discordReady,
+      })), new Date().toISOString());
+      await Promise.all(transitions.map(async transition => this.announceWorkerTransition(transition, statuses)));
+    } catch (error: unknown) {
+      console.error(`Worker health check failed: ${errorLabel(error)}`);
+    }
+  }
+
+  /** Sends one alert (when a status channel is set) and audits it with the system actor. Never throws. */
+  private async announceWorkerTransition(transition: WorkerHealthTransition, statuses: Array<Settled<WorkerStatus>>): Promise<void> {
+    const down = transition.type === 'down';
+    const worker: WorkerAlertSubject = {
+      workerId: transition.workerId,
+      botName: this.botNames.get(transition.workerId) ?? transition.workerId,
+      since: transition.since,
+    };
+    const delivery = await this.deliverWorkerAlert(down ? 'worker-down' : 'worker-recovered', worker, statuses);
+    const downtimeSeconds = Math.max(0, Math.round((Date.now() - Date.parse(transition.since)) / 1000));
+    this.record({
+      actor: SYSTEM_ACTOR,
+      action: down ? 'worker.down' : 'worker.recovered',
+      subjectType: 'WORKER',
+      subjectId: transition.workerId,
+      details: {since: transition.since, ...(down ? {} : {downtimeSeconds}), ...deliveryDetails(delivery)},
+      outcome: delivery.status === 'failed' ? 'failed' : 'ok',
+    });
+  }
+
+  /** Posts one alert through a healthy bot that is a member of the status server. */
+  private async deliverWorkerAlert(kind: WorkerAlertKind, worker: WorkerAlertSubject, statuses: Array<Settled<WorkerStatus>>): Promise<AlertDelivery> {
+    const {statusGuildId, statusChannelId, mentionRoleIds} = this.platform.statusChannel();
+    if (statusChannelId === null) {
+      return {status: 'skipped', reason: 'NO_STATUS_CHANNEL'};
+    }
+
+    if (statusGuildId === null) {
+      return {status: 'skipped', reason: 'NO_STATUS_GUILD'};
+    }
+
+    const poster = this.workers.find(candidate => statuses.some(result => result.workerId === candidate.id
+      && result.ok
+      && result.value.discordReady
+      && result.value.guilds.some(guild => guild.id === statusGuildId)));
+    if (!poster) {
+      return {status: 'failed', error: 'NO_HEALTHY_POSTER', postedBy: null};
+    }
+
+    const answer = statusTestResult(await settle(poster.id, poster.announceStatus({
+      guildId: statusGuildId,
+      channelId: statusChannelId,
+      test: false,
+      mentionRoleIds,
+      kind,
+      worker,
+    })));
+    return answer.ok
+      ? {status: 'posted', postedBy: poster.id}
+      : {status: 'failed', error: answer.error, postedBy: poster.id};
   }
 
   /** Audit entries are written after the action; a failed audit write never fails the action. */
