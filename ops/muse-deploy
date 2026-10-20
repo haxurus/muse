@@ -27,7 +27,7 @@ RUNTIME_GID=10001
 WORKER_NUMBERS=(01 02 03 04 05)
 # Orchestrator state (each with its .bak): groups, super console blocks and audit,
 # platform settings (status channel) and server plans/coupons.
-ORCHESTRATOR_STATE_FILES=(groups.json blocks.json super-audit.json platform-settings.json plans.json)
+ORCHESTRATOR_STATE_FILES=(groups.json blocks.json super-audit.json platform-settings.json plans.json install-grants.json)
 ALLOWED_OVERLAYS=(bot-one-playback bot-two-playback bot-three-playback bot-four-playback bot-five-playback)
 COMPOSE_FILES=()
 FLEET_SERVICES=()

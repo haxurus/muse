@@ -12,6 +12,8 @@ x-worker-environment: &worker-environment
   YT_DLP_POT_PROVIDER_URL: http://muse-pot:4416
   # Playback pool: player commands follow the bot of the user's voice channel.
   MUSE_PLAYBACK_POOL: ${MUSE_PLAYBACK_POOL:-true}
+  # Closed access: a bot added to an unauthorized server explains why and leaves.
+  MUSE_INSTALL_GATE: ${MUSE_INSTALL_GATE:-true}
 
 x-worker-common: &worker-common
   image: ${MUSE_IMAGE:?MUSE_IMAGE must reference an immutable GHCR digest}
@@ -139,6 +141,8 @@ services:
       MUSE_WORKERS_FILE: /config/workers.json
       MUSE_ORCHESTRATOR_GROUPS_FILE: /state/groups.json
       MUSE_PLAYBACK_POOL: ${MUSE_PLAYBACK_POOL:-true}
+      MUSE_INSTALL_GATE: ${MUSE_INSTALL_GATE:-true}
+      MUSE_SUPER_ADMIN_USER_ID: ${MUSE_SUPER_ADMIN_USER_ID:-}
     secrets:
       - orchestrator_api_token
       - control_token_01

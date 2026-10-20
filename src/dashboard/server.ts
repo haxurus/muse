@@ -7,10 +7,10 @@ import DashboardAuth from './auth.js';
 import type {DashboardConfig} from './config.js';
 import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send, sendJson} from './http.js';
 import {MAX_BRANDING_BODY_BYTES, sanitizeBrandingProfile} from '../plans/branding.js';
-import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
+import {DICTIONARIES, LOCALES, Locale, escapeHtml, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
 import OrchestratorClient, {BlockKind, GuildSettingsUpdate, StatusChannelUpdate, SuperActor} from './orchestrator-client.js';
 import {homeStructuredData, robotsTxt, sitemapXml} from './seo.js';
-import {pricingMarkup, type PublicInfo} from './pricing.js';
+import {contactList, pricingMarkup, type PublicInfo} from './pricing.js';
 import type {DashboardSession} from './session-store.js';
 
 const STATIC_ROOT = path.join(process.cwd(), 'dashboard');
@@ -41,6 +41,8 @@ const PUBLIC_INFO_TTL_MS = 30_000;
 
 /** Rendered per request: promotions and contacts come from the orchestrator. */
 const PRICING_TEMPLATE = readFileSync(path.join(STATIC_ROOT, 'pricing.html'), 'utf8');
+/** "Access on request" page for anyone who is not the super admin (closed access). */
+const ACCESS_TEMPLATE = readFileSync(path.join(STATIC_ROOT, 'access.html'), 'utf8');
 
 const TEMPLATES = {
   home: readFileSync(path.join(STATIC_ROOT, 'home.html'), 'utf8'),
@@ -96,9 +98,10 @@ const COUPON_PATH = /^[\w-]{3,32}$/u;
 
 /**
  * Bot invite permissions: View Channels, Send Messages, Embed Links, Read Message History,
- * Connect, Speak and Change Nickname (Brand plan: the bot's own name and banner).
+ * Connect, Speak, Change Nickname (Brand plan: the bot's own name and banner) and View Audit
+ * Log (closed access: who added the bot).
  */
-export const BOT_INVITE_PERMISSIONS = '70339584';
+export const BOT_INVITE_PERMISSIONS = '70339712';
 
 export const botInviteUrl = (botId: string): string =>
   `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(botId)}&scope=bot+applications.commands&permissions=${BOT_INVITE_PERMISSIONS}`;
@@ -121,7 +124,7 @@ const isAppRoute = (segments: string[]): boolean =>
   (segments.length === 1 && (segments[0] === 'dashboard' || segments[0] === 'super'))
   || (segments.length === 2 && segments[0] === 'server' && SNOWFLAKE.test(segments[1]));
 
-/** The old "still in development" notice; its links now lead to the bot invites. */
+/** The old "still in development" notice; its links now lead to the access page. */
 const isDevelopmentRoute = (segments: string[]): boolean =>
   segments.length === 1 && segments[0] === 'development';
 
@@ -299,12 +302,6 @@ export default class DashboardServer {
         return;
       }
 
-      if (request.method === 'GET' && pathname === '/api/bots') {
-        this.auth.requireSession(request);
-        sendJson(response, 200, {bots: await this.inviteBots()});
-        return;
-      }
-
       if (request.method === 'GET' && pathname === '/api/session') {
         await this.sessionResponse(request, response);
         return;
@@ -439,6 +436,16 @@ export default class DashboardServer {
     send(response, 200, HTML, Buffer.from(html, 'utf8'), {'cache-control': NO_STORE, 'content-language': locale});
   }
 
+  private async sendAccess(response: ServerResponse, locale: Locale): Promise<void> {
+    const {origin} = this.config.publicUrl;
+    const info = await this.publicInfo();
+    const html = renderPage(ACCESS_TEMPLATE, locale, '/access', {origin}, {
+      contactList: contactList(info?.contacts ?? null, locale),
+      accessUnavailable: info ? '' : `<div class="notice notice-warn">${escapeHtml(DICTIONARIES[locale].access.unavailable)}</div>`,
+    });
+    send(response, 200, HTML, Buffer.from(html, 'utf8'), {'cache-control': NO_STORE, 'content-language': locale, ...NOINDEX});
+  }
+
   private sendPage(response: ServerResponse, page: PageName, locale: Locale): void {
     send(response, 200, HTML, this.pages[page][locale], {
       'cache-control': NO_STORE,
@@ -512,8 +519,13 @@ export default class DashboardServer {
       return true;
     }
 
+    if (rest.length === 1 && rest[0] === 'access') {
+      await this.sendAccess(response, locale);
+      return true;
+    }
+
     if (isDevelopmentRoute(rest)) {
-      redirect(response, new URL(`/add?lang=${locale}`, this.config.publicUrl).toString());
+      redirect(response, new URL(localizedPath(locale, '/access'), this.config.publicUrl).toString());
       return true;
     }
 
@@ -521,25 +533,31 @@ export default class DashboardServer {
   }
 
   /**
-   * "Add to Discord" from the public pages: signed-in users land on the dashboard invite
-   * card, anonymous visitors sign in with Discord first.
+   * "Add to Discord" from the public pages. Muse is closed to new servers: only the super admin
+   * lands on the dashboard invite card, everybody else on the "access on request" page.
    */
   private add(request: IncomingMessage, response: ServerResponse, locale: Locale): void {
-    const target = this.auth.currentSession(request)
+    const session = this.auth.currentSession(request);
+    const target = session !== undefined && this.auth.isSuperAdmin(session)
       ? `${localizedPath(locale, DASHBOARD_PATH)}#${NEW_SERVER_ANCHOR}`
-      : `/auth/discord?lang=${locale}`;
+      : localizedPath(locale, '/access');
     redirect(response, new URL(target, this.config.publicUrl).toString());
   }
 
   /**
-   * Bot invite links. Anonymous visitors start the Discord login; signed-in users are sent
-   * to Discord's bot authorization page for the requested worker's application (the
-   * blocklist still makes a bot leave a blocked server or one added by a blocked user).
+   * Bot invite links. Anonymous visitors start the Discord login, other users see the access
+   * page, and the super admin is sent to Discord's bot authorization page for that worker.
+   * The bots' install gate refuses unauthorized servers even when an invite link leaks.
    */
   private async invite(request: IncomingMessage, response: ServerResponse, workerId: string, locale: Locale): Promise<void> {
     const session = this.auth.currentSession(request);
     if (!session) {
       redirect(response, new URL(`/auth/discord?lang=${locale}`, this.config.publicUrl).toString());
+      return;
+    }
+
+    if (!this.auth.isSuperAdmin(session)) {
+      redirect(response, new URL(localizedPath(locale, '/access'), this.config.publicUrl).toString());
       return;
     }
 
@@ -610,6 +628,26 @@ export default class DashboardServer {
         }
 
         return this.orchestrator.superSetGuildPlan(segments[1], body, actor);
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && route === 'install-grants') {
+      const session = this.requireSuperAdmin(request);
+      sendJson(response, 200, await this.orchestrator.superInstallGrants(superActor(session)));
+      return;
+    }
+
+    if ((request.method === 'PUT' || request.method === 'DELETE') && segments.length === 2 && segments[0] === 'install-grants') {
+      const guildId = SNOWFLAKE.test(segments[1]) ? segments[1] : undefined;
+      await this.superPassThrough(request, response, {action: request.method === 'PUT' ? 'super.install.grant' : 'super.install.revoke', guildId}, async (body, actor) => {
+        if (!guildId) {
+          throw new HttpError(400, 'guild id must be a Discord server id');
+        }
+
+        return request.method === 'PUT'
+          ? this.orchestrator.superGrantInstall(guildId, body, actor)
+          : this.orchestrator.superRevokeInstall(guildId, actor);
       });
       return;
     }

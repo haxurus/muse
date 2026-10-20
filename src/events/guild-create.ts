@@ -8,6 +8,7 @@ import {REST} from '@discordjs/rest';
 import {Setting} from '@prisma/client';
 import registerCommandsOnGuild from '../utils/register-commands-on-guild.js';
 import {blocklist} from '../control/blocklist.js';
+import {explainRejection, findInstaller, isInstallGateEnabled, requestInstallCheck} from '../control/install-check.js';
 import {localeFromDiscord, t} from '../i18n/index.js';
 
 export async function createGuildSettings(guildId: string): Promise<Setting> {
@@ -30,9 +31,27 @@ export default async (guild: Guild): Promise<void> => {
     return;
   }
 
-  await createGuildSettings(guild.id);
-
   const config = container.get<Config>(TYPES.Config);
+
+  // Closed access: the bot stays only in a server the orchestrator authorizes (fails closed).
+  if (isInstallGateEnabled() && config.WORKER_ID) {
+    const client = container.get<Client>(TYPES.Client);
+    const installerId = await findInstaller(guild, client);
+    const verdict = await requestInstallCheck(config.CONTROL_TOKEN, {
+      guildId: guild.id,
+      guildName: guild.name.slice(0, 100) || guild.id,
+      memberCount: guild.memberCount,
+      installerId,
+    });
+    if (!verdict.approved) {
+      await explainRejection(guild, client, installerId, verdict.contacts);
+      await guild.leave();
+      console.log(`Left guild ${guild.id}: installation not authorized`);
+      return;
+    }
+  }
+
+  await createGuildSettings(guild.id);
 
   // Setup slash commands
   if (!config.REGISTER_COMMANDS_ON_BOT) {

@@ -34,8 +34,8 @@
     "button": "Accedi con Discord",
     "newServerKicker": "NUOVO SERVER",
     "newServerTitle": "Muse non è ancora nel server?",
-    "newServerText": "Accedi con Discord e aggiungi i bot ai server che amministri. Il piano Free include un bot, gratis.",
-    "newServerButton": "Aggiungi i bot",
+    "newServerText": "Questa istanza di Muse non accetta nuovi server: è un progetto open source da installare sul proprio server. Scopri perché e come contattarmi.",
+    "newServerButton": "Scopri di più",
     "failed": "Accesso con Discord non riuscito o annullato. Riprova.",
     "blocked": "Accesso non consentito."
   },
@@ -397,6 +397,28 @@
       "url": "Sito o modulo (https)",
       "save": "Salva recapiti",
       "saved": "Recapiti salvati."
+    },
+    "installs": {
+      "kicker": "ACCESSO",
+      "title": "Server autorizzati",
+      "text": "Muse è chiuso a nuovi server: un bot aggiunto altrove spiega il motivo a chi l’ha aggiunto ed esce. Autorizza qui un server prima che il proprietario aggiunga i bot.",
+      "on": "Accesso chiuso",
+      "off": "Controllo disattivato",
+      "guildId": "ID del server",
+      "note": "Nota (facoltativa)",
+      "grant": "Autorizza",
+      "empty": "Nessun server autorizzato.",
+      "revoke": "Revoca",
+      "revokeConfirm": "Revocare l’autorizzazione del server {id}? I bot già presenti restano, ma non potranno essere aggiunti di nuovo.",
+      "granted": "Server autorizzato.",
+      "revoked": "Autorizzazione revocata.",
+      "invalidId": "Inserisci l’ID di un server Discord (17-20 cifre).",
+      "source": {
+        "MANUAL": "Autorizzato dalla console",
+        "OWNER": "Aggiunto da te",
+        "EXISTING": "Aveva già un bot Muse",
+        "LEGACY": "Presente all’attivazione"
+      }
     }
   },
   "errors": {

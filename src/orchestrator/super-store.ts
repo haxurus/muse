@@ -66,7 +66,7 @@ export const isValidActor = (value: unknown): value is Actor => isPlainObject(va
 /** Author of automatic actions (for example a plan expiring), like Sentinel's "system" audit rows. */
 export const SYSTEM_ACTOR: Actor = {userId: 'system', username: 'Muse'};
 
-const isSystemActor = (value: unknown): boolean => isPlainObject(value)
+export const isSystemActor = (value: unknown): boolean => isPlainObject(value)
   && value.userId === SYSTEM_ACTOR.userId
   && value.username === SYSTEM_ACTOR.username;
 

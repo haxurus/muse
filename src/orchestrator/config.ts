@@ -119,6 +119,7 @@ export type OrchestratorConfig = {
   platformFile?: string;
   /** Server plans and coupons; defaults to plans.json next to the groups file. */
   plansFile?: string;
+  installGrantsFile?: string;
   /** Blocklist reconcile period; defaults to 60 seconds. */
   blocklistReconcileIntervalMs?: number;
 };
@@ -148,8 +149,9 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
   const auditFile = resolveStateFile('MUSE_ORCHESTRATOR_AUDIT_FILE', '/state/super-audit.json');
   const platformFile = resolveStateFile('MUSE_ORCHESTRATOR_PLATFORM_FILE', '/state/platform-settings.json');
   const plansFile = resolveStateFile('MUSE_ORCHESTRATOR_PLANS_FILE', '/state/plans.json');
-  if (new Set([groupsFile, blocksFile, auditFile, platformFile, plansFile]).size !== 5) {
-    throw new Error('Orchestrator groups, blocks, audit, platform settings and plans files must be distinct');
+  const installGrantsFile = resolveStateFile('MUSE_ORCHESTRATOR_INSTALL_GRANTS_FILE', '/state/install-grants.json');
+  if (new Set([groupsFile, blocksFile, auditFile, platformFile, plansFile, installGrantsFile]).size !== 6) {
+    throw new Error('Orchestrator groups, blocks, audit, platform settings, plans and install grants files must be distinct');
   }
 
   return {
@@ -162,5 +164,6 @@ export const loadOrchestratorConfig = (): OrchestratorConfig => {
     auditFile,
     platformFile,
     plansFile,
+    installGrantsFile,
   };
 };

@@ -2,8 +2,11 @@ import type {IncomingMessage} from 'node:http';
 import {HttpError, readJsonBody} from '../control/http.js';
 import {assertGuildId, isSnowflake} from '../control/snowflake.js';
 import {
+  type InstallNoticeKind,
+  type InstallSubject,
   isStatusAnnounceError,
   type StatusAnnounceError,
+  type StatusAnnounceRequest,
   type WorkerAlertKind,
   type WorkerAlertSubject,
   type WorkerBlocklistResult,
@@ -188,6 +191,21 @@ export default class SuperConsole {
     this.plans = new PlanService(workers, planStore, entry => {
       this.record(entry);
     }, async () => this.statuses());
+  }
+
+  /** Audit entries from other orchestrator parts (install gate); a failed write is only logged. */
+  appendAudit(entry: AuditEntryInput): void {
+    this.record(entry);
+  }
+
+  /** "Installation refused" in the status channel (when set), audited with the system actor. Never throws. */
+  async announceInstallRejected(install: InstallSubject): Promise<void> {
+    return this.announceInstall('install-rejected', install);
+  }
+
+  /** "Added to a server" (Sentinel), audited with the system actor. Never throws. */
+  async announceInstallApproved(install: InstallSubject): Promise<void> {
+    return this.announceInstall('install-approved', install);
   }
 
   // eslint-disable-next-line complexity
@@ -867,8 +885,36 @@ export default class SuperConsole {
     });
   }
 
+  private async announceInstall(kind: InstallNoticeKind, install: InstallSubject): Promise<void> {
+    try {
+      const delivery = await this.deliverStatusNotice({kind, install}, await this.statuses());
+      this.record({
+        actor: SYSTEM_ACTOR,
+        action: kind === 'install-approved' ? 'install.approved' : 'install.rejected',
+        subjectType: 'GUILD',
+        subjectId: install.guildId,
+        details: {
+          guildName: install.guildName,
+          memberCount: install.memberCount,
+          installerId: install.installerId,
+          workerId: install.workerId,
+          ...(install.source === undefined ? {} : {source: install.source}),
+          ...deliveryDetails(delivery),
+        },
+        outcome: delivery.status === 'failed' ? 'failed' : 'ok',
+      });
+    } catch (error: unknown) {
+      console.error(`Install rejection notice failed: ${errorLabel(error)}`);
+    }
+  }
+
   /** Posts one alert through a healthy bot that is a member of the status server. */
   private async deliverWorkerAlert(kind: WorkerAlertKind, worker: WorkerAlertSubject, statuses: Array<Settled<WorkerStatus>>): Promise<AlertDelivery> {
+    return this.deliverStatusNotice({kind, worker}, statuses);
+  }
+
+  /** Posts one alert or notice through a healthy bot that is a member of the status server. */
+  private async deliverStatusNotice(notice: Pick<StatusAnnounceRequest, 'kind' | 'worker' | 'install'>, statuses: Array<Settled<WorkerStatus>>): Promise<AlertDelivery> {
     const {statusGuildId, statusChannelId, mentionRoleIds} = this.platform.statusChannel();
     if (statusChannelId === null) {
       return {status: 'skipped', reason: 'NO_STATUS_CHANNEL'};
@@ -891,8 +937,7 @@ export default class SuperConsole {
       channelId: statusChannelId,
       test: false,
       mentionRoleIds,
-      kind,
-      worker,
+      ...notice,
     })));
     return answer.ok
       ? {status: 'posted', postedBy: poster.id}

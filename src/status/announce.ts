@@ -4,6 +4,8 @@ import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {isSnowflake} from '../control/snowflake.js';
 import {
   isWorkerAlertKind,
+  type InstallNoticeKind,
+  type InstallSubject,
   type StatusAnnounceError,
   type StatusAnnounceRequest,
   type StatusAnnounceResult,
@@ -19,6 +21,8 @@ export const STATUS_ONLINE_COLOR = 0x3ccf8e;
 export const STATUS_TEST_COLOR = 0xa78bfa;
 /** Left bar of the "Bot offline" alert (Muse danger red). */
 export const STATUS_DOWN_COLOR = 0xf2555a;
+/** Left bar of the "Installation refused" notice (Muse warning amber). */
+export const STATUS_WARN_COLOR = 0xf5a524;
 /** Footer when MUSE_DASHBOARD_PUBLIC_URL is missing or invalid. */
 export const DEFAULT_STATUS_FOOTER = 'Muse';
 
@@ -99,6 +103,41 @@ export const buildWorkerAlertEmbed = (input: WorkerAlertEmbedInput): EmbedBuilde
     .setTimestamp(input.now);
 };
 
+export type InstallRejectedEmbedInput = {
+  /** Defaults to a refusal. */
+  kind?: InstallNoticeKind;
+  install: InstallSubject;
+  locale: Locale;
+  now: Date;
+  footer: string;
+};
+
+/**
+ * Sentinel's install notices: "Installazione rifiutata" (which bot left which server) or "aggiunto a
+ * un server" (with the authorization), each with the server size and who added the bot.
+ */
+export const buildInstallRejectedEmbed = (input: InstallRejectedEmbedInput): EmbedBuilder => {
+  const {install, locale} = input;
+  const approved = input.kind === 'install-approved';
+  const embed = new EmbedBuilder()
+    .setColor(approved ? STATUS_ONLINE_COLOR : STATUS_WARN_COLOR)
+    .setTitle(t(locale, approved ? 'statusInstallApprovedTitle' : 'statusInstallRejectedTitle'))
+    .setDescription(t(locale, approved ? 'statusInstallApprovedDescription' : 'statusInstallRejectedDescription', {bot: install.botName, guild: install.guildName}))
+    .addFields(
+      {name: t(locale, 'statusFieldServer'), value: `${install.guildName}\n\`${install.guildId}\``},
+      {name: t(locale, 'statusFieldMembers'), value: String(install.memberCount)},
+      {
+        name: t(locale, 'statusFieldInstaller'),
+        value: install.installerId === null ? t(locale, 'statusInstallerUnknown') : `<@${install.installerId}>\n\`${install.installerId}\``,
+      },
+    );
+  if (approved && install.source !== undefined) {
+    embed.addFields({name: t(locale, 'statusFieldAuthorization'), value: install.source});
+  }
+
+  return embed.setFooter({text: input.footer}).setTimestamp(input.now);
+};
+
 /** Message content: only the role mentions, e.g. "<@&1> <@&2>"; undefined when there are none. */
 export const roleMentions = (roleIds: readonly string[]): string | undefined =>
   roleIds.length === 0 ? undefined : roleIds.map(id => `<@&${id}>`).join(' ');
@@ -163,20 +202,24 @@ export const postStatusMessage = async (
   const {user} = client;
   const locale = await resolveLocale(channel.guild.id);
   const footer = statusFooter(process.env.MUSE_DASHBOARD_PUBLIC_URL);
-  const alert = input.kind !== undefined && input.worker !== undefined ? {kind: input.kind, worker: input.worker} : undefined;
-  const embed = alert === undefined
-    ? buildStatusEmbed({
+  let embed: EmbedBuilder;
+  if (isInstallNoticeKind(input.kind) && input.install !== undefined) {
+    embed = buildInstallRejectedEmbed({kind: input.kind, install: input.install, locale, now: new Date(), footer});
+  } else if (input.kind !== undefined && !isInstallNoticeKind(input.kind) && input.worker !== undefined) {
+    embed = buildWorkerAlertEmbed({kind: input.kind, worker: input.worker, locale, now: new Date(), footer});
+  } else {
+    embed = buildStatusEmbed({
       bot: {id: user.id, username: user.username, tag: user.tag},
       guildCount: client.guilds.cache.size,
       test: input.test,
       locale,
       now: new Date(),
       footer,
-    })
-    : buildWorkerAlertEmbed({kind: alert.kind, worker: alert.worker, locale, now: new Date(), footer});
+    });
+  }
 
-  // Only the "down" alert pings the configured roles: a recovery message never does.
-  const roles = alert?.kind === 'worker-recovered' ? [] : [...new Set(input.mentionRoleIds)];
+  // Recoveries and refused installations are news, not emergencies: they never ping the roles.
+  const roles = input.kind === 'worker-recovered' || isInstallNoticeKind(input.kind) ? [] : [...new Set(input.mentionRoleIds)];
   const content = roleMentions(roles);
   try {
     await channel.send({
@@ -205,13 +248,33 @@ const parseWorkerAlertSubject = (input: unknown): WorkerAlertSubject => {
   return {workerId, botName, since};
 };
 
+const isInstallNoticeKind = (value: unknown): value is InstallNoticeKind => value === 'install-approved' || value === 'install-rejected';
+
+const parseInstallSubject = (input: unknown): InstallSubject => {
+  const {guildId, guildName, memberCount, installerId, workerId, botName, source} = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+  if (!isSnowflake(guildId)
+    || typeof guildName !== 'string' || guildName.length < 1 || guildName.length > 100
+    || !Number.isSafeInteger(memberCount) || (memberCount as number) < 0
+    || (installerId !== null && !isSnowflake(installerId))
+    || typeof workerId !== 'string' || !WORKER_ID.test(workerId)
+    || typeof botName !== 'string' || botName.length < 1 || botName.length > 64) {
+    throw new HttpError(400, 'install must name the server, its member count, the installer (or null) and the bot', 'INVALID_BODY');
+  }
+
+  if (source !== undefined && (typeof source !== 'string' || !/^[A-Z]{3,16}$/u.test(source))) {
+    throw new HttpError(400, 'install source must be an upper-case word', 'INVALID_BODY');
+  }
+
+  return {guildId, guildName, memberCount: memberCount as number, installerId, workerId, botName, ...(source === undefined ? {} : {source})};
+};
+
 /** Body of the worker control route `POST /v1/status-channel/announce`. */
 export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceRequest => {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) {
     throw new HttpError(400, 'request body must be an object', 'INVALID_BODY');
   }
 
-  const {guildId, channelId, test, mentionRoleIds, kind, worker} = input as Record<string, unknown>;
+  const {guildId, channelId, test, mentionRoleIds, kind, worker, install} = input as Record<string, unknown>;
   // Optional for settings saved before the server was stored.
   if (guildId !== undefined && guildId !== null && !isSnowflake(guildId)) {
     throw new HttpError(400, 'guildId must be a Discord server id or null', 'INVALID_GUILD_ID');
@@ -236,13 +299,18 @@ export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceReques
     return request;
   }
 
-  // Health alerts are never test messages; `worker` names the bot they are about.
-  if (!isWorkerAlertKind(kind)) {
-    throw new HttpError(400, 'kind must be worker-down or worker-recovered', 'INVALID_BODY');
-  }
-
+  // Alerts and notices are never test messages.
   if (test) {
     throw new HttpError(400, 'health alerts cannot be test messages', 'INVALID_BODY');
+  }
+
+  if (isInstallNoticeKind(kind)) {
+    return {...request, kind, install: parseInstallSubject(install)};
+  }
+
+  // `worker` names the bot a health alert is about.
+  if (!isWorkerAlertKind(kind)) {
+    throw new HttpError(400, 'kind must be worker-down, worker-recovered, install-approved or install-rejected', 'INVALID_BODY');
   }
 
   return {...request, kind, worker: parseWorkerAlertSubject(worker)};
