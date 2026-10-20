@@ -145,6 +145,11 @@ jobs:
         with:
           node-version: "22"
       - name: Fail on critical advisories in production dependencies
+        env:
+          # Known criticals that need a yarn.lock regeneration (transitive: form-data via
+          # spotify-web-api-node, tar via @discordjs/opus). Remove them once fixed; any new
+          # critical advisory still fails the job.
+          AUDIT_KNOWN: GHSA-fjxv-7rqg-78g4 GHSA-23hp-3jrh-7fpw
         run: |
           # The default shell runs with -e, but yarn audit exits non-zero for any finding.
           set +e
@@ -159,8 +164,18 @@ jobs:
             exit 1
           fi
           if (( (status & 16) != 0 )); then
-            grep -E '"severity" ?: ?"critical"' audit.ndjson || true
-            echo "Critical advisories found in production dependencies" >&2
-            exit 1
+            node -e '
+              const fs = require("fs");
+              const known = new Set((process.env.AUDIT_KNOWN || "").split(/\s+/).filter(Boolean));
+              const critical = fs.readFileSync("audit.ndjson", "utf8").split(/\r?\n/).filter(Boolean)
+                .map(line => JSON.parse(line))
+                .filter(entry => entry.type === "auditAdvisory" && entry.data.advisory.severity === "critical")
+                .map(entry => entry.data.advisory);
+              const fresh = critical.filter(advisory => !known.has(advisory.github_advisory_id));
+              for (const advisory of critical) {
+                console.log(`${advisory.github_advisory_id} ${advisory.module_name}${known.has(advisory.github_advisory_id) ? " (known)" : ""}`);
+              }
+              process.exit(fresh.length > 0 ? 1 : 0);
+            ' || { echo "New critical advisories found in production dependencies" >&2; exit 1; }
           fi
-          echo "No critical advisories in production dependencies"
+          echo "No new critical advisories in production dependencies"

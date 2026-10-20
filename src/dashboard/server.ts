@@ -960,7 +960,24 @@ export default class DashboardServer {
   /** One budget per signed-in session; anonymous callers share one per socket address (forwarded headers are not trusted). */
   private rateLimitKey(request: IncomingMessage): string {
     const session = this.auth.currentSession(request);
-    return session ? `session:${session.id}` : `address:${request.socket.remoteAddress ?? 'unknown'}`;
+    return session ? `session:${session.id}` : `address:${this.clientAddress(request)}`;
+  }
+
+  /**
+   * Behind Muse's own edge proxy (`MUSE_DASHBOARD_TRUST_PROXY=true`, production) every request comes
+   * from the edge container, which overwrites X-Forwarded-For: its last entry is the address the
+   * public proxy saw. Without the flag the header is never trusted.
+   */
+  private clientAddress(request: IncomingMessage): string {
+    const header = request.headers['x-forwarded-for'];
+    if (process.env.MUSE_DASHBOARD_TRUST_PROXY === 'true' && typeof header === 'string' && header.length <= 512) {
+      const last = header.split(',').at(-1)?.trim();
+      if (last && /^[\d.:a-f]{2,45}$/iu.test(last)) {
+        return last;
+      }
+    }
+
+    return request.socket.remoteAddress ?? 'unknown';
   }
 
   /**
