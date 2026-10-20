@@ -4,7 +4,7 @@ import {isSnowflake} from '../control/snowflake.js';
 import type {InstallCheckResult, InstallContacts, InstallSubject} from '../control/types.js';
 import {commitWithBackup, isPlainObject, isPrintable, loadWithBackup} from './durable-file.js';
 import type {SettledStatus} from './plan-service.js';
-import {SYSTEM_ACTOR, isValidActor, type Actor, type AuditEntryInput} from './super-store.js';
+import {SYSTEM_ACTOR, isSystemActor, isValidActor, type Actor, type AuditEntryInput} from './super-store.js';
 
 /**
  * Closed access (Sentinel install gate): Muse is a self-hosted project, not a public service, so a
@@ -41,7 +41,7 @@ const isValidGrant = (value: unknown): value is InstallGrant => isPlainObject(va
   && (INSTALL_GRANT_SOURCES as readonly unknown[]).includes(value.source)
   && (value.note === null || (typeof value.note === 'string' && isPrintable(value.note, 1, MAX_INSTALL_NOTE_LENGTH)))
   && isIsoDate(value.createdAt)
-  && isValidActor(value.createdBy);
+  && (isValidActor(value.createdBy) || isSystemActor(value.createdBy));
 
 const isValidInstallFile = (value: unknown): value is InstallFile => isPlainObject(value)
   && value.version === 1
