@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0913">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="{{meta.accessDescription}}">
+  <title>{{meta.accessTitle}}</title>
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body>
+  <div class="public-site access-page">
+    <header class="site-header">
+      <div class="site-container site-nav">
+        <a class="brand" href="{{prefix}}" aria-label="{{nav.homeLabel}}">
+          <svg class="brand-mark" width="28" height="28" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M13 21V10.6l8.5-2.1v10.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="10.9" cy="21" r="2.3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <circle class="brand-dot" cx="19.4" cy="18.8" r="2.4"/>
+          </svg>
+          <span>Muse</span>
+        </a>
+        <nav class="site-nav-links" aria-label="{{nav.label}}">
+          <a href="{{prefix}}">Home</a>
+          <a href="{{prefix}}/pricing">{{nav.pricing}}</a>
+          <a href="{{prefix}}/dashboard">{{footer.dashboard}}</a>
+        </nav>
+        <div class="site-nav-end">
+          {{{languageSwitcher}}}
+          <div class="site-nav-actions">
+            <a class="button button-ghost" href="{{prefix}}/dashboard">{{nav.login}}</a>
+            <a class="button button-primary" href="/add?lang={{lang}}">{{nav.add}}</a>
+          </div>
+        </div>
+        <details class="site-mobile-menu">
+          <summary aria-label="{{nav.openMenu}}"><span></span><span></span></summary>
+          <div>
+            <a href="{{prefix}}">Home</a>
+            <a href="{{prefix}}/pricing">{{nav.pricing}}</a>
+            <div class="site-mobile-actions">
+              <a class="button button-secondary" href="{{prefix}}/dashboard">{{nav.login}}</a>
+              <a class="button button-primary" href="/add?lang={{lang}}">{{nav.add}}</a>
+            </div>
+            {{{languageSwitcherMobile}}}
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main>
+      <section class="section" aria-labelledby="access-title">
+        <div class="site-container contact-layout">
+          <div class="contact-card">
+            <span class="kicker">{{access.kicker}}</span>
+            <h1 id="access-title">{{access.title}}</h1>
+            <p>{{access.reason}}</p>
+            <p>{{access.selfHostText}}</p>
+            <div class="access-actions">
+              <a class="button button-primary" href="https://github.com/haxurus/muse/blob/main/docs/DEPLOYMENT.md" target="_blank" rel="noreferrer noopener">{{access.selfHostButton}}</a>
+              <a class="button button-secondary" href="https://github.com/haxurus/muse" target="_blank" rel="noreferrer noopener">GitHub</a>
+            </div>
+          </div>
+          <div class="contact-card" id="contact">
+            <span class="kicker">{{access.contactKicker}}</span>
+            <h2>{{access.contactTitle}}</h2>
+            <p>{{access.contactText}}</p>
+            {{{accessUnavailable}}}
+            {{{contactList}}}
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-container">
+        <div class="footer-main">
+          <p>{{footer.about}} <a href="https://github.com/museofficial/muse" target="_blank" rel="noreferrer noopener">museofficial/muse</a> {{footer.license}}</p>
+          <nav aria-label="{{footer.navLabel}}">
+            <a href="{{prefix}}">Home</a>
+            <a href="{{prefix}}/pricing">{{nav.pricing}}</a>
+            <a href="{{prefix}}/dashboard">{{footer.dashboard}}</a>
+            <a href="https://github.com/haxurus/muse" target="_blank" rel="noreferrer noopener">GitHub</a>
+          </nav>
+        </div>
+        <div class="site-footer-bottom">
+          <span>{{footer.credits}}</span>
+          <span class="mono">{{footer.tagline}}</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

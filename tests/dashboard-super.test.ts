@@ -212,10 +212,20 @@ describe('bot invite links', () => {
     expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
   });
 
-  it('redirects any signed-in user to the Discord bot authorization for that worker', async () => {
+  it('sends signed-in users who are not the super admin to the access page', async () => {
     const dashboard = await startDashboard();
 
     const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.userHeaders().cookie});
+
+    expect(result.status).toBe(302);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en/access`);
+    expect(dashboard.orchestrator.workers).not.toHaveBeenCalled();
+  });
+
+  it('redirects the super admin to the Discord bot authorization for that worker', async () => {
+    const dashboard = await startDashboard();
+
+    const result = await call(dashboard.port, 'GET', '/invite/muse-01', {cookie: dashboard.superHeaders().cookie});
 
     expect(result.status).toBe(302);
     expect(result.headers.location).toBe(botInviteUrl(BOT_ID));
@@ -223,8 +233,8 @@ describe('bot invite links', () => {
     expect(location.origin + location.pathname).toBe('https://discord.com/oauth2/authorize');
     expect(location.searchParams.get('client_id')).toBe(BOT_ID);
     expect(location.searchParams.get('scope')).toBe('bot applications.commands');
-    // 3230720 plus Change Nickname (67108864) for the Brand plan.
-    expect(location.searchParams.get('permissions')).toBe('70339584');
+    // 3230720 plus Change Nickname (67108864, Brand plan) and View Audit Log (128, closed access).
+    expect(location.searchParams.get('permissions')).toBe('70339712');
   });
 
   it('returns 404 for malformed or unknown worker ids', async () => {
@@ -288,18 +298,18 @@ describe('super console API', () => {
     expect(dashboard.orchestrator.superOverview).toHaveBeenCalledWith({userId: SUPER_ADMIN_ID, username: 'haxurus'});
   });
 
-  it('lists inviteable bots for the super admin and for every signed-in user', async () => {
+  it('lists inviteable bots for the super admin only', async () => {
     const dashboard = await startDashboard();
-    const expected = {
+
+    expect(JSON.parse((await call(dashboard.port, 'GET', '/api/super/bots', {cookie: dashboard.superHeaders().cookie})).text)).toEqual({
       bots: [
         {workerId: 'muse-01', ready: true, bot: {id: BOT_ID, username: 'Muse One'}},
         {workerId: 'muse-02', ready: false, bot: null},
       ],
-    };
-
-    expect(JSON.parse((await call(dashboard.port, 'GET', '/api/super/bots', {cookie: dashboard.superHeaders().cookie})).text)).toEqual(expected);
-    expect(JSON.parse((await call(dashboard.port, 'GET', '/api/bots', {cookie: dashboard.userHeaders().cookie})).text)).toEqual(expected);
-    expect((await call(dashboard.port, 'GET', '/api/bots')).status).toBe(401);
+    });
+    expect((await call(dashboard.port, 'GET', '/api/super/bots', {cookie: dashboard.userHeaders().cookie})).status).toBe(403);
+    // The open-access route is gone.
+    expect((await call(dashboard.port, 'GET', '/api/bots', {cookie: dashboard.userHeaders().cookie})).status).toBe(404);
   });
 
   it('rejects mutations without CSRF token or with a foreign Origin', async () => {
@@ -589,25 +599,24 @@ describe('super console status channel API', () => {
 });
 
 describe('"Aggiungi a Discord" from the home page', () => {
-  it('sends anonymous visitors to the Discord login', async () => {
+  it('sends anonymous visitors and other users to the access page', async () => {
     const dashboard = await startDashboard();
 
-    const result = await call(dashboard.port, 'GET', '/add');
-
-    expect(result.status).toBe(302);
-    expect(result.headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=en`);
-    expect(result.headers['content-security-policy']).toBeDefined();
+    for (const headers of [{}, {cookie: dashboard.userHeaders().cookie}]) {
+      const result = await call(dashboard.port, 'GET', '/add', headers);
+      expect(result.status).toBe(302);
+      expect(result.headers.location).toBe(`${PUBLIC_URL}/en/access`);
+      expect(result.headers['content-security-policy']).toBeDefined();
+    }
   });
 
-  it('sends every signed-in user to the dashboard invite card', async () => {
+  it('sends the super admin to the dashboard invite card', async () => {
     const dashboard = await startDashboard();
 
-    for (const headers of [dashboard.userHeaders(), dashboard.superHeaders()]) {
-      const result = await call(dashboard.port, 'GET', '/add', {cookie: headers.cookie});
-      expect(result.status).toBe(302);
-      expect(result.headers.location).toBe(`${PUBLIC_URL}/en${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}`);
-    }
+    const result = await call(dashboard.port, 'GET', '/add', {cookie: dashboard.superHeaders().cookie});
 
+    expect(result.status).toBe(302);
+    expect(result.headers.location).toBe(`${PUBLIC_URL}/en${DASHBOARD_PATH}#${NEW_SERVER_ANCHOR}`);
     expect(NEW_SERVER_ANCHOR).toBe('nuovo-server');
   });
 
@@ -757,7 +766,7 @@ describe('dashboard static pages and fonts', () => {
 
     const development = await call(dashboard.port, 'GET', '/it/development');
     expect(development.status).toBe(302);
-    expect(development.headers.location).toBe(`${PUBLIC_URL}/add?lang=it`);
+    expect(development.headers.location).toBe(`${PUBLIC_URL}/it/access`);
 
     const app = await call(dashboard.port, 'GET', `/en${DASHBOARD_PATH}`);
     expect(app.text).toContain('<script src="/assets/dashboard.js" defer></script>');

@@ -260,6 +260,24 @@
               <div class="table-list" id="coupon-list"></div>
             </section>
 
+            <section class="card" id="installs-card">
+              <div class="card-head">
+                <div>
+                  <span class="kicker" data-i18n="super.installs.kicker"></span>
+                  <h2 data-i18n="super.installs.title"></h2>
+                  <p data-i18n="super.installs.text"></p>
+                </div>
+                <span class="tag" id="installs-state"></span>
+              </div>
+              <form class="installs-form" id="installs-form" novalidate>
+                <label class="field"><span data-i18n="super.installs.guildId"></span><input name="guildId" inputmode="numeric" maxlength="20" autocomplete="off" required></label>
+                <label class="field"><span data-i18n="super.installs.note"></span><input name="note" maxlength="200" autocomplete="off"></label>
+                <button class="button button-primary" type="submit" data-i18n="super.installs.grant"></button>
+              </form>
+              <div class="empty" id="installs-empty" hidden data-i18n="super.installs.empty"></div>
+              <div class="table-list" id="installs-list"></div>
+            </section>
+
             <section class="card" id="contacts-card">
               <div class="card-head">
                 <div>

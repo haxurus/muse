@@ -34,8 +34,8 @@
     "button": "Sign in with Discord",
     "newServerKicker": "NEW SERVER",
     "newServerTitle": "Muse not in your server yet?",
-    "newServerText": "Sign in with Discord and add the bots to the servers you manage. The Free plan includes one bot, free of charge.",
-    "newServerButton": "Add the bots",
+    "newServerText": "This Muse instance does not accept new servers: it is an open source project to host on your own server. Find out why and how to contact me.",
+    "newServerButton": "Learn more",
     "failed": "Discord sign-in failed or was cancelled. Please try again.",
     "blocked": "Access denied."
   },
@@ -397,6 +397,28 @@
       "url": "Website or form (https)",
       "save": "Save contacts",
       "saved": "Contacts saved."
+    },
+    "installs": {
+      "kicker": "ACCESS",
+      "title": "Authorized servers",
+      "text": "Muse is closed to new servers: a bot added elsewhere explains why to whoever added it and leaves. Authorize a server here before its owner adds the bots.",
+      "on": "Closed access",
+      "off": "Check disabled",
+      "guildId": "Server ID",
+      "note": "Note (optional)",
+      "grant": "Authorize",
+      "empty": "No authorized servers.",
+      "revoke": "Revoke",
+      "revokeConfirm": "Revoke the authorization of server {id}? The bots already there stay, but cannot be added again.",
+      "granted": "Server authorized.",
+      "revoked": "Authorization revoked.",
+      "invalidId": "Enter a Discord server ID (17-20 digits).",
+      "source": {
+        "MANUAL": "Authorized from the console",
+        "OWNER": "Added by you",
+        "EXISTING": "Already had a Muse bot",
+        "LEGACY": "Present when enabled"
+      }
     }
   },
   "errors": {

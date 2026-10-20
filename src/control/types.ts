@@ -97,6 +97,30 @@ export type WorkerAlertSubject = {
   since: string;
 };
 
+/** A refused installation: the server, who added the bot (when the audit log shows it) and which bot. */
+export type InstallSubject = {
+  guildId: string;
+  guildName: string;
+  memberCount: number;
+  installerId: string | null;
+  workerId: string;
+  botName: string;
+};
+
+/** Public contacts shown to whoever tried to add a bot (super console "Public contacts"). */
+export type InstallContacts = {
+  email: string | null;
+  discord: string | null;
+  url: string | null;
+};
+
+/** Answer of `POST /v1/worker/install-check` on the orchestrator. */
+export type InstallCheckResult = {
+  approved: boolean;
+  source: string | null;
+  contacts: InstallContacts;
+};
+
 /** Body of `POST /v1/status-channel/announce` on a worker. */
 export type StatusAnnounceRequest = {
   /** Server the channel must belong to; `null` only for settings saved before the server was stored. */
@@ -107,9 +131,11 @@ export type StatusAnnounceRequest = {
   /** Roles pinged by the message (0-10). */
   mentionRoleIds: string[];
   /** Health alert instead of the online or test message (then `test` is `false`). Absent for those. */
-  kind?: WorkerAlertKind;
-  /** The worker the alert is about; required with `kind`. */
+  kind?: WorkerAlertKind | 'install-rejected';
+  /** The worker a health alert is about; required with a health alert `kind`. */
   worker?: WorkerAlertSubject;
+  /** The refused installation; required with `kind: 'install-rejected'`. */
+  install?: InstallSubject;
 };
 
 /** Answer of `POST /v1/status-channel/announce` on a worker. */

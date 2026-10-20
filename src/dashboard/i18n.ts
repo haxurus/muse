@@ -114,6 +114,8 @@ const it = {
     ogImageAlt: 'Muse: music bot Discord per cinque canali vocali insieme, con YouTube, Spotify e SoundCloud.',
     pricingTitle: 'Prezzi · Piani gratuiti e premium del music bot Discord Muse',
     pricingDescription: 'Confronta i piani di Muse: music bot Discord gratuito con YouTube, Spotify e SoundCloud, più i piani Plus, Pro e Brand con più bot in canali vocali diversi, 24/7 e nome del bot personalizzato.',
+    accessTitle: 'Muse · Accesso su richiesta',
+    accessDescription: 'Muse è un music bot Discord open source da installare sul proprio server: questa istanza non accetta nuovi server.',
     appNoscript: 'Muse Control richiede JavaScript.',
   },
   nav: {
@@ -303,6 +305,17 @@ const it = {
     credits: 'Muse © 2026 · Fatto da Haxurus',
     tagline: 'discord music · self-hosted',
   },
+  access: {
+    kicker: 'Accesso su richiesta',
+    title: 'Muse non è un servizio pubblico.',
+    reason: 'Per rispettare i termini dei servizi musicali da cui Muse riproduce l’audio (come YouTube), questa istanza non accetta nuovi server: Muse è distribuito come progetto open source che chiunque può installare sulla propria infrastruttura.',
+    selfHostText: 'Puoi avere il tuo Muse in pochi passi: la guida spiega come installarlo con Docker su un tuo server, con i tuoi bot Discord.',
+    selfHostButton: 'Guida all’installazione',
+    contactKicker: 'Contatti',
+    contactTitle: 'Vuoi usarlo nel tuo server?',
+    contactText: 'Scrivimi indicando il server: valuto io le richieste e, se possibile, lo autorizzo dalla console.',
+    unavailable: 'Impossibile caricare i recapiti in questo momento: puoi comunque aprire una issue su GitHub.',
+  },
   pricing: {
     kicker: 'Piani',
     title: 'Un piano per ogni server.',
@@ -389,6 +402,8 @@ const en: Messages = {
     ogImageAlt: 'Muse: Discord music bot for five voice channels at once, with YouTube, Spotify and SoundCloud.',
     pricingTitle: 'Pricing · Free and premium Discord music bot plans',
     pricingDescription: 'Compare Muse plans: a free Discord music bot with YouTube, Spotify and SoundCloud, plus Plus, Pro and Brand plans with more bots in different voice channels, 24/7 and a custom bot name.',
+    accessTitle: 'Muse · Access on request',
+    accessDescription: 'Muse is an open source Discord music bot to host on your own server: this instance does not accept new servers.',
     appNoscript: 'Muse Control requires JavaScript.',
   },
   nav: {
@@ -577,6 +592,17 @@ const en: Messages = {
     dashboard: 'Dashboard',
     credits: 'Muse © 2026 · Made by Haxurus',
     tagline: 'discord music · self-hosted',
+  },
+  access: {
+    kicker: 'Access on request',
+    title: 'Muse is not a public service.',
+    reason: 'To respect the terms of the music services Muse plays from (such as YouTube), this instance does not accept new servers: Muse is distributed as an open source project that anyone can host on their own infrastructure.',
+    selfHostText: 'You can run your own Muse in a few steps: the guide explains how to install it with Docker on your own server, with your own Discord bots.',
+    selfHostButton: 'Installation guide',
+    contactKicker: 'Contact',
+    contactTitle: 'Want to use it in your server?',
+    contactText: 'Write to me naming the server: I review requests myself and, when possible, authorize it from the console.',
+    unavailable: 'Contacts cannot be loaded right now: you can still open an issue on GitHub.',
   },
   pricing: {
     kicker: 'Plans',

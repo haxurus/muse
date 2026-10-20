@@ -6,8 +6,9 @@ import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
 import {handlePlaybackProxy} from '../playback/transport.js';
-import {assertGuildId} from '../control/snowflake.js';
-import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS} from './super-console.js';
+import {assertGuildId, isSnowflake} from '../control/snowflake.js';
+import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS, parseActor} from './super-console.js';
+import InstallGate, {InstallGrantStore, isInstallGateEnabled} from './install-gate.js';
 import {AuditStore, BlockStore} from './super-store.js';
 import {PlatformSettingsStore} from './platform-store.js';
 import {PlanStore} from './plan-store.js';
@@ -15,7 +16,7 @@ import {PLANS} from '../plans/plans.js';
 import {MAX_BRANDING_BODY_BYTES} from '../plans/branding.js';
 import {isPlaybackPoolEnabled} from '../playback/protocol.js';
 import PlaybackPool from './playback-pool.js';
-import type {WorkerPlatformConfig} from '../control/types.js';
+import type {InstallCheckResult, InstallContacts, WorkerPlatformConfig} from '../control/types.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -36,6 +37,7 @@ export default class OrchestratorServer {
   private readonly superConsole: SuperConsole;
   private readonly platform: PlatformSettingsStore;
   private readonly pool?: PlaybackPool;
+  private readonly installGate: InstallGate;
 
   constructor(private readonly config: OrchestratorConfig) {
     this.workers = config.workers.map(worker => new WorkerClient(worker));
@@ -52,6 +54,16 @@ export default class OrchestratorServer {
       this.platform,
       new PlanStore(config.plansFile ?? path.join(stateDirectory, 'plans.json')),
     );
+    const superAdminUserId = process.env.MUSE_SUPER_ADMIN_USER_ID?.trim();
+    this.installGate = new InstallGate(new InstallGrantStore(config.installGrantsFile ?? path.join(stateDirectory, 'install-grants.json')), {
+      statuses: async () => this.workerStatuses(),
+      superAdminUserId: isSnowflake(superAdminUserId) ? superAdminUserId : null,
+      contacts: () => this.installContacts(),
+      announceRejected: async install => this.superConsole.announceInstallRejected(install),
+      record: entry => {
+        this.superConsole.appendAudit(entry);
+      },
+    });
     if (isPlaybackPoolEnabled()) {
       this.pool = new PlaybackPool(
         config.workers,
@@ -77,6 +89,11 @@ export default class OrchestratorServer {
     console.log(`Muse orchestrator listening on ${this.config.host}:${this.config.port} with ${this.workers.length} workers`);
     // Workers keep the blocklist only in memory, so it is pushed at start and periodically.
     this.superConsole.startReconcile(this.config.blocklistReconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
+    if (isInstallGateEnabled()) {
+      void this.installGate.seedOnce().catch((error: unknown) => {
+        console.warn(`Install gate seeding failed: ${errorLabel(error)}`);
+      });
+    }
   }
 
   async close(): Promise<void> {
@@ -120,8 +137,18 @@ export default class OrchestratorServer {
         return;
       }
 
+      if (segments.join('/') === 'v1/worker/install-check') {
+        sendJson(response, 200, await this.installCheck(request));
+        return;
+      }
+
       if (!hasBearerToken(request, this.config.apiToken)) {
         sendJson(response, 401, {error: 'unauthorized'});
+        return;
+      }
+
+      if (segments.length >= 3 && segments[0] === 'v1' && segments[1] === 'super' && segments[2] === 'install-grants') {
+        sendJson(response, 200, await this.installGrantsRoute(request, segments));
         return;
       }
 
@@ -247,6 +274,57 @@ export default class OrchestratorServer {
 
     const {statusGuildId, statusChannelId, mentionRoleIds} = this.platform.statusChannel();
     return {statusGuildId, statusChannelId, mentionRoleIds};
+  }
+
+  /** The calling worker of a worker-token route; the admin API token is refused. */
+  private workerCaller(request: IncomingMessage): string {
+    if (hasBearerToken(request, this.config.apiToken)) {
+      throw new HttpError(403, 'this route requires a worker control token', 'WORKER_TOKEN_REQUIRED');
+    }
+
+    const callers = this.config.workers.filter(worker => hasBearerToken(request, worker.token));
+    if (callers.length !== 1) {
+      throw new HttpError(401, 'unauthorized');
+    }
+
+    return callers[0].id;
+  }
+
+  /** `POST /v1/worker/install-check` (worker control token): may the bot stay in the server it was added to? */
+  private async installCheck(request: IncomingMessage): Promise<InstallCheckResult> {
+    const callerId = this.workerCaller(request);
+    if (request.method !== 'POST') {
+      throw new HttpError(405, 'method not allowed');
+    }
+
+    const body = await readJsonBody(request);
+    if (!isInstallGateEnabled()) {
+      return {approved: true, source: null, contacts: this.installContacts()};
+    }
+
+    return this.installGate.check(callerId, body);
+  }
+
+  /** `GET /v1/super/install-grants`, `PUT|DELETE /v1/super/install-grants/:guildId`. */
+  private async installGrantsRoute(request: IncomingMessage, segments: string[]) {
+    if (request.method === 'GET' && segments.length === 3) {
+      return {enabled: isInstallGateEnabled(), grants: this.installGate.grants()};
+    }
+
+    if (segments.length === 4 && request.method === 'PUT') {
+      return this.installGate.authorize(segments[3], request, parseActor(request));
+    }
+
+    if (segments.length === 4 && request.method === 'DELETE') {
+      return this.installGate.revoke(segments[3], parseActor(request));
+    }
+
+    throw new HttpError(404, 'not found');
+  }
+
+  private installContacts(): InstallContacts {
+    const {contactEmail, contactDiscord, contactUrl} = this.platform.instance();
+    return {email: contactEmail, discord: contactDiscord, url: contactUrl};
   }
 
   private async workerStatuses() {

@@ -300,3 +300,9 @@ Layout (Sentinel super console style):
 - **AUDIT · Azioni super-admin**: action, subject, actor, outcome (`ok` / `partial` / `failed`) and time.
 
 After every action the overview is reloaded; successes show a toast, failures and partial results a notice. Orchestrator errors such as `CANNOT_BLOCK_SELF` or `BLOCK_NOT_FOUND` are shown with their message.
+
+## Closed access: authorized servers
+
+`GET /v1/super/install-grants` -> `{enabled, grants: [{guildId, source, note, createdAt, createdBy}]}`; `PUT /v1/super/install-grants/:guildId {note?}` authorizes a server (source `MANUAL`, audit `install.grant`); `DELETE` revokes it (audit `install.revoke`; the bots already there stay). Dashboard: `/api/super/install-grants[/:guildId]`, card "Server autorizzati".
+
+Grant sources: `LEGACY` (servers the bots were in when `MUSE_INSTALL_GATE` was first enabled), `EXISTING` (a Muse bot was already there), `OWNER` (added by `MUSE_SUPER_ADMIN_USER_ID`, read from the audit log), `MANUAL`. A refused installation is audited as `install.rejected` (system actor, with server name, member count, installer and delivery) and announced in the status channel without role mentions. State file: `install-grants.json` (backed up by `muse-deploy`).

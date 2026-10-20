@@ -380,6 +380,30 @@ export default class OrchestratorClient {
     return sanitizePublicInfo(body);
   }
 
+  /** Closed access: whether the install gate is on and the authorized servers. */
+  async superInstallGrants(actor: SuperActor): Promise<unknown> {
+    return call(async () => got.get(
+      `${this.config.orchestratorUrl}/v1/super/install-grants`,
+      actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
+  }
+
+  /** Authorize a server before its owner adds the bots. */
+  async superGrantInstall(guildId: string, body: Record<string, unknown>, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.put(
+      `${this.config.orchestratorUrl}/v1/super/install-grants/${encodeURIComponent(guildId)}`,
+      {...actorOptions(this.config.orchestratorToken, actor), json: body},
+    ).json<unknown>());
+  }
+
+  /** Withdraw a server's authorization (the bots already there stay). */
+  async superRevokeInstall(guildId: string, actor: SuperActor): Promise<unknown> {
+    return call(async () => got.delete(
+      `${this.config.orchestratorUrl}/v1/super/install-grants/${encodeURIComponent(guildId)}`,
+      actorOptions(this.config.orchestratorToken, actor),
+    ).json<unknown>());
+  }
+
   /** Waitlist switch and public contacts of the super console. */
   async superSetConfig(body: Record<string, unknown>, actor: SuperActor): Promise<unknown> {
     return call(async () => got.put(

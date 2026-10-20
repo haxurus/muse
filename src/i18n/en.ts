@@ -232,6 +232,17 @@ export const EN_MESSAGES = {
   statusRecoveredDescription: '{bot} is connected to Discord again.',
   statusFieldWorker: 'Worker',
   statusFieldDownSince: 'Down since',
+  statusInstallRejectedTitle: 'Installation refused',
+  statusInstallRejectedDescription: '{bot} left **{guild}**: the server is not authorized.',
+  statusFieldServer: 'Server',
+  statusFieldMembers: 'Members',
+  statusFieldInstaller: 'Added by',
+  statusInstallerUnknown: 'unknown',
+  installRejectedTitle: 'Muse cannot be added to {guild}',
+  installRejectedReason: 'Muse is not a public service. To respect the terms of the music services it plays from (such as YouTube), it is distributed only as an open source project that everyone can host on their own server.',
+  installRejectedSelfHost: 'You can host your own Muse by following the guide: {url}',
+  installRejectedContact: 'Would you like to use this instance in your server? Contact me:',
+  installRejectedLeft: 'The bot has left the server.',
 } as const;
 
 export type MessageKey = keyof typeof EN_MESSAGES;
