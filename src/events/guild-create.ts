@@ -32,13 +32,6 @@ export default async (guild: Guild): Promise<void> => {
     return;
   }
 
-<<<<<<< HEAD
-  await createGuildSettings(guild.id);
-  // Back in a server the bot left: the stored settings and favorites are no longer on the retention clock.
-  await clearGuildDeparture(guild.id);
-
-=======
->>>>>>> origin/main
   const config = container.get<Config>(TYPES.Config);
 
   // Closed access: the bot stays only in a server the orchestrator authorizes (fails closed).
@@ -60,6 +53,8 @@ export default async (guild: Guild): Promise<void> => {
   }
 
   await createGuildSettings(guild.id);
+  // Back in a server the bot left: the stored settings and favorites are no longer on the retention clock.
+  await clearGuildDeparture(guild.id);
 
   // Setup slash commands
   if (!config.REGISTER_COMMANDS_ON_BOT) {
