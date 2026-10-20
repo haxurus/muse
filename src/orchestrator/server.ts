@@ -60,6 +60,7 @@ export default class OrchestratorServer {
       superAdminUserId: isSnowflake(superAdminUserId) ? superAdminUserId : null,
       contacts: () => this.installContacts(),
       announceRejected: async install => this.superConsole.announceInstallRejected(install),
+      announceApproved: async install => this.superConsole.announceInstallApproved(install),
       record: entry => {
         this.superConsole.appendAudit(entry);
       },

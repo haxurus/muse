@@ -137,6 +137,9 @@ describe('refused installation messages', () => {
     expect(() => parseStatusAnnounceRequest({channelId: guildA, test: false, kind: 'install-rejected', install: {guildId: 'x'}})).toThrow();
     const embed = buildInstallRejectedEmbed({install: subject, locale: 'it', now: new Date(0), footer: 'Muse'}).toJSON();
     expect(embed.title).toBe('Installazione rifiutata');
+    const approved = buildInstallRejectedEmbed({kind: 'install-approved', install: {...subject, source: 'MANUAL'}, locale: 'en', now: new Date(0), footer: 'Muse'}).toJSON();
+    expect(approved.title).toBe('Muse added to a server');
+    expect(approved.fields?.at(-1)).toEqual({name: 'Authorization', value: 'MANUAL'});
     expect(embed.fields?.map(field => field.value)).toEqual(['Test server\n`222222222222222222`', '12', `<@${STRANGER}>\n\`${STRANGER}\``]);
   });
 

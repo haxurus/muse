@@ -4,6 +4,7 @@ import {parseMentionRoleIds} from '../control/mention-roles.js';
 import {isSnowflake} from '../control/snowflake.js';
 import {
   isWorkerAlertKind,
+  type InstallNoticeKind,
   type InstallSubject,
   type StatusAnnounceError,
   type StatusAnnounceRequest,
@@ -103,19 +104,25 @@ export const buildWorkerAlertEmbed = (input: WorkerAlertEmbedInput): EmbedBuilde
 };
 
 export type InstallRejectedEmbedInput = {
+  /** Defaults to a refusal. */
+  kind?: InstallNoticeKind;
   install: InstallSubject;
   locale: Locale;
   now: Date;
   footer: string;
 };
 
-/** Sentinel's "Installazione rifiutata": which bot left which server, its size and who added the bot. */
+/**
+ * Sentinel's install notices: "Installazione rifiutata" (which bot left which server) or "aggiunto a
+ * un server" (with the authorization), each with the server size and who added the bot.
+ */
 export const buildInstallRejectedEmbed = (input: InstallRejectedEmbedInput): EmbedBuilder => {
   const {install, locale} = input;
-  return new EmbedBuilder()
-    .setColor(STATUS_WARN_COLOR)
-    .setTitle(t(locale, 'statusInstallRejectedTitle'))
-    .setDescription(t(locale, 'statusInstallRejectedDescription', {bot: install.botName, guild: install.guildName}))
+  const approved = input.kind === 'install-approved';
+  const embed = new EmbedBuilder()
+    .setColor(approved ? STATUS_ONLINE_COLOR : STATUS_WARN_COLOR)
+    .setTitle(t(locale, approved ? 'statusInstallApprovedTitle' : 'statusInstallRejectedTitle'))
+    .setDescription(t(locale, approved ? 'statusInstallApprovedDescription' : 'statusInstallRejectedDescription', {bot: install.botName, guild: install.guildName}))
     .addFields(
       {name: t(locale, 'statusFieldServer'), value: `${install.guildName}\n\`${install.guildId}\``},
       {name: t(locale, 'statusFieldMembers'), value: String(install.memberCount)},
@@ -123,9 +130,12 @@ export const buildInstallRejectedEmbed = (input: InstallRejectedEmbedInput): Emb
         name: t(locale, 'statusFieldInstaller'),
         value: install.installerId === null ? t(locale, 'statusInstallerUnknown') : `<@${install.installerId}>\n\`${install.installerId}\``,
       },
-    )
-    .setFooter({text: input.footer})
-    .setTimestamp(input.now);
+    );
+  if (approved && install.source !== undefined) {
+    embed.addFields({name: t(locale, 'statusFieldAuthorization'), value: install.source});
+  }
+
+  return embed.setFooter({text: input.footer}).setTimestamp(input.now);
 };
 
 /** Message content: only the role mentions, e.g. "<@&1> <@&2>"; undefined when there are none. */
@@ -193,9 +203,9 @@ export const postStatusMessage = async (
   const locale = await resolveLocale(channel.guild.id);
   const footer = statusFooter(process.env.MUSE_DASHBOARD_PUBLIC_URL);
   let embed: EmbedBuilder;
-  if (input.kind === 'install-rejected' && input.install !== undefined) {
-    embed = buildInstallRejectedEmbed({install: input.install, locale, now: new Date(), footer});
-  } else if (input.kind !== undefined && input.kind !== 'install-rejected' && input.worker !== undefined) {
+  if (isInstallNoticeKind(input.kind) && input.install !== undefined) {
+    embed = buildInstallRejectedEmbed({kind: input.kind, install: input.install, locale, now: new Date(), footer});
+  } else if (input.kind !== undefined && !isInstallNoticeKind(input.kind) && input.worker !== undefined) {
     embed = buildWorkerAlertEmbed({kind: input.kind, worker: input.worker, locale, now: new Date(), footer});
   } else {
     embed = buildStatusEmbed({
@@ -209,7 +219,7 @@ export const postStatusMessage = async (
   }
 
   // Recoveries and refused installations are news, not emergencies: they never ping the roles.
-  const roles = input.kind === 'worker-recovered' || input.kind === 'install-rejected' ? [] : [...new Set(input.mentionRoleIds)];
+  const roles = input.kind === 'worker-recovered' || isInstallNoticeKind(input.kind) ? [] : [...new Set(input.mentionRoleIds)];
   const content = roleMentions(roles);
   try {
     await channel.send({
@@ -238,8 +248,10 @@ const parseWorkerAlertSubject = (input: unknown): WorkerAlertSubject => {
   return {workerId, botName, since};
 };
 
+const isInstallNoticeKind = (value: unknown): value is InstallNoticeKind => value === 'install-approved' || value === 'install-rejected';
+
 const parseInstallSubject = (input: unknown): InstallSubject => {
-  const {guildId, guildName, memberCount, installerId, workerId, botName} = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+  const {guildId, guildName, memberCount, installerId, workerId, botName, source} = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   if (!isSnowflake(guildId)
     || typeof guildName !== 'string' || guildName.length < 1 || guildName.length > 100
     || !Number.isSafeInteger(memberCount) || (memberCount as number) < 0
@@ -249,7 +261,11 @@ const parseInstallSubject = (input: unknown): InstallSubject => {
     throw new HttpError(400, 'install must name the server, its member count, the installer (or null) and the bot', 'INVALID_BODY');
   }
 
-  return {guildId, guildName, memberCount: memberCount as number, installerId, workerId, botName};
+  if (source !== undefined && (typeof source !== 'string' || !/^[A-Z]{3,16}$/u.test(source))) {
+    throw new HttpError(400, 'install source must be an upper-case word', 'INVALID_BODY');
+  }
+
+  return {guildId, guildName, memberCount: memberCount as number, installerId, workerId, botName, ...(source === undefined ? {} : {source})};
 };
 
 /** Body of the worker control route `POST /v1/status-channel/announce`. */
@@ -288,13 +304,13 @@ export const parseStatusAnnounceRequest = (input: unknown): StatusAnnounceReques
     throw new HttpError(400, 'health alerts cannot be test messages', 'INVALID_BODY');
   }
 
-  if (kind === 'install-rejected') {
+  if (isInstallNoticeKind(kind)) {
     return {...request, kind, install: parseInstallSubject(install)};
   }
 
   // `worker` names the bot a health alert is about.
   if (!isWorkerAlertKind(kind)) {
-    throw new HttpError(400, 'kind must be worker-down, worker-recovered or install-rejected', 'INVALID_BODY');
+    throw new HttpError(400, 'kind must be worker-down, worker-recovered, install-approved or install-rejected', 'INVALID_BODY');
   }
 
   return {...request, kind, worker: parseWorkerAlertSubject(worker)};

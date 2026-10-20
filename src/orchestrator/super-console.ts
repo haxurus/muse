@@ -2,6 +2,7 @@ import type {IncomingMessage} from 'node:http';
 import {HttpError, readJsonBody} from '../control/http.js';
 import {assertGuildId, isSnowflake} from '../control/snowflake.js';
 import {
+  type InstallNoticeKind,
   type InstallSubject,
   isStatusAnnounceError,
   type StatusAnnounceError,
@@ -199,14 +200,30 @@ export default class SuperConsole {
 
   /** "Installation refused" in the status channel (when set), audited with the system actor. Never throws. */
   async announceInstallRejected(install: InstallSubject): Promise<void> {
+    return this.announceInstall('install-rejected', install);
+  }
+
+  /** "Added to a server" (Sentinel), audited with the system actor. Never throws. */
+  async announceInstallApproved(install: InstallSubject): Promise<void> {
+    return this.announceInstall('install-approved', install);
+  }
+
+  private async announceInstall(kind: InstallNoticeKind, install: InstallSubject): Promise<void> {
     try {
-      const delivery = await this.deliverStatusNotice({kind: 'install-rejected', install}, await this.statuses());
+      const delivery = await this.deliverStatusNotice({kind, install}, await this.statuses());
       this.record({
         actor: SYSTEM_ACTOR,
-        action: 'install.rejected',
+        action: kind === 'install-approved' ? 'install.approved' : 'install.rejected',
         subjectType: 'GUILD',
         subjectId: install.guildId,
-        details: {guildName: install.guildName, memberCount: install.memberCount, installerId: install.installerId, workerId: install.workerId, ...deliveryDetails(delivery)},
+        details: {
+          guildName: install.guildName,
+          memberCount: install.memberCount,
+          installerId: install.installerId,
+          workerId: install.workerId,
+          ...(install.source === undefined ? {} : {source: install.source}),
+          ...deliveryDetails(delivery),
+        },
         outcome: delivery.status === 'failed' ? 'failed' : 'ok',
       });
     } catch (error: unknown) {

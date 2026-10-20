@@ -105,7 +105,12 @@ export type InstallSubject = {
   installerId: string | null;
   workerId: string;
   botName: string;
+  /** Why an accepted installation was authorized (install grant source); absent for a refusal. */
+  source?: string;
 };
+
+/** Install notices in the status channel: Sentinel's "added to a server" and "installation refused". */
+export type InstallNoticeKind = 'install-approved' | 'install-rejected';
 
 /** Public contacts shown to whoever tried to add a bot (super console "Public contacts"). */
 export type InstallContacts = {
@@ -131,10 +136,10 @@ export type StatusAnnounceRequest = {
   /** Roles pinged by the message (0-10). */
   mentionRoleIds: string[];
   /** Health alert instead of the online or test message (then `test` is `false`). Absent for those. */
-  kind?: WorkerAlertKind | 'install-rejected';
+  kind?: WorkerAlertKind | InstallNoticeKind;
   /** The worker a health alert is about; required with a health alert `kind`. */
   worker?: WorkerAlertSubject;
-  /** The refused installation; required with `kind: 'install-rejected'`. */
+  /** The installation; required with an install notice `kind`. */
   install?: InstallSubject;
 };
 

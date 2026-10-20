@@ -112,11 +112,13 @@ export type InstallGateDeps = {
   contacts: () => InstallContacts;
   /** Posts "installation refused" in the status channel and audits it; never throws. */
   announceRejected: (install: InstallSubject) => Promise<void>;
+  /** Posts "added to a server" with the authorization; never throws. */
+  announceApproved?: (install: InstallSubject) => Promise<void>;
   record: (entry: AuditEntryInput) => void;
 };
 
 const parseInstallSubject = (input: unknown, workerId: string, botName: string): InstallSubject => {
-  const {guildId, guildName, memberCount, installerId} = (isPlainObject(input) ? input : {}) as Record<string, unknown>;
+  const {guildId, guildName, memberCount, installerId}: Record<string, unknown> = isPlainObject(input) ? input : {};
   if (!isSnowflake(guildId)
     || typeof guildName !== 'string' || !isPrintable(guildName, 1, 100)
     || !Number.isSafeInteger(memberCount) || (memberCount as number) < 0
@@ -182,6 +184,8 @@ export default class InstallGate {
     if (!existing) {
       this.store.set(install.guildId, {source, note: null, createdAt: new Date().toISOString(), createdBy: SYSTEM_ACTOR});
     }
+
+    await this.deps.announceApproved?.({...install, source});
 
     return {approved: true, source, contacts: this.deps.contacts()};
   }
