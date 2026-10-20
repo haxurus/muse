@@ -278,6 +278,8 @@ Create a GitHub Environment named `production`, restrict it to `main`, require a
 
 Until the repository variable `ENABLE_VPS_DEPLOY` is `true`, images are built but the VPS deployment job is skipped.
 
+`.github/workflows/dependabot-automerge.yml` (Sentinel model): when CI passes on a Dependabot pull request whose commit lists only `semver-minor`/`semver-patch` updates, it squash-merges that exact commit and dispatches **Deploy production** (merges made with the workflow token do not trigger push workflows). Majors and anything unclassified wait for a human.
+
 Deploy and rollback jobs share the `muse-production` concurrency group, so they never run at the same time. On the VPS, `muse-deploy` additionally holds an exclusive `flock` on `/run/lock/muse-deploy.lock` for `deploy` and `rollback`; a second invocation exits with status 75 instead of waiting.
 
 ## 10. First manual deploy

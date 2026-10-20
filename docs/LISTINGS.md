@@ -58,7 +58,7 @@ salvati su richiesta. Muse è self-hosted e non è ancora aperto al pubblico: l'
 ## Invite permissions
 
 The invite link asks for exactly these permissions (the value is `BOT_INVITE_PERMISSIONS` in
-`src/dashboard/server.ts`, `70339584`):
+`src/dashboard/server.ts`, `70339712`):
 
 | Permission | Bit | Why the bot needs it |
 | --- | --- | --- |
@@ -69,13 +69,14 @@ The invite link asks for exactly these permissions (the value is `BOT_INVITE_PER
 | Connect | 1048576 | Join a voice channel |
 | Speak | 2097152 | Play audio in the voice channel |
 | Change Nickname | 67108864 | Brand plan only: set the bot's nickname and banner in one server |
+| View Audit Log | 128 | Closed access: see who added the bot, so the install gate can tell the super admin from others |
 
-The bits add up to `70339584`. The invite does not ask for Administrator or any moderation permission.
+The bits add up to `70339712`. The invite does not ask for Administrator or any moderation permission.
 
 Invite link template (replace the application id; the dashboard builds the same link per bot):
 
 ```text
-https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=70339584
+https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=70339712
 ```
 
 ## Required links

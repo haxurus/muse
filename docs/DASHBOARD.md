@@ -65,13 +65,16 @@ GET /invite/:workerId[?lang=it|en]        workerId = muse-NN
 The language is `?lang=` when valid, otherwise the `Accept-Language` preference (the dashboard links always pass it).
 
 - no session: `302 /auth/discord?lang=<lang>` (the login starts; afterwards the user lands on `/<lang>/dashboard`);
-- signed in (Muse is public: any Discord user can add the bots): the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
-  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=70339584`
-  (View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak, Change Nickname; the last one is used by the Brand plan).
+- signed in but not the super admin: `302 /<lang>/access` (closed access, see below);
+- super admin: the worker is looked up in the orchestrator `GET /v1/workers`; unknown or malformed ids give `404`, an offline worker (no bot identity) gives `503`, otherwise `302` to
+  `https://discord.com/oauth2/authorize?client_id=<bot id>&scope=bot+applications.commands&permissions=70339712`
+  (View Channels, Send Messages, Embed Links, Read Message History, Connect, Speak, Change Nickname for the Brand plan, View Audit Log so the install gate knows who added the bot).
 
-Which bots answer in a server is decided by its plan (the Free plan includes the first bot); the blocklist still makes the bots leave a blocked server or one added by a blocked user. Servers that added the bots before the Change Nickname permission was part of the invite must grant it by hand to use the Brand plan.
+Servers that added the bots before Change Nickname / View Audit Log were part of the invite must grant them by hand (Brand plan, installer detection).
 
-`GET /api/bots` (any session) returns the inviteable bots for the dashboard "Add the bots" card, like `GET /api/super/bots`.
+### Closed access
+
+This instance does not accept new servers: Muse stays a self-hosted project (the music sources' terms, such as YouTube's, do not allow a public hosted service). `/<lang>/access` (noindex) explains why, links the self-hosting guide and shows the public contacts. The bots enforce it too: with `MUSE_INSTALL_GATE=true` (production default) a bot added to a server asks the orchestrator `POST /v1/worker/install-check`; an unauthorized server gets a DM to whoever added the bot (or the owner, else the system channel) with the same explanation and contacts, the bot leaves and the status channel shows "Installazione rifiutata". The check fails closed. Authorized servers: those the bots were in when the gate was first enabled, servers that already have a Muse bot, servers the super admin adds the bots to, and servers authorized in the super console ("Server autorizzati"). Also turn off **Public Bot** for each bot in the Discord Developer Portal.
 
 ### "Aggiungi a Discord" / "Add to Discord" (`/add`)
 
@@ -81,10 +84,10 @@ GET /add[?lang=it|en]
 
 Target of the "Add to Discord" buttons on the public home pages (they pass `?lang=`; without it the `Accept-Language` preference is used):
 
-- signed in: `302 /<lang>/dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" / "New server · Add the bots" card with one invite per bot);
-- no session: `302 /auth/discord?lang=<lang>` (after the login the user lands on the dashboard, where the same card is shown).
+- super admin: `302 /<lang>/dashboard#nuovo-server` (the "Nuovo server · Aggiungi i bot" / "New server · Add the bots" card with one invite per bot);
+- anybody else: `302 /<lang>/access`.
 
-The old `/<lang>/development` notice was removed when Muse became public: the path answers `302 /add?lang=<lang>`.
+The old `/<lang>/development` notice answers `302 /<lang>/access`.
 
 ### Brand plan: bot names and banner
 

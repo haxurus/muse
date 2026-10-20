@@ -97,6 +97,35 @@ export type WorkerAlertSubject = {
   since: string;
 };
 
+/** A refused installation: the server, who added the bot (when the audit log shows it) and which bot. */
+export type InstallSubject = {
+  guildId: string;
+  guildName: string;
+  memberCount: number;
+  installerId: string | null;
+  workerId: string;
+  botName: string;
+  /** Why an accepted installation was authorized (install grant source); absent for a refusal. */
+  source?: string;
+};
+
+/** Install notices in the status channel: Sentinel's "added to a server" and "installation refused". */
+export type InstallNoticeKind = 'install-approved' | 'install-rejected';
+
+/** Public contacts shown to whoever tried to add a bot (super console "Public contacts"). */
+export type InstallContacts = {
+  email: string | null;
+  discord: string | null;
+  url: string | null;
+};
+
+/** Answer of `POST /v1/worker/install-check` on the orchestrator. */
+export type InstallCheckResult = {
+  approved: boolean;
+  source: string | null;
+  contacts: InstallContacts;
+};
+
 /** Body of `POST /v1/status-channel/announce` on a worker. */
 export type StatusAnnounceRequest = {
   /** Server the channel must belong to; `null` only for settings saved before the server was stored. */
@@ -107,9 +136,11 @@ export type StatusAnnounceRequest = {
   /** Roles pinged by the message (0-10). */
   mentionRoleIds: string[];
   /** Health alert instead of the online or test message (then `test` is `false`). Absent for those. */
-  kind?: WorkerAlertKind;
-  /** The worker the alert is about; required with `kind`. */
+  kind?: WorkerAlertKind | InstallNoticeKind;
+  /** The worker a health alert is about; required with a health alert `kind`. */
   worker?: WorkerAlertSubject;
+  /** The installation; required with an install notice `kind`. */
+  install?: InstallSubject;
 };
 
 /** Answer of `POST /v1/status-channel/announce` on a worker. */

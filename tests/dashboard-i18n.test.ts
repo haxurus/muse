@@ -281,8 +281,8 @@ describe('localized routes', () => {
     expect(app.text).toContain('href="/en/super"');
     expect(app.text).toContain('<script src="/assets/dashboard.js" defer></script>');
 
-    // The old development notice now leads to the bot invites.
-    expect((await call(dashboard.port, 'GET', '/it/development')).headers.location).toBe(`${PUBLIC_URL}/add?lang=it`);
+    // The old development notice now leads to the access page.
+    expect((await call(dashboard.port, 'GET', '/it/development')).headers.location).toBe(`${PUBLIC_URL}/it/access`);
 
     for (const path of ['/it/', '/fr', '/fr/dashboard', '/en/dashboard/', '/en/server/123', '/it/add', '/en/en']) {
       expect((await call(dashboard.port, 'GET', path)).status, path).toBe(404);
@@ -389,13 +389,13 @@ describe('language through the Discord login', () => {
 });
 
 describe('localized /add and /invite redirects', () => {
-  it('sends anonymous visitors to the Discord login and signed-in users to the invite card', async () => {
+  it('sends visitors to the localized access page and the super admin to the invite card', async () => {
     const dashboard = await startDashboard();
 
-    expect((await call(dashboard.port, 'GET', '/add?lang=it')).headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=it`);
-    expect((await call(dashboard.port, 'GET', '/add', {'accept-language': 'it'})).headers.location).toBe(`${PUBLIC_URL}/auth/discord?lang=it`);
+    expect((await call(dashboard.port, 'GET', '/add?lang=it')).headers.location).toBe(`${PUBLIC_URL}/it/access`);
+    expect((await call(dashboard.port, 'GET', '/add', {'accept-language': 'it'})).headers.location).toBe(`${PUBLIC_URL}/it/access`);
     expect((await call(dashboard.port, 'GET', '/add?lang=en', {cookie: dashboard.userCookie})).headers.location)
-      .toBe(`${PUBLIC_URL}/en/dashboard#${NEW_SERVER_ANCHOR}`);
+      .toBe(`${PUBLIC_URL}/en/access`);
     expect((await call(dashboard.port, 'GET', '/add?lang=it', {cookie: dashboard.superCookie})).headers.location)
       .toBe(`${PUBLIC_URL}/it/dashboard#${NEW_SERVER_ANCHOR}`);
   });

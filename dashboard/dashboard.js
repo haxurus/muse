@@ -360,12 +360,15 @@ const renderHome = () => {
   grid.replaceChildren(...session.guilds.map(guildCard));
   $('guild-empty').hidden = session.guilds.length > 0;
 
+  // Closed access: only the super admin adds the bots to new servers.
   const inviteCard = $(NEW_SERVER_ANCHOR);
-  inviteCard.hidden = false;
-  void loadInvites();
-  // "/add" lands here with #nuovo-server: the card was hidden at load, so scroll once now.
-  if (window.location.hash === `#${NEW_SERVER_ANCHOR}`) {
-    inviteCard.scrollIntoView({block: 'start'});
+  inviteCard.hidden = !session.superAdmin;
+  if (session.superAdmin) {
+    void loadInvites();
+    // "/add" lands here with #nuovo-server: the card was hidden at load, so scroll once now.
+    if (window.location.hash === `#${NEW_SERVER_ANCHOR}`) {
+      inviteCard.scrollIntoView({block: 'start'});
+    }
   }
 };
 
@@ -376,7 +379,7 @@ const loadInvites = async () => {
   showNotice($('invite-message'), '');
 
   try {
-    const {bots} = await api('/api/bots');
+    const {bots} = await api('/api/super/bots');
     if (request !== inviteRequest) return;
 
     const tiles = (Array.isArray(bots) ? bots : []).map(bot => {
@@ -969,6 +972,7 @@ const loadOverview = async () => {
     overview = data;
     renderOverviewData();
     $('super-content').hidden = false;
+    void loadInstallGrants();
   } catch (error) {
     if (request !== overviewRequest) return;
     handleFailure(error, message => showNotice($('super-message'), message));
@@ -2031,6 +2035,80 @@ const renderCoupons = () => {
   $('coupon-empty').hidden = coupons.length > 0;
 };
 
+/* ---------- Closed access: authorized servers ---------- */
+
+let installGrants = null;
+let installRequest = 0;
+const INSTALL_SOURCES = ['MANUAL', 'OWNER', 'EXISTING', 'LEGACY'];
+
+const loadInstallGrants = async () => {
+  const request = ++installRequest;
+  try {
+    const data = await api('/api/super/install-grants');
+    if (request !== installRequest) return;
+    installGrants = data;
+  } catch (error) {
+    if (request !== installRequest) return;
+    installGrants = null;
+    handleFailure(error, message => showNotice($('super-message'), message));
+  }
+
+  renderInstallGrants();
+};
+
+const renderInstallGrant = grant => {
+  const row = el('div', 'block-row');
+  const copy = el('div');
+  const title = el('strong');
+  const name = guildNameById(grant.guildId);
+  title.append(document.createTextNode(name ? `${name} · ` : ''), el('span', 'mono', grant.guildId));
+  const source = INSTALL_SOURCES.includes(grant.source) ? t(`super.installs.source.${grant.source}`) : String(grant.source);
+  const by = grant.createdBy && grant.createdBy.username ? ` · ${t('super.by', {name: grant.createdBy.username})}` : '';
+  copy.append(title, el('span', '', `${source}${grant.note ? ` · ${grant.note}` : ''} · ${formatDate(grant.createdAt)}${by}`));
+  row.append(
+    copy,
+    button(t('super.installs.revoke'), 'button-secondary button-sm', () => {
+      if (window.confirm(t('super.installs.revokeConfirm', {id: grant.guildId}))) {
+        void superAction(`/api/super/install-grants/${encodeURIComponent(grant.guildId)}`, 'DELETE', {}).then(result => {
+          if (result) toast(t('super.installs.revoked'));
+        });
+      }
+    }),
+  );
+  return row;
+};
+
+const renderInstallGrants = () => {
+  const grants = installGrants && Array.isArray(installGrants.grants) ? installGrants.grants : [];
+  const state = $('installs-state');
+  const enabled = Boolean(installGrants && installGrants.enabled);
+  state.textContent = t(enabled ? 'super.installs.on' : 'super.installs.off');
+  state.className = enabled ? 'tag tag-ok' : 'tag tag-warn';
+  $('installs-list').replaceChildren(...grants.map(renderInstallGrant));
+  $('installs-empty').hidden = grants.length > 0;
+};
+
+/** Server names the bots know, for the authorized servers list. */
+const guildNameById = guildId => {
+  const guild = overview && Array.isArray(overview.guilds) ? overview.guilds.find(candidate => candidate.id === guildId) : undefined;
+  return guild ? guild.name : '';
+};
+
+const submitInstallForm = async form => {
+  const data = new FormData(form);
+  const guildId = String(data.get('guildId') || '').trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    showNotice($('super-message'), t('super.installs.invalidId'));
+    return;
+  }
+
+  const result = await superAction(`/api/super/install-grants/${encodeURIComponent(guildId)}`, 'PUT', {note: String(data.get('note') || '').trim()});
+  if (result) {
+    form.reset();
+    toast(t('super.installs.granted'));
+  }
+};
+
 /** Public contacts of the pricing page; the form keeps what is being typed across reloads. */
 const renderContacts = () => {
   const form = $('contacts-form');
@@ -2381,6 +2459,11 @@ const wire = () => {
   $('brand-banner-remove').addEventListener('click', () => {
     const workerIds = Object.entries(guildBranding()).filter(([, profile]) => profile && profile.bannerSet).map(([workerId]) => workerId);
     if (workerIds.length > 0) void runBranding(workerIds, {banner: null}, t('brand.bannerRemoved'));
+  });
+
+  $('installs-form').addEventListener('submit', event => {
+    event.preventDefault();
+    void submitInstallForm(event.currentTarget);
   });
 
   $('contacts-form').addEventListener('submit', event => {
