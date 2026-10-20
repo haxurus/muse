@@ -361,6 +361,7 @@ select {
 .coupon-row > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .coupon-row > div:first-child span { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 .block-forms form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.member-data-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .block-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; align-items: center; padding: 12px 16px; background: var(--bg-raised); }
 .block-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .block-row > div > span { color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
@@ -568,6 +569,7 @@ select {
   .card { padding: 20px; }
   .card-head { flex-direction: column; }
   .block-forms form { grid-template-columns: 1fr; }
+  .member-data-form { grid-template-columns: 1fr; }
   .plan-editor-grid, .coupon-form, .plan-meters { grid-template-columns: 1fr; }
   .status-channel-actions .button { flex: 1 1 auto; }
   .block-row { grid-template-columns: 1fr auto; }

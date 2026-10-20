@@ -50,3 +50,9 @@ model FavoriteQuery {
 
   @@unique([guildId, name])
 }
+
+/// When the bot left a server (or was first seen not to be in it); see src/services/data-retention.ts.
+model GuildDeparture {
+  guildId String   @id
+  leftAt  DateTime
+}

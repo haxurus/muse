@@ -150,3 +150,34 @@ export type WorkerGuildMeta = {
   channels: GuildMetaChannel[];
   roles: GuildMetaRole[];
 };
+
+/** A saved favorite as exported (name, query, author and creation time; the row id is not exported). */
+export type WorkerFavoriteExport = {
+  name: string;
+  query: string;
+  authorId: string;
+  createdAt: string;
+};
+
+/** `GET /v1/guilds/:guildId/export` on a worker: this bot's settings row (null when none) and favorites of the guild. */
+export type WorkerGuildExport = {
+  workerId: string;
+  guildId: string;
+  settings: WorkerGuildSettings | null;
+  favorites: WorkerFavoriteExport[];
+};
+
+/** `DELETE /v1/guilds/:guildId/privacy/user/:userId` on a worker: favorites removed in that guild. */
+export type WorkerGuildUserDataDeletion = {
+  workerId: string;
+  guildId: string;
+  userId: string;
+  favorites: number;
+};
+
+/** `DELETE /v1/users/:userId/data` on a worker: favorites removed in every guild this bot has data for. */
+export type WorkerUserDataDeletion = {
+  workerId: string;
+  userId: string;
+  favorites: number;
+};

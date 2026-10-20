@@ -399,6 +399,26 @@
       "saved": "Contacts saved."
     }
   },
+  "privacy": {
+    "kicker": "DATA",
+    "title": "Your data",
+    "text": "Delete the favorites you saved in any server where Muse runs. Dashboard sessions are kept in memory only and end when you sign out.",
+    "deleteButton": "Delete my data",
+    "confirmSelf": "Delete every favorite you saved, in every server on every Muse bot? This cannot be undone. Your dashboard session stays open.",
+    "selfDeleted": "Deleted {count} saved favorites.",
+    "selfPartial": "Deleted {count} saved favorites. {failed} bots could not be reached: run the deletion again later.",
+    "serverKicker": "SERVER DATA",
+    "serverTitle": "Export and member data",
+    "serverText": "Download this server's settings, saved favorites, groups and plan as JSON, or delete the favorites one member saved here.",
+    "exportButton": "Export server data",
+    "exported": "The export was downloaded.",
+    "memberLabel": "Member Discord user ID",
+    "memberButton": "Delete member's favorites",
+    "confirmMember": "Delete every favorite that this member saved in this server? Settings are not affected.",
+    "memberDeleted": "Deleted {count} favorites of that member.",
+    "memberPartial": "Deleted {count} favorites. {failed} bots could not be reached: run the deletion again later.",
+    "invalidId": "Enter a Discord user ID (17 to 20 digits)."
+  },
   "errors": {
     "generic": "Request failed.",
     "forbidden": "Action not allowed. Reload the page and try again.",

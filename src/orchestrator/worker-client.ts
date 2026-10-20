@@ -3,13 +3,16 @@ import type {GuildSettingsPatch} from '../control/settings-validation.js';
 import type {
   WorkerBlocklistResult,
   WorkerBrandingResult,
+  WorkerGuildExport,
   WorkerGuildMeta,
   WorkerGuildSettings,
+  WorkerGuildUserDataDeletion,
   WorkerLeaveGuildResult,
   WorkerLogs,
   WorkerStatus,
   StatusAnnounceRequest,
   WorkerStatusAnnounceResult,
+  WorkerUserDataDeletion,
 } from '../control/types.js';
 import type {Blocklist} from '../control/blocklist.js';
 import type {EntitlementsPush} from '../plans/entitlements.js';
@@ -90,6 +93,30 @@ export default class WorkerClient {
         json: patch,
       },
     )).json<WorkerGuildSettings>();
+  }
+
+  /** Data export of one guild on this bot: its settings row and saved favorites (`GET /v1/guilds/:guildId/export`). */
+  async guildExport(guildId: string): Promise<WorkerGuildExport> {
+    return capResponseSize(got.get(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/export`,
+      requestOptions(this.worker.token),
+    )).json<WorkerGuildExport>();
+  }
+
+  /** Removes one user's saved favorites in one guild on this bot (server admin privacy action). */
+  async deleteGuildUserData(guildId: string, userId: string): Promise<WorkerGuildUserDataDeletion> {
+    return capResponseSize(got.delete(
+      `${this.worker.baseUrl}/v1/guilds/${encodeURIComponent(guildId)}/privacy/user/${encodeURIComponent(userId)}`,
+      requestOptions(this.worker.token),
+    )).json<WorkerGuildUserDataDeletion>();
+  }
+
+  /** Removes one user's saved favorites in every guild of this bot (self-service privacy action). */
+  async deleteUserData(userId: string): Promise<WorkerUserDataDeletion> {
+    return capResponseSize(got.delete(
+      `${this.worker.baseUrl}/v1/users/${encodeURIComponent(userId)}/data`,
+      requestOptions(this.worker.token),
+    )).json<WorkerUserDataDeletion>();
   }
 
   async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {

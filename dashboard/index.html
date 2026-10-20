@@ -131,6 +131,18 @@
             <div class="notice" id="guild-empty" hidden data-i18n="servers.empty"></div>
             <div class="guild-grid" id="guild-grid"></div>
           </section>
+
+          <section class="card" id="privacy-card">
+            <div class="card-head">
+              <div>
+                <span class="kicker" data-i18n="privacy.kicker"></span>
+                <h2 data-i18n="privacy.title"></h2>
+                <p data-i18n="privacy.text"></p>
+              </div>
+            </div>
+            <div class="notice" id="own-data-message" role="status" hidden></div>
+            <button class="button button-danger" type="button" id="delete-own-data" data-i18n="privacy.deleteButton"></button>
+          </section>
         </div>
       </section>
 
@@ -434,6 +446,21 @@
             </div>
             <div class="empty" id="overview-empty" hidden data-i18n="overview.empty"></div>
             <div class="table-list" id="overview-bots"></div>
+          </section>
+          <section class="panel" id="privacy-panel">
+            <div class="panel-title">
+              <div>
+                <p class="eyebrow" data-i18n="privacy.serverKicker"></p>
+                <h2 data-i18n="privacy.serverTitle"></h2>
+                <p class="muted" data-i18n="privacy.serverText"></p>
+              </div>
+              <button class="button button-secondary button-sm" type="button" id="export-guild" data-i18n="privacy.exportButton"></button>
+            </div>
+            <div class="notice" id="privacy-message" role="status" hidden></div>
+            <form class="member-data-form" id="member-data-form" novalidate>
+              <label class="field"><span data-i18n="privacy.memberLabel"></span><input name="userId" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="123456789012345678"></label>
+              <button class="button button-danger" type="submit" data-i18n="privacy.memberButton"></button>
+            </form>
           </section>
         </div>
 

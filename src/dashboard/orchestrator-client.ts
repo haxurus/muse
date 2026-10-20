@@ -63,6 +63,28 @@ export type SuperActor = {
 
 export type BlockKind = 'GUILD' | 'USER';
 
+/** `GET /v1/guilds/:guildId/export`: per present bot its settings and favorites, plus groups, plan and branding flags. */
+export type OrchestratorGuildExport = {
+  guildId: string;
+  workers: Array<{
+    workerId: string;
+    guildId: string;
+    settings: Record<string, unknown> | null;
+    favorites: Array<Record<string, unknown>>;
+  }>;
+  unavailableWorkers: string[];
+  groups: GuildWorkerGroup[];
+  plan: {tier: string; billing: string | null; expiresAt: string | null};
+  branding: Record<string, {nickname: string | null; bannerSet: boolean}>;
+};
+
+/** Favorites removed by a privacy action, per bot; `failed` lists bots that could not be reached. */
+export type OrchestratorPrivacyDeletion = {
+  favorites: number;
+  workers: Array<{workerId: string; favorites: number}>;
+  failed: string[];
+};
+
 const MAX_ACTOR_NAME_LENGTH = 64;
 
 const isControlCharacter = (code: number): boolean => code < 32 || (code >= 127 && code <= 159);
@@ -505,6 +527,40 @@ export default class OrchestratorClient {
         json: body,
       },
     ).json<unknown>());
+  }
+
+  /** Data export of one server (settings and favorites of each present bot, groups, plan, branding flags). */
+  async guildExport(guildId: string): Promise<OrchestratorGuildExport> {
+    return call(async () => got.get(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/export`,
+      {
+        ...options(this.config.orchestratorToken),
+        // The orchestrator asks every present bot in parallel, each with a 3 s limit.
+        timeout: {request: 10_000},
+      },
+    ).json<OrchestratorGuildExport>());
+  }
+
+  /** Server admin privacy action: one user's saved favorites removed from this server on every present bot. */
+  async deleteGuildUserData(guildId: string, userId: string): Promise<OrchestratorPrivacyDeletion> {
+    return call(async () => got.delete(
+      `${this.config.orchestratorUrl}/v1/guilds/${encodeURIComponent(guildId)}/privacy/user/${encodeURIComponent(userId)}`,
+      {
+        ...options(this.config.orchestratorToken),
+        timeout: {request: 10_000},
+      },
+    ).json<OrchestratorPrivacyDeletion>());
+  }
+
+  /** Self-service privacy action: one user's saved favorites removed on every bot, in every server. */
+  async deleteUserData(userId: string): Promise<OrchestratorPrivacyDeletion> {
+    return call(async () => got.delete(
+      `${this.config.orchestratorUrl}/v1/users/${encodeURIComponent(userId)}/data`,
+      {
+        ...options(this.config.orchestratorToken),
+        timeout: {request: 10_000},
+      },
+    ).json<OrchestratorPrivacyDeletion>());
   }
 
   async updateGuildSettings(guildId: string, body: GuildSettingsUpdate): Promise<unknown> {

@@ -927,6 +927,7 @@ const openGuild = async guildId => {
   resetGroupEditor();
   setMessage($('form-message'), '');
   setMessage($('group-message'), '');
+  showNotice($('privacy-message'), '');
   $('guild-title').textContent = '';
   $('guild-subtitle').textContent = '';
   $('sidebar-guild').replaceChildren();
@@ -2156,6 +2157,91 @@ const submitBlockForm = async form => {
   }
 };
 
+/* ---------- Data rights ---------- */
+
+const exportFileName = (response, guildId) => {
+  const match = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') || '');
+  return match ? match[1] : `muse-${guildId}.json`;
+};
+
+/** Downloads the server export as a file; the server answers with an attachment, not JSON. */
+const downloadGuildExport = async guildId => {
+  const response = await fetch(`/api/guilds/${encodeURIComponent(guildId)}/export`, {credentials: 'same-origin'});
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 401) session = null;
+    throw new ApiError(typeof body.error === 'string' ? body.error : t('errors.generic'), response.status, body.code);
+  }
+
+  const url = URL.createObjectURL(await response.blob());
+  const link = el('a');
+  link.href = url;
+  link.download = exportFileName(response, guildId);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const exportGuildData = async () => {
+  showNotice($('privacy-message'), '');
+  try {
+    await downloadGuildExport(selectedGuildId);
+    showNotice($('privacy-message'), t('privacy.exported'));
+  } catch (error) {
+    handleFailure(error, message => showNotice($('privacy-message'), message));
+  }
+};
+
+const deleteMemberData = async form => {
+  const userId = form.elements.userId.value.trim();
+  if (!SNOWFLAKE.test(userId)) {
+    showNotice($('privacy-message'), t('privacy.invalidId'));
+    form.elements.userId.focus();
+    return;
+  }
+
+  if (!window.confirm(t('privacy.confirmMember'))) return;
+
+  const submit = form.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  showNotice($('privacy-message'), '');
+  try {
+    const result = await api(
+      `/api/guilds/${encodeURIComponent(selectedGuildId)}/privacy/user/${encodeURIComponent(userId)}`,
+      mutation('DELETE'),
+    );
+    form.reset();
+    const failed = list(result.failed).length;
+    showNotice($('privacy-message'), failed > 0
+      ? t('privacy.memberPartial', {count: result.favorites, failed})
+      : t('privacy.memberDeleted', {count: result.favorites}));
+  } catch (error) {
+    handleFailure(error, message => showNotice($('privacy-message'), message));
+  } finally {
+    submit.disabled = false;
+  }
+};
+
+const deleteOwnData = async () => {
+  if (!window.confirm(t('privacy.confirmSelf'))) return;
+
+  const button = $('delete-own-data');
+  button.disabled = true;
+  showNotice($('own-data-message'), '');
+  try {
+    const result = await api('/api/me/data', mutation('DELETE'));
+    const failed = list(result.failed).length;
+    showNotice($('own-data-message'), failed > 0
+      ? t('privacy.selfPartial', {count: result.favorites, failed})
+      : t('privacy.selfDeleted', {count: result.favorites}));
+  } catch (error) {
+    handleFailure(error, message => showNotice($('own-data-message'), message));
+  } finally {
+    button.disabled = false;
+  }
+};
+
 /* ---------- Wiring ---------- */
 
 const logout = async () => {
@@ -2313,6 +2399,19 @@ const wire = () => {
       void submitBlockForm(form);
     });
   }
+
+  $('export-guild').addEventListener('click', () => {
+    void exportGuildData();
+  });
+
+  $('member-data-form').addEventListener('submit', event => {
+    event.preventDefault();
+    void deleteMemberData(event.currentTarget);
+  });
+
+  $('delete-own-data').addEventListener('click', () => {
+    void deleteOwnData();
+  });
 };
 
 const showLoginMessage = () => {

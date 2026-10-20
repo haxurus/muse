@@ -9,6 +9,7 @@ import {DashboardHttpError, describeUpstreamError, readJsonBody, redirect, send,
 import {MAX_BRANDING_BODY_BYTES, sanitizeBrandingProfile} from '../plans/branding.js';
 import {LOCALES, Locale, isLocale, localizedPath, preferredLocale, renderPage} from './i18n.js';
 import OrchestratorClient, {BlockKind, GuildSettingsUpdate, StatusChannelUpdate, SuperActor} from './orchestrator-client.js';
+import FixedWindowRateLimiter from './rate-limit.js';
 import {homeStructuredData, robotsTxt, sitemapXml} from './seo.js';
 import {pricingMarkup, type PublicInfo} from './pricing.js';
 import type {DashboardSession} from './session-store.js';
@@ -203,12 +204,15 @@ export default class DashboardServer {
   /** Crawler files (robots.txt, sitemap.xml), generated from the public origin at startup. */
   private readonly crawlerFiles: Map<string, StaticAsset>;
   private publicInfoCache?: {at: number; info: PublicInfo};
+  /** 120 requests per minute per session (or per client address when anonymous) on /api and /auth. */
+  private readonly rateLimiter: FixedWindowRateLimiter;
 
   constructor(private readonly config: DashboardConfig, dependencies: DashboardServerDependencies = {}) {
     this.orchestrator = dependencies.orchestrator ?? new OrchestratorClient(config);
     this.auth = dependencies.auth ?? new DashboardAuth(config, {
       isUserBlocked: async userId => this.orchestrator.isUserBlocked(userId),
     });
+    this.rateLimiter = new FixedWindowRateLimiter();
 
     const {origin} = config.publicUrl;
     const render = (page: PageName): Record<Locale, Buffer> => {
@@ -254,6 +258,7 @@ export default class DashboardServer {
 
   async close(): Promise<void> {
     this.auth.close();
+    this.rateLimiter.close();
     if (!this.server) {
       return;
     }
@@ -278,6 +283,17 @@ export default class DashboardServer {
       if (request.method === 'GET' && pathname === '/health') {
         sendJson(response, 200, {ok: true});
         return;
+      }
+
+      // Static assets and HTML views are not limited; the API and the login routes are.
+      if (pathname.startsWith('/api/') || pathname.startsWith('/auth/')) {
+        const decision = this.rateLimiter.consume(this.rateLimitKey(request));
+        if (!decision.allowed) {
+          sendJson(response, 429, {error: 'too many requests', code: 'RATE_LIMITED'}, {
+            'retry-after': String(decision.retryAfterSeconds),
+          });
+          return;
+        }
       }
 
       if (request.method === 'GET' && await this.handlePage(request, response, url)) {
@@ -316,11 +332,26 @@ export default class DashboardServer {
         return;
       }
 
+      if (segments.length === 3 && segments[0] === 'api' && segments[1] === 'me' && segments[2] === 'data' && request.method === 'DELETE') {
+        await this.deleteOwnData(request, response);
+        return;
+      }
+
       if (segments[0] === 'api' && segments[1] === 'guilds') {
         const guildId = segments[2];
 
         if (segments.length === 3 && request.method === 'GET') {
           await this.guildResponse(request, response, guildId);
+          return;
+        }
+
+        if (segments.length === 4 && segments[3] === 'export' && request.method === 'GET') {
+          await this.exportGuild(request, response, guildId);
+          return;
+        }
+
+        if (segments.length === 6 && segments[3] === 'privacy' && segments[4] === 'user' && request.method === 'DELETE') {
+          await this.deleteGuildUserData(request, response, guildId, segments[5]);
           return;
         }
 
@@ -924,6 +955,96 @@ export default class DashboardServer {
       },
       ...details,
     });
+  }
+
+  /** One budget per signed-in session; anonymous callers share one per socket address (forwarded headers are not trusted). */
+  private rateLimitKey(request: IncomingMessage): string {
+    const session = this.auth.currentSession(request);
+    return session ? `session:${session.id}` : `address:${request.socket.remoteAddress ?? 'unknown'}`;
+  }
+
+  /**
+   * Server data export (Sentinel: GET /api/guilds/:id/export). Same access check as the guild view
+   * (Manage Server); the download carries no tokens, plan notes or coupons.
+   */
+  private async exportGuild(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {
+    const session = this.auth.requireSession(request);
+    const audit: GuildMutationAudit = {action: 'guild.export', guildId};
+    let outcome = 'failed';
+
+    try {
+      const guild = await this.assertGuildAccess(session, guildId, false);
+      const exported = await this.orchestrator.guildExport(guildId);
+      const exportedAt = new Date().toISOString();
+      sendJson(response, 200, {
+        exportedAt,
+        guild: {id: guild.id, name: guild.name},
+        ...exported,
+      }, {
+        'content-disposition': `attachment; filename="muse-${guild.id}-${exportedAt.slice(0, 10)}.json"`,
+      });
+      outcome = 'ok';
+    } catch (error: unknown) {
+      outcome = error instanceof HttpError ? `rejected_${error.statusCode}` : 'failed';
+      throw error;
+    } finally {
+      auditMutation(session, audit, outcome);
+    }
+  }
+
+  /**
+   * Server admin privacy action (Sentinel: DELETE /api/guilds/:id/privacy/user/:userId): removes
+   * one user's saved favorites from this server on every bot present in it.
+   */
+  private async deleteGuildUserData(request: IncomingMessage, response: ServerResponse, guildId: string, userId: string): Promise<void> {
+    await this.mutate(request, response, {action: 'privacy.user.delete', guildId, subjectKind: 'USER', subjectId: userId}, async () => {
+      if (!SNOWFLAKE.test(userId)) {
+        throw new HttpError(400, 'invalid Discord user id');
+      }
+
+      return {
+        statusCode: 200,
+        body: await this.orchestrator.deleteGuildUserData(guildId, userId),
+      };
+    });
+  }
+
+  /** Self-service privacy action: the signed-in user's saved favorites removed on every bot, in every server. */
+  private async deleteOwnData(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    await this.accountMutate(request, response, {action: 'me.data.delete'}, async session => ({
+      statusCode: 200,
+      body: await this.orchestrator.deleteUserData(session.user.id),
+    }));
+  }
+
+  /**
+   * Mutation of the signed-in user's own data: session, Origin + CSRF and the mutation budget, then
+   * the action, audited like the guild mutations. No server access check (the data is the user's).
+   */
+  private async accountMutate(
+    request: IncomingMessage,
+    response: ServerResponse,
+    audit: MutationAudit,
+    execute: (session: DashboardSession) => Promise<MutationResult>,
+  ): Promise<void> {
+    const session = this.auth.currentSession(request);
+    if (!session) {
+      throw unauthorized();
+    }
+
+    let outcome = 'failed';
+    try {
+      this.auth.assertCsrf(request, session);
+      this.auth.assertMutationAllowed(session);
+      const result = await execute(session);
+      sendJson(response, result.statusCode, result.body);
+      outcome = 'ok';
+    } catch (error: unknown) {
+      outcome = error instanceof HttpError ? `rejected_${error.statusCode}` : 'failed';
+      throw error;
+    } finally {
+      auditMutation(session, audit, outcome);
+    }
   }
 
   private async createGroup(request: IncomingMessage, response: ServerResponse, guildId: string): Promise<void> {

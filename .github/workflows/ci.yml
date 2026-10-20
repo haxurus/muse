@@ -132,3 +132,34 @@ jobs:
           set -euo pipefail
           version="$(sed -n 's/^ARG YT_DLP_VERSION=//p' Dockerfile)"
           grep -Fqx "yt-dlp[default]==${version} \\" deploy/yt-dlp-requirements.txt
+
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Fail on critical advisories in production dependencies
+        run: |
+          set -uo pipefail
+          corepack enable
+          # yarn audit exits with a bitmask of the severities it found:
+          # info 1, low 2, moderate 4, high 8, critical 16. Only critical (16) fails the job.
+          yarn audit --groups dependencies --level critical --json > audit.ndjson
+          status=$?
+          if ! grep -Eq '"type" ?: ?"auditSummary"' audit.ndjson; then
+            cat audit.ndjson
+            echo "yarn audit did not report a summary (registry unreachable?)" >&2
+            exit 1
+          fi
+          if (( (status & 16) != 0 )); then
+            grep -E '"severity" ?: ?"critical"' audit.ndjson || true
+            echo "Critical advisories found in production dependencies" >&2
+            exit 1
+          fi
+          echo "No critical advisories in production dependencies"

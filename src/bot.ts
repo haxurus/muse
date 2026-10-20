@@ -7,7 +7,9 @@ import container from './inversify.config.js';
 import Command from './commands/index.js';
 import debug from './utils/debug.js';
 import handleGuildCreate from './events/guild-create.js';
+import handleGuildDelete from './events/guild-delete.js';
 import handleVoiceStateUpdate from './events/voice-state-update.js';
+import DataRetentionJob from './services/data-retention.js';
 import errorMsg from './utils/error-msg.js';
 import {isUserInVoice} from './utils/channels.js';
 import Config from './services/config.js';
@@ -88,6 +90,7 @@ export default class {
   private readonly commandsByButtonId!: Collection<string, Command>;
   private hasCompletedStartup = false;
   private readonly statusAnnouncer: StatusAnnouncer;
+  private readonly dataRetention: DataRetentionJob;
 
   constructor(@inject(TYPES.Client) client: Client, @inject(TYPES.Config) config: Config) {
     this.client = client;
@@ -96,10 +99,12 @@ export default class {
     this.commandsByName = new Collection();
     this.commandsByButtonId = new Collection();
     this.statusAnnouncer = new StatusAnnouncer(client, config);
+    this.dataRetention = new DataRetentionJob(client);
   }
 
   public shutdown(): void {
     this.setReady(false);
+    this.dataRetention.stop();
     this.client.destroy();
   }
 
@@ -319,7 +324,10 @@ export default class {
     });
 
     this.client.on('guildCreate', logListenerFailures('guildCreate', handleGuildCreate));
+    this.client.on('guildDelete', logListenerFailures('guildDelete', handleGuildDelete));
     this.client.on('voiceStateUpdate', logListenerFailures('voiceStateUpdate', handleVoiceStateUpdate));
+    // The retention job waits for Discord readiness itself, so it can start before login.
+    this.dataRetention.start();
     // Pass the token explicitly: without an argument discord.js only reads
     // process.env.DISCORD_TOKEN, which is empty when the token comes from DISCORD_TOKEN_FILE.
     await this.client.login(this.config.DISCORD_TOKEN);

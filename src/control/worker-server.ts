@@ -6,16 +6,20 @@ import {getGuildSettings} from '../utils/get-guild-settings.js';
 import {HttpError, errorBody, getPathSegments, hasBearerToken, readJsonBody, sendJson} from './http.js';
 import {sanitizeGuildSettingsPatch, updateGuildSettings} from './guild-settings.js';
 import type PlaybackWorker from '../playback/worker.js';
-import {assertGuildId} from './snowflake.js';
+import {assertGuildId, assertUserId} from './snowflake.js';
 import {MAX_BLOCKLIST_BODY_BYTES, blocklist, sanitizeBlocklist} from './blocklist.js';
+import {deleteFavoritesOfUser, exportGuildData} from './user-data.js';
 import type {
   WorkerBlocklistResult,
   WorkerBrandingResult,
+  WorkerGuildExport,
   WorkerGuildMeta,
+  WorkerGuildUserDataDeletion,
   WorkerLeaveGuildResult,
   WorkerLogs,
   WorkerStatus,
   WorkerStatusAnnounceResult,
+  WorkerUserDataDeletion,
 } from './types.js';
 import {logBuffer, parseLogLimit} from '../utils/log-buffer.js';
 import {parseStatusAnnounceRequest, postStatusMessage} from '../status/announce.js';
@@ -163,6 +167,26 @@ export default class WorkerControlServer {
         }
       }
 
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'export' && request.method === 'GET') {
+        sendJson(response, 200, await this.exportGuild(segments[2]));
+        return;
+      }
+
+      if (segments.length === 6
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'privacy'
+        && segments[4] === 'user'
+        && request.method === 'DELETE') {
+        sendJson(response, 200, await this.deleteGuildUserData(segments[2], segments[5]));
+        return;
+      }
+
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'users' && segments[3] === 'data' && request.method === 'DELETE') {
+        sendJson(response, 200, await this.deleteUserData(segments[2]));
+        return;
+      }
+
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
       if (error instanceof HttpError) {
@@ -243,6 +267,36 @@ export default class WorkerControlServer {
     }
 
     return {workerId: this.config.WORKER_ID, guildId, ok: true};
+  }
+
+  /** Settings and saved favorites of one guild on this bot (the server data export). */
+  private async exportGuild(guildId: string): Promise<WorkerGuildExport> {
+    assertGuildId(guildId);
+    if (!this.client.guilds.cache.has(guildId)) {
+      throw new HttpError(404, 'worker is not a member of that guild');
+    }
+
+    const data = await exportGuildData(guildId);
+    return {workerId: this.config.WORKER_ID, guildId, settings: data.settings, favorites: data.favorites};
+  }
+
+  /** Server admin privacy action: one user's saved favorites in one guild of this bot. */
+  private async deleteGuildUserData(guildId: string, userId: string): Promise<WorkerGuildUserDataDeletion> {
+    assertGuildId(guildId);
+    assertUserId(userId);
+    if (!this.client.guilds.cache.has(guildId)) {
+      throw new HttpError(404, 'worker is not a member of that guild');
+    }
+
+    const favorites = await deleteFavoritesOfUser(userId, guildId);
+    return {workerId: this.config.WORKER_ID, guildId, userId, favorites};
+  }
+
+  /** Self-service privacy action: one user's saved favorites in every guild of this bot's database. */
+  private async deleteUserData(userId: string): Promise<WorkerUserDataDeletion> {
+    assertUserId(userId);
+    const favorites = await deleteFavoritesOfUser(userId);
+    return {workerId: this.config.WORKER_ID, userId, favorites};
   }
 
   private async leaveGuild(guildId: string): Promise<WorkerLeaveGuildResult> {

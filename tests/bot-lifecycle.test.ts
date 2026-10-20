@@ -64,6 +64,7 @@ vi.mock('../src/inversify.config.js', () => ({
 vi.mock('../src/utils/db.js', () => ({
   prisma: {
     setting: {upsert: mocks.settingUpsert},
+    guildDeparture: {deleteMany: vi.fn(async () => ({count: 0}))},
   },
 }));
 
