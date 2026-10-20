@@ -17,6 +17,10 @@ import DashboardServer from '../src/dashboard/server.js';
 import SessionStore from '../src/dashboard/session-store.js';
 import OrchestratorServer from '../src/orchestrator/server.js';
 
+vi.mock('../src/utils/get-guild-settings.js', () => ({
+  getGuildSettings: vi.fn(async (guildId: string) => ({guildId})),
+}));
+
 const guildA = '111111111111111111';
 const guildB = '222222222222222222';
 const SUPER_ADMIN = '333333333333333333';
