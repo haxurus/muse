@@ -208,29 +208,6 @@ export default class SuperConsole {
     return this.announceInstall('install-approved', install);
   }
 
-  private async announceInstall(kind: InstallNoticeKind, install: InstallSubject): Promise<void> {
-    try {
-      const delivery = await this.deliverStatusNotice({kind, install}, await this.statuses());
-      this.record({
-        actor: SYSTEM_ACTOR,
-        action: kind === 'install-approved' ? 'install.approved' : 'install.rejected',
-        subjectType: 'GUILD',
-        subjectId: install.guildId,
-        details: {
-          guildName: install.guildName,
-          memberCount: install.memberCount,
-          installerId: install.installerId,
-          workerId: install.workerId,
-          ...(install.source === undefined ? {} : {source: install.source}),
-          ...deliveryDetails(delivery),
-        },
-        outcome: delivery.status === 'failed' ? 'failed' : 'ok',
-      });
-    } catch (error: unknown) {
-      console.error(`Install rejection notice failed: ${errorLabel(error)}`);
-    }
-  }
-
   // eslint-disable-next-line complexity
   async route(request: IncomingMessage, segments: string[]): Promise<SuperRouteResult | undefined> {
     if (segments[0] !== 'v1') {
@@ -906,6 +883,29 @@ export default class SuperConsole {
       details: {since: transition.since, ...(down ? {} : {downtimeSeconds}), ...deliveryDetails(delivery)},
       outcome: delivery.status === 'failed' ? 'failed' : 'ok',
     });
+  }
+
+  private async announceInstall(kind: InstallNoticeKind, install: InstallSubject): Promise<void> {
+    try {
+      const delivery = await this.deliverStatusNotice({kind, install}, await this.statuses());
+      this.record({
+        actor: SYSTEM_ACTOR,
+        action: kind === 'install-approved' ? 'install.approved' : 'install.rejected',
+        subjectType: 'GUILD',
+        subjectId: install.guildId,
+        details: {
+          guildName: install.guildName,
+          memberCount: install.memberCount,
+          installerId: install.installerId,
+          workerId: install.workerId,
+          ...(install.source === undefined ? {} : {source: install.source}),
+          ...deliveryDetails(delivery),
+        },
+        outcome: delivery.status === 'failed' ? 'failed' : 'ok',
+      });
+    } catch (error: unknown) {
+      console.error(`Install rejection notice failed: ${errorLabel(error)}`);
+    }
   }
 
   /** Posts one alert through a healthy bot that is a member of the status server. */
