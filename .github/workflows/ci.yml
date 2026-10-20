@@ -146,7 +146,8 @@ jobs:
           node-version: "22"
       - name: Fail on critical advisories in production dependencies
         run: |
-          set -uo pipefail
+          # The default shell runs with -e, but yarn audit exits non-zero for any finding.
+          set +e
           corepack enable
           # yarn audit exits with a bitmask of the severities it found:
           # info 1, low 2, moderate 4, high 8, critical 16. Only critical (16) fails the job.

@@ -303,7 +303,7 @@ describe('SQLite persistence', () => {
         finished_at: Date | null;
         migration_name: string;
       }>>('SELECT migration_name, finished_at FROM _prisma_migrations ORDER BY migration_name');
-      expect(appliedMigrations).toHaveLength(22);
+      expect(appliedMigrations).toHaveLength(23);
       expect(appliedMigrations.every(({finished_at: finishedAt}) => finishedAt !== null)).toBe(true);
       expect(appliedMigrations.map(({migration_name: name}) => name))
         .toContain('20220101155430_migrate_from_sequelize');
@@ -314,6 +314,8 @@ describe('SQLite persistence', () => {
         .toContain('20261008120000_add_guild_status_channel');
       expect(appliedMigrations.map(({migration_name: name}) => name))
         .toContain('20261010120000_drop_guild_status_channel');
+      expect(appliedMigrations.map(({migration_name: name}) => name))
+        .toContain('20261020120000_add_guild_departure');
     } finally {
       await probeClient?.$disconnect();
       await reopenedClient?.$disconnect();

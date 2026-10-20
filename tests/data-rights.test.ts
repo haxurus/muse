@@ -408,7 +408,8 @@ describe('dashboard data routes', () => {
     await server.start();
     servers.push(server);
 
-    const names = dashboardCookieNames(false);
+    // The public URL is https, so the session cookie carries the __Host- prefix.
+    const names = dashboardCookieNames(dashboardConfig.publicUrl.protocol === 'https:');
     const session = store.createSession(user, 'discord-access-token', 3600);
     const headers = (overrides: Record<string, string> = {}): Record<string, string> => ({
       cookie: `${names.session}=${session.id}`,
