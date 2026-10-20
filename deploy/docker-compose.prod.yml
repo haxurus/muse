@@ -95,6 +95,8 @@ services:
       MUSE_DASHBOARD_ORCHESTRATOR_URL: http://orchestrator:3100
       MUSE_ORCHESTRATOR_TOKEN_FILE: /run/secrets/orchestrator_api_token
       MUSE_DASHBOARD_SESSION_HOURS: ${MUSE_DASHBOARD_SESSION_HOURS:-8}
+      # Only the edge container reaches the dashboard: its X-Forwarded-For is trusted for rate limits.
+      MUSE_DASHBOARD_TRUST_PROXY: "true"
       MUSE_SUPER_ADMIN_USER_ID: ${MUSE_SUPER_ADMIN_USER_ID:-}
     secrets:
       - dashboard_discord_client_secret

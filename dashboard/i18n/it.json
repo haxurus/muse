@@ -421,6 +421,26 @@
       }
     }
   },
+  "privacy": {
+    "kicker": "DATI",
+    "title": "I tuoi dati",
+    "text": "Elimina i preferiti salvati in qualsiasi server dove gira Muse. Le sessioni della dashboard restano solo in memoria e finiscono quando esci.",
+    "deleteButton": "Elimina i miei dati",
+    "confirmSelf": "Eliminare tutti i preferiti che hai salvato, in ogni server e su ogni bot Muse? L'operazione non si può annullare. La tua sessione della dashboard resta aperta.",
+    "selfDeleted": "Eliminati {count} preferiti salvati.",
+    "selfPartial": "Eliminati {count} preferiti salvati. {failed} bot non raggiungibili: ripeti l'eliminazione più tardi.",
+    "serverKicker": "DATI DEL SERVER",
+    "serverTitle": "Esportazione e dati dei membri",
+    "serverText": "Scarica in JSON impostazioni, preferiti salvati, gruppi e piano di questo server, oppure elimina i preferiti salvati qui da un membro.",
+    "exportButton": "Esporta dati del server",
+    "exported": "Esportazione scaricata.",
+    "memberLabel": "ID utente Discord del membro",
+    "memberButton": "Elimina i preferiti del membro",
+    "confirmMember": "Eliminare tutti i preferiti che questo membro ha salvato in questo server? Le impostazioni non cambiano.",
+    "memberDeleted": "Eliminati {count} preferiti del membro.",
+    "memberPartial": "Eliminati {count} preferiti. {failed} bot non raggiungibili: ripeti l'eliminazione più tardi.",
+    "invalidId": "Inserisci un ID utente Discord (da 17 a 20 cifre)."
+  },
   "errors": {
     "generic": "Richiesta non riuscita.",
     "forbidden": "Operazione non consentita. Ricarica la pagina e riprova.",

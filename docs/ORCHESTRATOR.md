@@ -74,8 +74,13 @@ PUT   /v1/blocklist
 PUT   /v1/entitlements   (plan of every guild of this worker, pushed by the orchestrator; see SUPER_CONSOLE.md)
 POST  /v1/status-channel/announce
 GET   /v1/guilds/:guildId/meta
+GET   /v1/guilds/:guildId/export                    (settings row and favorites of the guild; see "Data retention")
+DELETE /v1/guilds/:guildId/privacy/user/:userId     (one user's favorites in the guild)
+DELETE /v1/users/:userId/data                       (one user's favorites in every guild of this bot)
 POST  /v1/playback        (only when the worker's MUSE_BOT_*_PLAYBACK flag is "true")
 ```
+
+`GET /v1/guilds/:guildId/export` answers `{workerId, guildId, settings, favorites}`: `settings` is the guild's settings row or `null` (read only, no row is created), `favorites` lists `{name, query, authorId, createdAt}` oldest first. A worker that is not a member of the guild answers `404` (`worker is not a member of that guild`), as the settings route does. Both `DELETE` routes answer with the number of favorites removed (`favorites`); the guild variant needs membership, the user variant does not, because it also covers guilds the bot has left.
 
 `GET /v1/status` reports, per guild, `id`, `name`, `iconUrl`, `memberCount`, `ownerId` and `playerActive` (the bot has a voice connection there), and `bot.avatarUrl`. The extra fields are optional for the orchestrator, so mixed-version fleets keep working.
 
@@ -117,6 +122,9 @@ GET   /v1/guilds
 GET   /v1/guilds/:guildId/workers
 PATCH  /v1/guilds/:guildId/workers/settings
 GET    /v1/guilds/:guildId/groups
+GET    /v1/guilds/:guildId/export
+DELETE /v1/guilds/:guildId/privacy/user/:userId
+DELETE /v1/users/:userId/data
 POST   /v1/guilds/:guildId/groups
 PATCH  /v1/guilds/:guildId/groups/:groupId
 DELETE /v1/guilds/:guildId/groups/:groupId
@@ -214,3 +222,14 @@ Writes are durable and atomic: the next state is written to a temporary file, fs
 ### Single instance
 
 The orchestrator keeps the group, block and audit stores in memory and is the only writer of `/state/groups.json`, `/state/blocks.json` and `/state/super-audit.json`. Run exactly one orchestrator instance per state volume; multiple replicas would silently overwrite each other's changes.
+
+## Data retention
+
+Each worker purges its own SQLite database (settings rows and saved favorites) for servers the bot has been out of for more than 30 days:
+
+- `guildDelete` (the bot was removed or left) records a `GuildDeparture` row with the time; `guildCreate` removes it when the bot is back, so a quick re-invite keeps everything.
+- The purge job runs once at startup, as soon as Discord is ready (retried every minute until then), and every six hours after that. It only runs when the bot is ready, because the guild cache is incomplete before.
+- A server with stored rows that the bot is not in and that has no departure record gets one at the job's first run. Rows that predate this feature are therefore purged 30 days after the first run following deployment.
+- A server the bot is in is never purged; its departure record is dropped instead.
+
+Each worker applies this to its own database only, so a server can be purged on one bot and still present on another. Export and deletion of a user's data use the routes above. The orchestrator's super audit log keeps its 1000-entry cap.

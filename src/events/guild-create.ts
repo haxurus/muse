@@ -10,6 +10,7 @@ import registerCommandsOnGuild from '../utils/register-commands-on-guild.js';
 import {blocklist} from '../control/blocklist.js';
 import {explainRejection, findInstaller, isInstallGateEnabled, requestInstallCheck} from '../control/install-check.js';
 import {localeFromDiscord, t} from '../i18n/index.js';
+import {clearGuildDeparture} from '../services/data-retention.js';
 
 export async function createGuildSettings(guildId: string): Promise<Setting> {
   return prisma.setting.upsert({
@@ -52,6 +53,8 @@ export default async (guild: Guild): Promise<void> => {
   }
 
   await createGuildSettings(guild.id);
+  // Back in a server the bot left: the stored settings and favorites are no longer on the retention clock.
+  await clearGuildDeparture(guild.id);
 
   // Setup slash commands
   if (!config.REGISTER_COMMANDS_ON_BOT) {

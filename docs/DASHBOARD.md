@@ -135,6 +135,8 @@ Muse Control uses:
 
 Mutations are checked in this order: session, Origin + CSRF, mutation budget (30 per 60 s per session), then a forced Discord permission refresh. A Discord `429` is returned to the browser as `429` with `Retry-After`; a Discord `401` deletes the session and returns `401`.
 
+Every `/api/*` and `/auth/*` request also counts against a rate limit: 120 requests per minute (fixed window) per signed-in session, or per socket address for anonymous requests. Over the limit the answer is `429 {"error": "too many requests", "code": "RATE_LIMITED"}` with `Retry-After`. Static assets and HTML views are not limited. The address is the TCP peer's: forwarded headers are not trusted, and behind `dashboard-edge` the peer is the edge, so anonymous visitors share one budget there. The limiter keeps at most 10,000 windows in memory and evicts the oldest when full.
+
 Orchestrator `400`/`404`/`409`/`413`/`422` responses keep their status with the orchestrator's short JSON `error` message (generic text if longer than 200 characters or not printable); other orchestrator failures become `502`. Server errors are logged with the error name and upstream HTTP status only.
 
 Every mutation attempt by an authenticated user writes one JSON line to stdout (`event: "dashboard_mutation"`, timestamp, userId, guildId, action, groupId, workerIds and count, outcome). Tokens, cookies and CSRF values are never logged.
@@ -216,6 +218,10 @@ PATCH  /api/guilds/:guildId
 POST   /api/guilds/:guildId/groups
 PATCH  /api/guilds/:guildId/groups/:groupId
 DELETE /api/guilds/:guildId/groups/:groupId
+
+GET    /api/guilds/:guildId/export                 server data export (see "Data rights")
+DELETE /api/guilds/:guildId/privacy/user/:userId   remove one member's saved favorites here
+DELETE /api/me/data                                remove the signed-in user's saved favorites
 ```
 
 The dashboard also exposes persistent worker groups scoped to the selected Discord server. An administrator can create any combination, edit membership, delete a group, or select a group and then apply a settings patch to its currently available workers.
@@ -242,6 +248,15 @@ Example:
 The orchestrator and each worker validate the request again before persistence.
 
 Super-admin endpoints are listed under "Super console API" above.
+
+## Data rights
+
+- **Server export** (`GET /api/guilds/:guildId/export`, Manage Server): a JSON attachment named `muse-<guildId>-<date>.json`. It holds `exportedAt`, the server `guild` (id, name), `workers` (each bot present in the server: its settings row, or `null`, and its saved favorites with name, query, author id and creation time), `unavailableWorkers` (bots present that did not answer), `groups`, `plan` (tier, billing, expiry) and `branding` flags (per bot: nickname set and banner set; no images). Plan notes and coupons are never included. It uses the same access check as the guild view and is audited as `guild.export`.
+- **Member removal** (`DELETE /api/guilds/:guildId/privacy/user/:userId`, Manage Server): deletes that user's saved favorites in this server on every bot present in it. Settings are untouched. Audited as `privacy.user.delete`.
+- **Self-service** (`DELETE /api/me/data`): deletes the signed-in user's saved favorites in every server on every bot, including servers the bots have left and are still within the retention period. It needs the session, Origin, CSRF and the mutation budget, and is audited as `me.data.delete`. The dashboard session itself lives in memory only: it ends at sign-out, at expiry or on restart, so nothing else is stored for the user.
+- **Retention**: a bot's settings and favorites are purged 30 days after it left a server (see [ORCHESTRATOR.md](ORCHESTRATOR.md), "Data retention").
+
+The server page offers the export and member removal under "Export and member data"; the server list offers "Delete my data".
 
 ## User interface
 

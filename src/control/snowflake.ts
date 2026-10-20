@@ -11,3 +11,9 @@ export const assertGuildId = (guildId: string): void => {
     throw new HttpError(400, 'invalid Discord guild id');
   }
 };
+
+export const assertUserId = (userId: string): void => {
+  if (!isSnowflake(userId)) {
+    throw new HttpError(400, 'invalid Discord user id');
+  }
+};

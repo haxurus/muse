@@ -6,7 +6,7 @@ import type {OrchestratorConfig} from './config.js';
 import WorkerClient from './worker-client.js';
 import GuildGroupStore from './guild-group-store.js';
 import {handlePlaybackProxy} from '../playback/transport.js';
-import {assertGuildId, isSnowflake} from '../control/snowflake.js';
+import {assertGuildId, assertUserId, isSnowflake} from '../control/snowflake.js';
 import SuperConsole, {DEFAULT_RECONCILE_INTERVAL_MS, parseActor} from './super-console.js';
 import InstallGate, {InstallGrantStore, isInstallGateEnabled} from './install-gate.js';
 import {AuditStore, BlockStore} from './super-store.js';
@@ -16,7 +16,7 @@ import {PLANS} from '../plans/plans.js';
 import {MAX_BRANDING_BODY_BYTES} from '../plans/branding.js';
 import {isPlaybackPoolEnabled} from '../playback/protocol.js';
 import PlaybackPool from './playback-pool.js';
-import type {InstallCheckResult, InstallContacts, WorkerPlatformConfig} from '../control/types.js';
+import type {InstallCheckResult, InstallContacts, WorkerPlatformConfig, WorkerStatus} from '../control/types.js';
 
 type WorkerResult<T> = {
   workerId: string;
@@ -29,6 +29,13 @@ type WorkerResult<T> = {
 };
 
 const errorLabel = (error: unknown): string => error instanceof Error ? error.name : 'Error';
+
+/** Total favorites removed, the bots that removed some, and the bots that could not be reached. */
+const summarizeDeletions = (results: Array<WorkerResult<{favorites: number}>>) => ({
+  favorites: results.reduce((total, result) => (result.ok ? total + result.value.favorites : total), 0),
+  workers: results.flatMap(result => (result.ok ? [{workerId: result.workerId, favorites: result.value.favorites}] : [])),
+  failed: results.flatMap(result => (result.ok ? [] : [result.workerId])),
+});
 
 export default class OrchestratorServer {
   private server?: Server;
@@ -243,6 +250,26 @@ export default class OrchestratorServer {
         return;
       }
 
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'guilds' && segments[3] === 'export' && request.method === 'GET') {
+        sendJson(response, 200, await this.guildExport(segments[2]));
+        return;
+      }
+
+      if (segments.length === 6
+        && segments[0] === 'v1'
+        && segments[1] === 'guilds'
+        && segments[3] === 'privacy'
+        && segments[4] === 'user'
+        && request.method === 'DELETE') {
+        sendJson(response, 200, await this.deleteGuildUserData(segments[2], segments[5]));
+        return;
+      }
+
+      if (segments.length === 4 && segments[0] === 'v1' && segments[1] === 'users' && segments[3] === 'data' && request.method === 'DELETE') {
+        sendJson(response, 200, await this.deleteUserData(segments[2]));
+        return;
+      }
+
       sendJson(response, 404, {error: 'not found'});
     } catch (error: unknown) {
       if (error instanceof HttpError) {
@@ -379,6 +406,63 @@ export default class OrchestratorServer {
       groups,
       plan: this.superConsole.plans.guildUsage(guildId, statuses, groups.length),
     };
+  }
+
+  /** Workers that are reachable and list the guild: only these are asked about one server's data. */
+  private presentWorkers(guildId: string, statuses: Array<WorkerResult<WorkerStatus>>): WorkerClient[] {
+    const presentIds = new Set(statuses
+      .filter(result => result.ok && result.value.guilds.some(guild => guild.id === guildId))
+      .map(result => result.workerId));
+    return this.workers.filter(worker => presentIds.has(worker.id));
+  }
+
+  /**
+   * Data export of one server (dashboard `GET /api/guilds/:guildId/export`): the settings and saved
+   * favorites of every bot present in it, its groups, the plan (tier, billing, expiry) and the bot
+   * branding flags. Internal plan notes and coupons are never included.
+   */
+  private async guildExport(guildId: string) {
+    assertGuildId(guildId);
+    const statuses = await this.workerStatuses();
+    const results = await Promise.all(this.presentWorkers(guildId, statuses).map(async worker => this.wrap(
+      worker.id,
+      worker.guildExport(guildId),
+    )));
+
+    const groups = this.groups.list(guildId);
+    const usage = this.superConsole.plans.guildUsage(guildId, statuses, groups.length);
+    return {
+      guildId,
+      workers: results.flatMap(result => (result.ok ? [result.value] : [])),
+      unavailableWorkers: results.flatMap(result => (result.ok ? [] : [result.workerId])),
+      groups,
+      plan: {tier: usage.tier, billing: usage.billing, expiresAt: usage.expiresAt},
+      branding: usage.branding,
+    };
+  }
+
+  /** Server admin privacy action: removes one user's saved favorites from this server on every present bot. */
+  private async deleteGuildUserData(guildId: string, userId: string) {
+    assertGuildId(guildId);
+    assertUserId(userId);
+    const statuses = await this.workerStatuses();
+    const results = await Promise.all(this.presentWorkers(guildId, statuses).map(async worker => this.wrap(
+      worker.id,
+      worker.deleteGuildUserData(guildId, userId),
+    )));
+
+    return {guildId, userId, ...summarizeDeletions(results)};
+  }
+
+  /** Self-service privacy action: removes one user's saved favorites from every bot's database, in every server. */
+  private async deleteUserData(userId: string) {
+    assertUserId(userId);
+    const results = await Promise.all(this.workers.map(async worker => this.wrap(
+      worker.id,
+      worker.deleteUserData(userId),
+    )));
+
+    return {userId, ...summarizeDeletions(results)};
   }
 
   /** A new saved group must fit the guild's plan (`403 PLAN_LIMIT`). */
