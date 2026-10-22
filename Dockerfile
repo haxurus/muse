@@ -5,7 +5,7 @@ FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddf
 # locked release and is cross-checked against the lock and the installed binary.
 # Bump both together with .github/scripts/yt-dlp-lock.py (the yt-dlp refresh
 # workflow opens a pull request doing exactly that).
-ARG YT_DLP_VERSION=2026.08.19
+ARG YT_DLP_VERSION=2026.10.21
 # PO token provider plugin, hash-locked in its own file (the refresh workflow
 # regenerates only the yt-dlp lock). It must match the pot-provider image
 # version in deploy/docker-compose.prod.yml; bump all three together.
