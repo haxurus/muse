@@ -34,6 +34,12 @@ export default class {
     this.guildPlayers.clear();
   }
 
+  /** Stops and forgets a guild's player, e.g. once the bot is no longer in that guild. */
+  remove(guildId: string): void {
+    this.guildPlayers.get(guildId)?.stop();
+    this.guildPlayers.delete(guildId);
+  }
+
   get(guildId: string): Player {
     let player = this.guildPlayers.get(guildId);
 

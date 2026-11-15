@@ -986,6 +986,52 @@ describe('OPS-11 yt-dlp extraction and ffmpeg handoff', () => {
     expect(destroyCacheDestination).toHaveBeenCalledOnce();
   });
 
+  it('does not report a buffer failure when the audio pipeline closes the playback reader on skip or stop', async () => {
+    dependencyMocks.ffmpeg.mockImplementation(() => makeFfmpegCommand({deferProcessResult: true}));
+    dependencyMocks.execa.mockResolvedValue({
+      stdout: JSON.stringify({
+        ...JSON.parse(VALID_MEDIA_RESPONSE),
+        is_live: false,
+      }),
+    });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const cacheDestination = new PassThrough();
+    const destroyCacheDestination = vi.spyOn(cacheDestination, 'destroy');
+    const player = new Player({
+      createWriteStream: vi.fn(() => cacheDestination),
+      getEntryFor: vi.fn().mockResolvedValue(null),
+    } as never, GUILD_ID);
+    const song: QueuedSong = {
+      title: 'Skipped while caching',
+      artist: 'Artist',
+      url: 'abcdefghijk',
+      length: 100,
+      offset: 0,
+      playlist: null,
+      isLive: false,
+      thumbnailUrl: null,
+      source: MediaSource.Youtube,
+      addedInChannelId: 'text-channel-id',
+      requestedBy: 'requester-id',
+    };
+
+    const stream = await (player as unknown as {
+      getStream(input: QueuedSong): Promise<Readable>;
+    }).getStream(song);
+    // What stream.pipeline() does to its source when a stopped audio player destroys the resource.
+    const closed = new Promise<void>(resolve => {
+      stream.once('close', resolve);
+    });
+    stream.destroy(Object.assign(new Error('Premature close'), {code: 'ERR_STREAM_PREMATURE_CLOSE'}));
+    // The error is emitted on a later tick, just before close.
+    await closed;
+    await flushAsyncWork();
+
+    expect(logError).not.toHaveBeenCalled();
+    // The unfinished cache write is still dropped, so the buffer can close and stop FFmpeg.
+    expect(destroyCacheDestination).toHaveBeenCalledOnce();
+  });
+
   it('releases the playback buffer so its temp file is removed once every reader closes', async () => {
     const release = vi.spyOn(CapacitorWriteStream.prototype, 'release');
     const player = new Player({

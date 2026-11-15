@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import {Readable} from 'node:stream';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -38,6 +39,7 @@ vi.mock('../src/utils/build-embed.js', () => ({
 }));
 
 import Player, {MediaSource, QueuedSong, SongMetadata, STATUS} from '../src/services/player.js';
+import PlayerManager from '../src/managers/player.js';
 import {entitlements} from '../src/plans/entitlements.js';
 import getProgressBar from '../src/utils/get-progress-bar.js';
 import {YtDlpMediaUnavailableError} from '../src/utils/yt-dlp.js';
@@ -202,6 +204,43 @@ describe('Player forward state transitions', () => {
     expect(getStream).toHaveBeenLastCalledWith(song, {seek: 12, to: 100});
     expect(player.status).toBe(STATUS.PLAYING);
     expect(getPrivateState(player).audioPlayer).not.toBeNull();
+  });
+
+  it.each([
+    ['the target is past the end of the song', 101, false, 'Seek position is outside the range of the song.'],
+    ['the voice connection never becomes ready', 30, true, 'voice not ready'],
+  ])('keeps a playing song in PLAYING when a seek is rejected because %s', async (_reason, position, voiceFails, message) => {
+    const {getStream, player} = makeReadyPlayer();
+    const song = makeSong('Still playing');
+    const audioPlayer = makeAudioPlayer();
+    player.add(song);
+    player.status = STATUS.PLAYING;
+    Object.assign(player, {audioPlayer, nowPlaying: song, nowPlayingQueueEntryVersion: 1});
+    if (voiceFails) {
+      dependencyMocks.entersState.mockRejectedValueOnce(new Error('voice not ready'));
+    }
+
+    await expect(player.seek(position)).rejects.toThrow(message);
+
+    expect(player.status).toBe(STATUS.PLAYING);
+    expect(audioPlayer.stop).not.toHaveBeenCalled();
+    expect(getStream).not.toHaveBeenCalled();
+  });
+
+  it('stops and forgets a removed guild player', () => {
+    const manager = new PlayerManager({} as never, {} as never);
+    const player = manager.get(GUILD_ID);
+    const voiceConnection = makeVoiceConnection();
+    player.voiceConnection = voiceConnection as never;
+    player.add(makeSong('Left behind'));
+
+    manager.remove(GUILD_ID);
+    manager.remove('never-seen-guild');
+
+    expect(voiceConnection.destroy).toHaveBeenCalledOnce();
+    expect(player.getCurrent()).toBeNull();
+    expect(manager.snapshot()).toEqual([]);
+    expect(manager.get(GUILD_ID)).not.toBe(player);
   });
 
   it('restores a retryable paused state after a transient play startup failure', async () => {

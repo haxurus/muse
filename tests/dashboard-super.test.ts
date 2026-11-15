@@ -406,6 +406,25 @@ describe('super console API', () => {
     expect(JSON.parse(lines[0])).toMatchObject({subjectKind: 'USER', subjectId: BLOCKED_USER_ID, outcome: 'ok'});
   });
 
+  it('signs a blocked user out, but never the super admin', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const dashboard = await startDashboard();
+
+    const refused = await call(dashboard.port, 'PUT', `/api/super/blocks/USER/${regularUser.id}`, dashboard.userHeaders(), '{}');
+    expect(refused.status).toBe(403);
+    expect(dashboard.store.get(dashboard.userSession.id)).toBeDefined();
+
+    const put = await call(dashboard.port, 'PUT', `/api/super/blocks/USER/${regularUser.id}`, dashboard.superHeaders(), '{}');
+    expect(put.status).toBe(200);
+    expect(dashboard.store.get(dashboard.userSession.id)).toBeUndefined();
+    expect(dashboard.discord.revoke).toHaveBeenCalledTimes(1);
+    expect((await call(dashboard.port, 'GET', '/api/session', dashboard.userHeaders())).status).toBe(401);
+
+    const self = await call(dashboard.port, 'PUT', `/api/super/blocks/USER/${SUPER_ADMIN_ID}`, dashboard.superHeaders(), '{}');
+    expect(self.status).toBe(200);
+    expect(dashboard.store.get(dashboard.superSession.id)).toBeDefined();
+  });
+
   it('rejects invalid kinds, ids, reasons and worker lists before calling the orchestrator', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const dashboard = await startDashboard();

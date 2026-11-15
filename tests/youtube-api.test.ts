@@ -109,6 +109,26 @@ const chapterSummary = (songs: Awaited<ReturnType<YoutubeAPI['getVideo']>>) => s
   length: song.length,
 }));
 
+describe('YoutubeAPI cache keys', () => {
+  it('never shares a cache entry between a playlist lookup and a video lookup of the same id', async () => {
+    const keys: string[] = [];
+    const cache = {
+      wrap: async (_fetch: unknown, ...args: unknown[]) => {
+        const options = args.at(-1) as {key?: string};
+        keys.push(options.key ?? JSON.stringify(args.slice(0, -1)));
+        return {items: []};
+      },
+    };
+    const api = new YoutubeAPI({YOUTUBE_API_KEY: 'test-key'} as never, cache as never);
+
+    await expect(api.getPlaylist('dQw4w9WgXcQ', false)).rejects.toThrow('Playlist could not be found.');
+    await expect(api.getVideo('dQw4w9WgXcQ', false)).rejects.toThrow('Video could not be found.');
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+});
+
 describe('YoutubeAPI playlist pagination', () => {
   it.each([false, true])('handles an early detail rejection while another page is pending (page fails: %s)', async pageFails => {
     const unhandled: unknown[] = [];

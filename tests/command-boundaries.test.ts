@@ -558,6 +558,38 @@ describe('seek parsing', () => {
     expect(deferReply).toHaveBeenCalledOnce();
     expect(editReply).toHaveBeenCalledWith('👍 seeked to 00:11');
   });
+
+  // A seek that fails at once (e.g. the bot is no longer in a voice channel) used to race the
+  // deferral: the error handler saw an interaction that was neither deferred nor repliable.
+  it.each([
+    ['/seek', (manager: never) => new Seek(manager), {time: '30'}],
+    ['/fseek', (manager: never) => new ForwardSeek(manager), {time: '30'}],
+    ['/replay', (manager: never) => new Replay(manager), {}],
+  ])('%s acknowledges the interaction before a seek can fail', async (_name, makeCommand, strings) => {
+    let acknowledged = false;
+    const acknowledgedWhenSeeking: boolean[] = [];
+    const failingSeek = vi.fn(async () => {
+      acknowledgedWhenSeeking.push(acknowledged);
+      throw new Error('Not connected to a voice channel.');
+    });
+    const player = {
+      getCurrent: () => ({length: 300, isLive: false}),
+      getPosition: () => 0,
+      seek: failingSeek,
+      forwardSeek: failingSeek,
+    };
+    const {interaction, deferReply, editReply} = makeInteraction({strings});
+    deferReply.mockImplementation(async () => {
+      await new Promise(resolve => {
+        setTimeout(resolve, 5);
+      });
+      acknowledged = true;
+    });
+
+    await expect(makeCommand(managerFor(player) as never).execute(interaction)).rejects.toThrow('Not connected to a voice channel.');
+    expect(acknowledgedWhenSeeking).toEqual([true]);
+    expect(editReply).not.toHaveBeenCalled();
+  });
 });
 
 describe('/loop-queue', () => {

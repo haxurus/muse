@@ -58,10 +58,9 @@ export default class implements Command {
       throw new UserError('seekPastEnd');
     }
 
-    await Promise.all([
-      player.forwardSeek(seekTime),
-      interaction.deferReply(),
-    ]);
+    // Acknowledge first so a failed seek can still be reported (see /seek).
+    await interaction.deferReply();
+    await player.forwardSeek(seekTime);
 
     await interaction.editReply(t(await getGuildLocale(interaction.guild!.id), 'seekDone', {time: prettyTime(player.getPosition())}));
   }

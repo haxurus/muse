@@ -1,4 +1,5 @@
-import {createServer, type Server} from 'node:http';
+import {createServer, request as httpRequest, type Server} from 'node:http';
+import {gzipSync} from 'node:zlib';
 import type {AddressInfo} from 'node:net';
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -141,6 +142,49 @@ describe('orchestrator guild routes (LOW-3, L6)', () => {
     expect(present.status).not.toHaveBeenCalled();
   });
 
+  it('returns only the requested server from each bot status', async () => {
+    const {server, present} = makeServer();
+    const other = '999999999999999999';
+    present.status.mockResolvedValue({
+      guilds: [{id: guildId, name: 'Guild'}, {id: other, name: 'Someone else'}],
+      players: [{guildId, connected: true, channelId: '1', status: 'playing'}, {guildId: other, connected: true, channelId: '2', status: 'playing'}],
+    } as never);
+    Object.assign(present, {guildSettings: vi.fn(async () => ({guildId}))});
+
+    const result = await server.guildWorkers(guildId) as unknown as {workers: Array<{value: {status: {guilds: unknown[]; players: unknown[]}}}>};
+    expect(result.workers).toHaveLength(1);
+    expect(result.workers[0].value.status.guilds).toEqual([{id: guildId, name: 'Guild'}]);
+    expect(result.workers[0].value.status.players).toEqual([expect.objectContaining({guildId})]);
+  });
+
+  it('answers an unparseable request target without a stack trace', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const {server} = makeServer();
+    const http = createServer((server as unknown as {handle: Parameters<typeof createServer>[1]}).handle.bind(server));
+    await new Promise<void>(resolve => {
+      http.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const {port} = http.address() as AddressInfo;
+      const get = async (token?: string) => new Promise<number>((resolve, reject) => {
+        httpRequest({host: '127.0.0.1', port, path: '//', headers: token ? {authorization: `Bearer ${token}`} : {}}, response => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        }).on('error', reject).end();
+      });
+      expect(await get()).toBe(401);
+      expect(await get('a'.repeat(32))).toBe(404);
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      http.closeAllConnections();
+      await new Promise<void>(resolve => {
+        http.close(() => {
+          resolve();
+        });
+      });
+    }
+  });
+
   it('never patches requested workers that are not in the guild', async () => {
     const {server, present, absent} = makeServer();
     const result = await server.updateGuildWorkers(guildId, {workerIds: ['muse-01', 'muse-02'], settings: {defaultVolume: 50}});
@@ -152,6 +196,65 @@ describe('orchestrator guild routes (LOW-3, L6)', () => {
     await expect(server.updateGuildWorkers(guildId, {workerIds: ['muse-02'], settings: {defaultVolume: 50}}))
       .rejects.toMatchObject({statusCode: 404});
     expect(absent.updateGuildSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe('saved group plan limit', () => {
+  it('holds when several groups are created at the same time', async () => {
+    const directory = tempDirectory();
+    const plansFile = path.join(directory, 'plans.json');
+    // Plus allows two saved groups.
+    writeFileSync(plansFile, JSON.stringify({
+      version: 1,
+      guilds: {[guildId]: {tier: 'TIER1', billing: null, expiresAt: null, couponCode: null, note: null, updatedAt: new Date().toISOString()}},
+      coupons: [],
+    }));
+    const server = new OrchestratorServer({
+      host: '127.0.0.1', port: 0, apiToken: 'a'.repeat(32),
+      groupsFile: path.join(directory, 'groups.json'), plansFile,
+      workers: [{id: 'muse-01', baseUrl: 'http://127.0.0.1:9', token: 'b'.repeat(32)}],
+    });
+    const handle = (server as unknown as {handle: Parameters<typeof createServer>[1]}).handle.bind(server);
+    const http = createServer(handle);
+    await new Promise<void>(resolve => {
+      http.listen(0, '127.0.0.1', resolve);
+    });
+    try {
+      const {port} = http.address() as AddressInfo;
+      // Every request is past its headers before any body arrives.
+      const pending = [1, 2, 3, 4, 5].map(index => {
+        const outgoing = httpRequest({
+          host: '127.0.0.1', port, method: 'POST', path: `/v1/guilds/${guildId}/groups`,
+          headers: {authorization: `Bearer ${'a'.repeat(32)}`, 'content-type': 'application/json'},
+        });
+        outgoing.flushHeaders();
+        const status = new Promise<number>((resolve, reject) => {
+          outgoing.on('response', response => {
+            response.resume();
+            resolve(response.statusCode ?? 0);
+          });
+          outgoing.on('error', reject);
+        });
+        return {outgoing, status, body: JSON.stringify({name: `Group ${index}`, workerIds: ['muse-01']})};
+      });
+      await new Promise(resolve => {
+        setTimeout(resolve, 100);
+      });
+      for (const {outgoing, body} of pending) {
+        outgoing.end(body);
+      }
+
+      const statuses = await Promise.all(pending.map(async ({status}) => status));
+      expect(statuses.filter(status => status === 201)).toHaveLength(2);
+      expect(statuses.filter(status => status === 403)).toHaveLength(3);
+    } finally {
+      http.closeAllConnections();
+      await new Promise<void>(resolve => {
+        http.close(() => {
+          resolve();
+        });
+      });
+    }
   });
 });
 
@@ -197,6 +300,22 @@ describe('worker client response limits (LOW-2)', () => {
     const server = await listen((_request, response) => {
       response.writeHead(200, {'content-type': 'application/json'});
       response.end(`{"guilds":[],"padding":"${'x'.repeat(MAX_WORKER_RESPONSE_BYTES + 1024)}"}`);
+    });
+    try {
+      const {port} = server.address() as AddressInfo;
+      const client = new WorkerClient({id: 'muse-01', baseUrl: `http://127.0.0.1:${port}`, token: 'a'.repeat(32)});
+      await expect(client.status()).rejects.toThrow();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it('never inflates a compressed answer', async () => {
+    // got stops reporting progress once the inflated size passes Content-Length, so the cap would only act at the end.
+    const body = gzipSync('{"guilds":[]}');
+    const server = await listen((_request, response) => {
+      response.writeHead(200, {'content-type': 'application/json', 'content-encoding': 'gzip', 'content-length': body.length});
+      response.end(body);
     });
     try {
       const {port} = server.address() as AddressInfo;

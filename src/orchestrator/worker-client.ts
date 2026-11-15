@@ -27,6 +27,9 @@ const requestOptions = (token: string) => ({
     authorization: `Bearer ${token}`,
   },
   followRedirect: false,
+  // Workers answer plain JSON. With decompression got stops reporting progress once the inflated
+  // size passes Content-Length, so a compressed answer would get around the size cap.
+  decompress: false,
   hooks: {
     afterResponse: [
       // With redirects disabled got treats 3xx as success; a worker never redirects.

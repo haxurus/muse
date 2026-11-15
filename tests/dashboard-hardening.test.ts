@@ -1,5 +1,5 @@
 import {createServer, IncomingHttpHeaders, IncomingMessage, request, Server} from 'node:http';
-import type {AddressInfo} from 'node:net';
+import {connect, type AddressInfo} from 'node:net';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import DashboardAuth, {dashboardCookieNames} from '../src/dashboard/auth.js';
 import type {DashboardConfig} from '../src/dashboard/config.js';
@@ -77,6 +77,25 @@ const call = async (
   });
   outgoing.on('error', reject);
   outgoing.end(body);
+});
+
+/** Sends bytes as they are (request targets and framing a real HTTP client would refuse to write). */
+const rawCall = async (port: number, payload: string): Promise<string> => new Promise((resolve, reject) => {
+  const socket = connect(port, '127.0.0.1', () => {
+    socket.write(payload);
+  });
+  let data = '';
+  socket.setTimeout(2000, () => {
+    socket.destroy();
+    resolve(data);
+  });
+  socket.on('data', (chunk: Buffer) => {
+    data += chunk.toString('latin1');
+  });
+  socket.on('end', () => {
+    resolve(data);
+  });
+  socket.on('error', reject);
 });
 
 const cookiePair = (setCookie: string): string => setCookie.split(';')[0];
@@ -232,6 +251,63 @@ describe('dashboard mutation checks', () => {
 
     expect(result.status).toBe(404);
     expect(JSON.parse(result.body)).toEqual({error: 'group not found'});
+  });
+});
+
+describe('dashboard request handling', () => {
+  it('answers 400 to a request target that is not a URL and keeps serving', async () => {
+    const dashboard = await startDashboard();
+
+    const response = await rawCall(dashboard.port, 'GET // HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    expect(response.split('\r\n')[0]).toBe('HTTP/1.1 400 Bad Request');
+
+    expect((await call(dashboard.port, 'GET', '/health')).status).toBe(200);
+  });
+
+  it('shows a server only its own entries of each bot status', async () => {
+    const dashboard = await startDashboard();
+    const other = '999999999999999999';
+    dashboard.orchestrator.guildWorkers.mockResolvedValueOnce({
+      guildId: GUILD_ID,
+      groups: [],
+      workers: [
+        {
+          workerId: 'muse-01',
+          ok: true,
+          value: {
+            settings: {defaultVolume: 50},
+            status: {
+              discordReady: true,
+              bot: {id: '444444444444444444', username: 'Muse One'},
+              guilds: [{id: GUILD_ID, name: 'Guild'}, {id: other, name: 'Someone else', ownerId: '888888888888888888'}],
+              players: [{guildId: other, connected: true, channelId: '777777777777777777', status: 'playing'}, {guildId: GUILD_ID, connected: false, channelId: null, status: 'idle'}],
+            },
+          },
+        },
+        {workerId: 'muse-02', ok: false, error: 'RequestError'},
+      ],
+    } as never);
+
+    const result = await call(dashboard.port, 'GET', `/api/guilds/${GUILD_ID}`, {cookie: `${dashboard.names.session}=${dashboard.session.id}`});
+    expect(result.status).toBe(200);
+    expect(result.body).not.toContain(other);
+    expect(result.body).not.toContain('Someone else');
+    expect(JSON.parse(result.body).workers).toEqual([
+      {
+        workerId: 'muse-01',
+        ok: true,
+        value: {
+          settings: {defaultVolume: 50},
+          status: {
+            discordReady: true,
+            bot: {id: '444444444444444444', username: 'Muse One'},
+            guilds: [{id: GUILD_ID, name: 'Guild'}],
+            players: [{guildId: GUILD_ID, connected: false, channelId: null, status: 'idle'}],
+          },
+        },
+      },
+      {workerId: 'muse-02', ok: false, error: 'RequestError'},
+    ]);
   });
 });
 
@@ -511,6 +587,42 @@ describe('dashboard edge proxy', () => {
 
     // The edge process is still serving after a mid-response upstream failure.
     expect((await call(edgePort, 'GET', '/edge-health')).status).toBe(200);
+  });
+
+  it('keeps a request body framed so it cannot be read as a second request', async () => {
+    const seen: Array<{url?: string; forwardedFor?: string | string[]; body: string}> = [];
+    const upstream = createServer((incoming, outgoing) => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+      incoming.on('end', () => {
+        seen.push({url: incoming.url, forwardedFor: incoming.headers['x-forwarded-for'], body: Buffer.concat(chunks).toString('latin1')});
+        outgoing.writeHead(200, {'content-length': 2});
+        outgoing.end('ok');
+      });
+    });
+    rawServers.push(upstream);
+    const edge = createServer(createEdgeHandler(new URL(`http://127.0.0.1:${await listen(upstream)}/`), 2000));
+    rawServers.push(edge);
+    const edgePort = await listen(edge);
+
+    const smuggled = 'GET /api/session HTTP/1.1\r\nHost: x\r\nX-Forwarded-For: 203.0.113.66\r\n\r\n';
+    const head = 'Host: x\r\nConnection: close';
+
+    // Transfer-Encoding is hop-by-hop, and Node does not chunk a DELETE or GET body by default.
+    const chunked = await rawCall(edgePort, `DELETE /chunked HTTP/1.1\r\n${head}\r\nTransfer-Encoding: chunked\r\n\r\n${smuggled.length.toString(16)}\r\n${smuggled}\r\n0\r\n\r\n`);
+    expect(chunked.split('\r\n')[0]).toBe('HTTP/1.1 200 OK');
+
+    // A Content-Length named in Connection is stripped like any other listed header.
+    const listed = await rawCall(edgePort, `GET /listed HTTP/1.1\r\n${head}, content-length\r\nContent-Length: ${smuggled.length}\r\n\r\n${smuggled}`);
+    expect(listed.split('\r\n')[0]).toBe('HTTP/1.1 200 OK');
+
+    await new Promise(resolve => {
+      setTimeout(resolve, 100);
+    });
+    expect(seen).toEqual([
+      {url: '/chunked', forwardedFor: '127.0.0.1', body: smuggled},
+      {url: '/listed', forwardedFor: '127.0.0.1', body: smuggled},
+    ]);
   });
 
   it('returns 502 when the upstream is unreachable', async () => {

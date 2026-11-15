@@ -69,6 +69,13 @@ export const createEdgeHandler = (upstream: URL, timeoutMs = UPSTREAM_TIMEOUT_MS
     const headers: OutgoingHttpHeaders = stripHopByHop(incoming.headers);
     headers.host = upstream.host;
     headers['x-forwarded-for'] = forwardedFor(incoming);
+    // A body whose framing header was stripped (Transfer-Encoding, or a Content-Length named in
+    // Connection) must stay framed: Node sends a GET/DELETE/OPTIONS body raw otherwise, and the
+    // dashboard would read it as a second request carrying its own X-Forwarded-For.
+    if (headers['content-length'] === undefined
+      && (incoming.headers['transfer-encoding'] !== undefined || incoming.headers['content-length'] !== undefined)) {
+      headers['transfer-encoding'] = 'chunked';
+    }
 
     const proxy = httpRequest({
       protocol: upstream.protocol,

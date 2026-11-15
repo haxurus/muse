@@ -602,8 +602,6 @@ export default class {
   }
 
   private async seekWithAttempt(positionSeconds: number, attempt: PlaybackAttemptToken): Promise<void> {
-    this.status = STATUS.PAUSED;
-
     const currentSong = this.getCurrent();
     const currentQueueEntryVersion = this.getCurrentQueueEntryId();
     const voiceConnection = await this.ensureVoiceConnectionReady();
@@ -641,6 +639,9 @@ export default class {
       to = currentSong.length + currentSong.offset;
     }
 
+    // Only once the seek is certain to replace the stream: a rejected seek must
+    // leave a song that keeps playing in PLAYING, or its end never advances the queue.
+    this.status = STATUS.PAUSED;
     const previousPosition = this.positionInSeconds;
     this.stopTrackingPosition();
     let stream: Readable;
@@ -712,14 +713,15 @@ export default class {
     if (this.status === STATUS.PAUSED
       && currentSong === this.nowPlaying
       && this.currentQueueEntryVersion === this.nowPlayingQueueEntryVersion) {
-      if (this.audioPlayer) {
+      // A player stopped for a pending seek or replacement has nothing left to unpause.
+      if (this.audioPlayer && !this.programmaticallyStoppedAudioPlayers.has(this.audioPlayer)) {
         this.audioPlayer.unpause();
         this.status = STATUS.PLAYING;
         this.startTrackingPosition();
         return;
       }
 
-      // Was disconnected, need to recreate stream
+      // Was disconnected or stopped, need to recreate stream
       if (!currentSong.isLive) {
         return this.seekWithAttempt(this.getPosition(), attempt);
       }
@@ -1272,7 +1274,17 @@ export default class {
 
       capacitor.on('error', onBufferError);
       startupProbeStream.on('error', onBufferError);
-      returnedStream.on('error', onBufferError);
+      returnedStream.on('error', error => {
+        // Stopping or skipping makes the audio pipeline destroy its source with this
+        // code: the listener left, the buffer did not fail. Dropping the unfinished
+        // cache write still closes the buffer, which stops FFmpeg with the listener.
+        if (startupSettled && (error as NodeJS.ErrnoException).code === 'ERR_STREAM_PREMATURE_CLOSE') {
+          destroyCacheWrite();
+          return;
+        }
+
+        onBufferError(error);
+      });
       opusProbe.on('error', onBufferError);
       cacheReadStream?.on('error', onCacheWriteError);
       cacheReadStream?.once('end', () => {

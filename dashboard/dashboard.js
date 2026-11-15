@@ -764,6 +764,7 @@ const resetGroupEditor = () => {
   $('cancel-group-edit').hidden = true;
   $('group-offline-row').hidden = true;
   $('group-offline-note').textContent = '';
+  renderGroupPlanNotice();
 };
 
 const selectGroup = group => {
@@ -783,6 +784,8 @@ const selectGroup = group => {
 const editGroup = group => {
   resetGroupEditor();
   editingGroupId = group.id;
+  // At the plan limit only a new group is locked: saving this one must be possible again.
+  renderGroupPlanNotice();
   $('group-name').value = group.name;
   $('group-editor-title').textContent = t('groups.editTitle', {name: group.name});
   $('group-editor-hint').textContent = t('groups.editHint');
@@ -882,7 +885,7 @@ const saveGroup = async () => {
   } catch (error) {
     handleFailure(error, message => setMessage($('group-message'), message, 'error'));
   } finally {
-    $('save-group').disabled = false;
+    renderGroupPlanNotice();
   }
 };
 

@@ -91,7 +91,10 @@ export const sanitizeLogEntries = (input: unknown): LogEntry[] => {
       return [];
     }
 
-    return [{at: at.slice(0, 40), level, message: truncateLogMessage(redactLogText(message))}];
+    // An honest sender already truncated the message. Bounding it before redaction keeps an
+    // oversized one from another process from stalling the event loop (the patterns backtrack).
+    const bounded = message.slice(0, LOG_MESSAGE_MAX_LENGTH + 1);
+    return [{at: at.slice(0, 40), level, message: truncateLogMessage(redactLogText(bounded))}];
   });
 };
 

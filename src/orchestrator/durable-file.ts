@@ -1,4 +1,4 @@
-import {closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync} from 'node:fs';
+import {closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 
 export type LoadResult<T> = {status: 'ok'; data: T} | {status: 'missing'} | {status: 'invalid'};
@@ -25,7 +25,8 @@ export const writeDurably = (target: string, content: string): void => {
   const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.tmp`);
   const fd = openSync(temporary, 'w', 0o600);
   try {
-    writeSync(fd, content);
+    // Not writeSync: one write(2) may be short (disk nearly full), and the cut file would be renamed over the good one.
+    writeFileSync(fd, content);
     fsyncSync(fd);
   } finally {
     closeSync(fd);

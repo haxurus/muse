@@ -92,7 +92,7 @@ gh attestation verify oci://ghcr.io/haxurus/muse@sha256:<digest> --repo haxurus/
 sudo /usr/local/sbin/muse-deploy deploy ghcr.io/haxurus/muse@sha256:<digest>
 ```
 
-`muse-deploy` valida segreti e `.env`, estrae il bundle Compose dall'immagine, ferma la flotta, fa il backup, avvia e attende che tutti gli otto servizi siano healthy (max 240 s). Se la nuova release fallisce ripristina da solo configurazione, backup e immagine precedente. Un secondo comando concorrente esce con codice 75 (lock `/run/lock/muse-deploy.lock`).
+`muse-deploy` valida segreti e `.env`, estrae il bundle Compose dall'immagine, ferma la flotta, fa il backup, avvia e attende che tutti gli otto servizi siano healthy (max 240 s). Se la nuova release fallisce ripristina da solo configurazione, backup e immagine precedente. Un secondo comando concorrente esce con codice 75 (lock `/run/muse-deploy.lock`).
 
 ### Rollback
 

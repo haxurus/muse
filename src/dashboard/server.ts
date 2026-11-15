@@ -191,6 +191,30 @@ const readBlockReason = async (request: IncomingMessage): Promise<string | undef
   return trimmed === '' ? undefined : trimmed;
 };
 
+/** Entries of a bot's status lists that belong to one server (`key` holds the server id). */
+const ofGuild = (items: unknown, key: 'id' | 'guildId', guildId: string): unknown[] =>
+  Array.isArray(items) ? items.filter(item => (item as Record<string, unknown> | null)?.[key] === guildId) : [];
+
+/**
+ * A bot's status as the admins of one server may see it. The orchestrator answers with the whole
+ * status: every server the bot is in (name, owner, member count) and every player.
+ */
+const scopeWorkerToGuild = <T extends {value?: Record<string, unknown>}>(worker: T, guildId: string): T => {
+  const status = worker.value?.status;
+  if (typeof status !== 'object' || status === null) {
+    return worker;
+  }
+
+  const {guilds, players} = status as {guilds?: unknown; players?: unknown};
+  return {
+    ...worker,
+    value: {
+      ...worker.value,
+      status: {...status, guilds: ofGuild(guilds, 'id', guildId), players: ofGuild(players, 'guildId', guildId)},
+    },
+  };
+};
+
 const unauthorized = (): DashboardHttpError =>
   new DashboardHttpError(401, 'authentication required', {code: 'UNAUTHORIZED'});
 
@@ -279,7 +303,15 @@ export default class DashboardServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const url = new URL(request.url ?? '/', this.config.publicUrl);
+    let url: URL;
+    try {
+      url = new URL(request.url ?? '/', this.config.publicUrl);
+    } catch {
+      // "GET //" does not parse; left uncaught, the rejection would stop the process.
+      sendJson(response, 400, {error: 'invalid request target'});
+      return;
+    }
+
     const {pathname} = url;
 
     try {
@@ -885,10 +917,13 @@ export default class DashboardServer {
       }
 
       const reason = await readBlockReason(request);
-      return {
-        statusCode: 200,
-        body: await this.orchestrator.superPutBlock(kind, subjectId, reason === undefined ? {} : {reason}, actor),
-      };
+      const body = await this.orchestrator.superPutBlock(kind, subjectId, reason === undefined ? {} : {reason}, actor);
+      // The super admin is never blocked at login, so their own sessions stay.
+      if (kind === 'USER' && subjectId !== actor.userId) {
+        this.auth.endUserSessions(subjectId);
+      }
+
+      return {statusCode: 200, body};
     });
   }
 
@@ -992,6 +1027,7 @@ export default class DashboardServer {
         iconUrl: guildIconUrl(guild.id, guild.icon),
       },
       ...details,
+      workers: details.workers.map(worker => scopeWorkerToGuild(worker, guildId)),
     });
   }
 

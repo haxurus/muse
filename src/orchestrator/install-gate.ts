@@ -31,6 +31,8 @@ type InstallFile = {
 
 export const MAX_INSTALL_NOTE_LENGTH = 200;
 const MAX_GRANTS = 20_000;
+/** How long a bot whose own check is pending or was refused cannot vouch for that server (it leaves within seconds). */
+export const UNVERIFIED_HOLD_MS = 10 * 60 * 1000;
 
 /** The gate is on when MUSE_INSTALL_GATE is "true" (the production Compose file sets it). */
 export const isInstallGateEnabled = (): boolean => process.env.MUSE_INSTALL_GATE === 'true';
@@ -131,6 +133,11 @@ const parseInstallSubject = (input: unknown, workerId: string, botName: string):
 
 export default class InstallGate {
   private seeding?: Promise<void>;
+  /**
+   * `guildId:workerId` → expiry: bots still in a server only because their own check is pending or
+   * was just refused. They make that server neither "already served" (EXISTING) nor seeded (LEGACY).
+   */
+  private readonly unverified = new Map<string, number>();
 
   constructor(private readonly store: InstallGrantStore, private readonly deps: InstallGateDeps) {}
 
@@ -144,9 +151,12 @@ export default class InstallGate {
     }
 
     this.seeding ??= (async () => {
-      const reachable = (await this.deps.statuses()).filter(result => result.ok);
+      // A bot answers before it has logged in to Discord, with an empty server list: wait for a ready one.
+      const reachable = (await this.deps.statuses()).filter(result => result.ok && result.value.discordReady);
       if (reachable.length > 0 && this.store.seededAt() === null) {
-        const guildIds = [...new Set(reachable.flatMap(result => result.ok ? result.value.guilds.map(guild => guild.id) : []))];
+        const guildIds = [...new Set(reachable.flatMap(result => result.ok
+          ? result.value.guilds.map(guild => guild.id).filter(guildId => !this.isUnverified(guildId, result.workerId))
+          : []))];
         this.store.seed(guildIds, new Date().toISOString());
         console.log(`Install gate: authorized the ${guildIds.length} servers the bots are already in`);
       }
@@ -158,10 +168,20 @@ export default class InstallGate {
 
   /** `POST /v1/worker/install-check` from a bot that was just added to a server. */
   async check(callerId: string, input: unknown): Promise<InstallCheckResult> {
+    // Marked before the first await, so checks of one server that overlap see each other.
+    const subject = parseInstallSubject(input, callerId, callerId);
+    const pending = `${subject.guildId}:${callerId}`;
+    const now = Date.now();
+    for (const [key, until] of this.unverified) {
+      if (until <= now) {
+        this.unverified.delete(key);
+      }
+    }
+
+    this.unverified.set(pending, now + UNVERIFIED_HOLD_MS);
     const statuses = await this.deps.statuses();
     const caller = statuses.find(result => result.workerId === callerId);
-    const botName = caller?.ok && caller.value.bot ? caller.value.bot.username : callerId;
-    const install = parseInstallSubject(input, callerId, botName);
+    const install: InstallSubject = {...subject, botName: caller?.ok && caller.value.bot ? caller.value.bot.username : callerId};
     await this.seedOnce();
 
     const existing = this.store.grant(install.guildId);
@@ -172,12 +192,15 @@ export default class InstallGate {
 
     // Another Muse bot already serves this server: adding more bots is not a new installation.
     if (source === undefined && statuses.some(result => result.ok && result.workerId !== callerId
+      && !this.isUnverified(install.guildId, result.workerId)
       && result.value.guilds.some(guild => guild.id === install.guildId))) {
       source = 'EXISTING';
     }
 
+    // The notices are not awaited: a slow status channel must not outlast the bot's 5 second
+    // check timeout, which would make it leave a server that was just authorized.
     if (source === undefined) {
-      await this.deps.announceRejected(install);
+      void this.deps.announceRejected(install).catch(() => undefined);
       return {approved: false, source: null, contacts: this.deps.contacts()};
     }
 
@@ -185,7 +208,8 @@ export default class InstallGate {
       this.store.set(install.guildId, {source, note: null, createdAt: new Date().toISOString(), createdBy: SYSTEM_ACTOR});
     }
 
-    await this.deps.announceApproved?.({...install, source});
+    this.unverified.delete(pending);
+    void this.deps.announceApproved?.({...install, source}).catch(() => undefined);
 
     return {approved: true, source, contacts: this.deps.contacts()};
   }
@@ -230,5 +254,9 @@ export default class InstallGate {
 
     this.deps.record({actor, action: 'install.revoke', subjectType: 'GUILD', subjectId: guildId, details: {}, outcome: 'ok'});
     return {guildId, revoked};
+  }
+
+  private isUnverified(guildId: string, workerId: string): boolean {
+    return (this.unverified.get(`${guildId}:${workerId}`) ?? 0) > Date.now();
   }
 }

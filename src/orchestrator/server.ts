@@ -139,7 +139,12 @@ export default class OrchestratorServer {
         return;
       }
 
-      const segments = getPathSegments(request);
+      // An unparseable request target (for example "//") matches no route: 401 without the API token, 404 with it.
+      let segments: string[] = [];
+      try {
+        segments = getPathSegments(request);
+      } catch {}
+
       if (segments.join('/') === 'v1/worker/config') {
         sendJson(response, 200, this.workerConfig(request));
         return;
@@ -220,10 +225,13 @@ export default class OrchestratorServer {
         && segments[1] === 'guilds'
         && segments[3] === 'groups'
         && request.method === 'POST') {
+        assertGuildId(segments[2]);
+        // Read the body first: the plan check and the insert must not be separated by an await.
+        const body = await readJsonBody(request);
         this.assertGroupAllowed(segments[2]);
         sendJson(response, 201, {
           guildId: segments[2],
-          group: this.groups.create(segments[2], await readJsonBody(request)),
+          group: this.groups.create(segments[2], body),
         });
         return;
       }
@@ -393,10 +401,13 @@ export default class OrchestratorServer {
       }
 
       const worker = this.workers.find(candidate => candidate.id === result.workerId)!;
-      return this.wrap(worker.id, worker.guildSettings(guildId).then(settings => ({
-        status: result.value,
-        settings,
-      })));
+      // Only this server's part of the bot's status: the other servers and players are not the caller's to see.
+      const status = {
+        ...result.value,
+        guilds: result.value.guilds.filter(guild => guild.id === guildId),
+        players: (result.value.players ?? []).filter(player => player.guildId === guildId),
+      };
+      return this.wrap(worker.id, worker.guildSettings(guildId).then(settings => ({status, settings})));
     }));
 
     const groups = this.groups.list(guildId);

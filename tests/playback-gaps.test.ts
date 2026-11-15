@@ -745,6 +745,29 @@ describe('CTRL-20 audio-idle advance preservation', () => {
     expect(createReadStream).toHaveBeenCalledOnce();
   });
 
+  it('recreates the stream when resume races a pending seek instead of unpausing the stopped player', async () => {
+    const {createReadStream, player} = makeProductionStreamPlayer();
+    const current = makeQueuedSong('Current');
+    player.add(current);
+    await player.play();
+    const stoppedAudioPlayer = getPrivatePlayer(player).audioPlayer!;
+    const seekStream = makeDeferred<Readable>();
+    createReadStream.mockReturnValueOnce(seekStream.promise);
+
+    const seek = player.seek(30);
+    await flushAsyncWork();
+    expect(stoppedAudioPlayer.stop).toHaveBeenCalledWith(true);
+    await player.play();
+    seekStream.resolve(Readable.from([]));
+    await seek;
+
+    expect(stoppedAudioPlayer.unpause).not.toHaveBeenCalled();
+    expect(getPrivatePlayer(player).audioPlayer).not.toBe(stoppedAudioPlayer);
+    expect(player.status).toBe(STATUS.PLAYING);
+    expect(player.getCurrent()).toBe(current);
+    expect(createReadStream).toHaveBeenCalledTimes(3);
+  });
+
   it('announces only the natural idle advance, not a manual forward', async () => {
     dependencyMocks.getGuildSettings.mockResolvedValue({
       autoAnnounceNextSong: true,

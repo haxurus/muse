@@ -119,6 +119,53 @@ describe('install gate', () => {
     const {gate} = makeGate([status('muse-01', [])]);
     await expect(gate.check('muse-01', {guildId: 'x'})).rejects.toMatchObject({statusCode: 400});
   });
+
+  it('does not let a bot that is itself being refused vouch for the server', async () => {
+    const statuses = [status('muse-01', [guildA]), status('muse-02', [])];
+    const {gate} = makeGate(statuses);
+    await gate.seedOnce();
+
+    // Two bots added to an unauthorized server one after the other: the first is still in it while it explains the refusal.
+    statuses.splice(0, 2, status('muse-01', [guildA, guildB]), status('muse-02', []));
+    expect(await gate.check('muse-01', install(guildB, STRANGER))).toMatchObject({approved: false});
+    statuses.splice(0, 2, status('muse-01', [guildA, guildB]), status('muse-02', [guildB]));
+    expect(await gate.check('muse-02', install(guildB, STRANGER))).toMatchObject({approved: false});
+
+    // Added at the same time: both checks are pending together.
+    const guildC = '555555555555555555';
+    statuses.splice(0, 2, status('muse-01', [guildA, guildC]), status('muse-02', [guildC]));
+    const overlapping = await Promise.all([gate.check('muse-01', install(guildC, STRANGER)), gate.check('muse-02', install(guildC, STRANGER))]);
+    expect(overlapping.map(verdict => verdict.approved)).toEqual([false, false]);
+    expect(gate.grants().map(grant => grant.guildId)).toEqual([guildA]);
+  });
+
+  it('seeds only from logged-in bots and never the server whose check triggers the seeding', async () => {
+    // A bot answers its control API before it has logged in to Discord, with no servers yet.
+    const booting = status('muse-01', []);
+    const statuses = [{...booting, value: {...(booting.ok ? booting.value : {}), discordReady: false}} as SettledStatus];
+    const {gate, filePath} = makeGate(statuses);
+    await gate.seedOnce();
+    expect(new InstallGrantStore(filePath).seededAt()).toBeNull();
+
+    statuses.splice(0, 1, status('muse-01', [guildA, guildB]));
+    expect(await gate.check('muse-01', install(guildB, STRANGER))).toMatchObject({approved: false});
+    expect(gate.grants()).toEqual([expect.objectContaining({guildId: guildA, source: 'LEGACY'})]);
+  });
+
+  it('answers without waiting for the status channel notices', async () => {
+    const never = async () => new Promise<void>(() => undefined);
+    const gate = new InstallGate(new InstallGrantStore(path.join(tempDir(), 'install-grants.json')), {
+      statuses: async () => [status('muse-01', [guildA])],
+      superAdminUserId: SUPER_ADMIN,
+      contacts: () => contacts,
+      announceRejected: never,
+      announceApproved: never,
+      record: vi.fn(),
+    });
+    await gate.seedOnce();
+    expect(await gate.check('muse-01', install(guildA))).toMatchObject({approved: true, source: 'LEGACY'});
+    expect(await gate.check('muse-01', install(guildB, STRANGER))).toMatchObject({approved: false});
+  });
 });
 
 describe('refused installation messages', () => {

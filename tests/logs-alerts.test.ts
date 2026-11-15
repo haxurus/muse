@@ -37,6 +37,7 @@ import {AuditStore, BlockStore, SYSTEM_ACTOR} from '../src/orchestrator/super-st
 import {WorkerHealthTracker} from '../src/orchestrator/worker-health.js';
 import WorkerClient from '../src/orchestrator/worker-client.js';
 import {
+  LOG_MESSAGE_MAX_LENGTH,
   LogBuffer,
   installLogCapture,
   logBuffer,
@@ -180,6 +181,15 @@ describe('log buffer', () => {
       {at: 'yesterday', level: 'info', message: 'bad time'},
     ])).toEqual([{at, level: 'warn', message: 'Bearer [redacted]'}]);
     expect(sanitizeLogEntries({entries: 'nope'})).toEqual([]);
+  });
+
+  it('bounds an oversized message from another process before redacting it', () => {
+    const at = new Date().toISOString();
+    // Unbounded, this shape makes the URL pattern backtrack for minutes (quadratic).
+    const [entry] = sanitizeLogEntries([{at, level: 'info', message: 'a+'.repeat(60_000)}]);
+
+    expect(entry.message).toHaveLength(LOG_MESSAGE_MAX_LENGTH);
+    expect(entry.message.endsWith('…')).toBe(true);
   });
 });
 

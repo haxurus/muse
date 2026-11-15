@@ -35,10 +35,9 @@ export default class implements Command {
       throw new UserError('replayLivestream');
     }
 
-    await Promise.all([
-      player.seek(0),
-      interaction.deferReply(),
-    ]);
+    // Acknowledge first so a failed seek can still be reported (see /seek).
+    await interaction.deferReply();
+    await player.seek(0);
 
     await interaction.editReply(t(await getGuildLocale(interaction.guild!.id), 'replayDone'));
   }

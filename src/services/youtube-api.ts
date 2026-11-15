@@ -156,6 +156,8 @@ export default class {
       async () => this.got('playlists', playlistParams).json() as Promise<{items: PlaylistResponse[]}>,
       playlistParams,
       {
+        // The default key is the params alone, which a `videos` lookup of the same id shares.
+        key: JSON.stringify(['playlists', playlistParams]),
         expiresIn: ONE_MINUTE_IN_SECONDS,
       },
     );

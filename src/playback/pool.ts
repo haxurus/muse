@@ -57,7 +57,8 @@ export const requestAssignment = async (
     response = await fetch(resolveOrchestratorUrl('/v1/playback/assign'), {
       method: 'POST',
       redirect: 'error',
-      signal: AbortSignal.timeout(4000),
+      // No reply has been sent yet: stay well inside Discord's 3 s acknowledgement deadline.
+      signal: AbortSignal.timeout(2000),
       headers: {'content-type': 'application/json', authorization: `Bearer ${token}`},
       body: JSON.stringify(body),
     });

@@ -65,10 +65,10 @@ export default class implements Command {
       throw new UserError('seekPastEnd');
     }
 
-    await Promise.all([
-      player.seek(seekTime),
-      interaction.deferReply(),
-    ]);
+    // Acknowledge first: if the seek fails while the deferral is still in flight, the error
+    // handler cannot reply (the interaction is neither deferred nor repliable) and the user sees nothing.
+    await interaction.deferReply();
+    await player.seek(seekTime);
 
     await interaction.editReply(t(await getGuildLocale(interaction.guild!.id), 'seekDone', {time: prettyTime(player.getPosition())}));
   }

@@ -259,6 +259,16 @@ export default class DashboardAuth {
     ]);
   }
 
+  /**
+   * Signs a user out everywhere. The block list is only read at login, so a user blocked from the
+   * super console would otherwise keep a working session until it expires.
+   */
+  endUserSessions(userId: string): void {
+    for (const session of this.store.deleteUserSessions(userId)) {
+      void this.revokeQuietly(session.accessToken);
+    }
+  }
+
   /** /<lang>/dashboard (the signed-in app), optionally with ?login=failed|blocked. */
   private dashboardUrl(locale: Locale, login?: 'failed' | 'blocked'): string {
     const url = new URL(localizedPath(locale, '/dashboard'), this.config.publicUrl);

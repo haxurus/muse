@@ -153,6 +153,16 @@ export default class SessionStore {
     return session;
   }
 
+  /** Removes every session of one Discord user and returns them (their tokens are still to be revoked). */
+  deleteUserSessions(userId: string): DashboardSession[] {
+    const removed = [...this.sessions.values()].filter(session => session.user.id === userId);
+    for (const session of removed) {
+      this.sessions.delete(session.id);
+    }
+
+    return removed;
+  }
+
   consumeMutationBudget(session: DashboardSession, limit = 30, windowMs = 60_000): boolean {
     const now = Date.now();
     if (!session.mutationWindowStartedAt || now - session.mutationWindowStartedAt >= windowMs) {

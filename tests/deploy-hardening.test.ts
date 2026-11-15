@@ -135,6 +135,14 @@ describe('deploy tooling', () => {
     expect(muse).not.toMatch(/^SERVICES=/mu);
   });
 
+  it('checks the rollback archive is readable before stopping the fleet', async () => {
+    const muse = await read('ops/muse-deploy');
+    const rollbackBody = muse.slice(muse.indexOf('rollback() {'), muse.indexOf('status() {'));
+
+    expect(rollbackBody.indexOf('tar -tzf "$target_backup"')).toBeGreaterThan(-1);
+    expect(rollbackBody.indexOf('tar -tzf "$target_backup"')).toBeLessThan(rollbackBody.indexOf('stop_fleet'));
+  });
+
   it('fails fast when a service restarts during startup', async () => {
     const muse = await read('ops/muse-deploy');
     expect(muse).toContain('{{.RestartCount}}');

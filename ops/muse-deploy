@@ -17,7 +17,8 @@ PREVIOUS="$STATE/previous-image"
 PREVIOUS_BACKUP="$STATE/previous-backup"
 PREVIOUS_CONFIG="$STATE/previous-config"
 LAST_BACKUP="$STATE/last-backup"
-LOCK_FILE=/run/lock/muse-deploy.lock
+# /run is root-only; /run/lock is world-writable and would let any user block deploys.
+LOCK_FILE=/run/muse-deploy.lock
 # Deployment bundle shipped inside every image (see Dockerfile).
 BUNDLE_PATH=/opt/muse-deploy
 EDGE_NETWORK=muse-edge
@@ -577,6 +578,10 @@ rollback() {
   validate_image "$target"
   [[ "$target_backup" == "$NO_STATE_MARKER" || -f "$target_backup" ]] \
     || die 1 "The backup recorded for the previous image is missing: $target_backup"
+  # Checked while the fleet is still running: restore_backup would only notice
+  # a damaged archive once the fleet is down, and leave everything stopped.
+  [[ "$target_backup" == "$NO_STATE_MARKER" ]] || tar -tzf "$target_backup" >/dev/null 2>&1 \
+    || die 1 "The backup recorded for the previous image is unreadable: $target_backup"
   current="$(current_image)"
   ensure_dirs
   ensure_optional_secrets
