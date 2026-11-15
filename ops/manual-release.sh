@@ -1,8 +1,12 @@
 #!/bin/bash
 # Manual release: the fallback when GitHub Actions cannot build images.
 #
-# Run as root from a fresh clone of main, after `docker login ghcr.io` with a
-# token that has write:packages. Mirrors CI and the "Deploy production" build:
+# Run on the workstation (like the other bots), from a clean checkout of main,
+# as a user with Docker access. It logs in to GHCR with the GitHub CLI token
+# (`gh auth token`, needs the write:packages scope) and logs out at the end;
+# without gh it uses an existing `docker login ghcr.io`. The VPS only deploys.
+# The image is built for this machine's architecture, which must match the VPS.
+# Mirrors CI and the "Deploy production" build:
 #   1. lint, typecheck, tests and TypeScript build (inside the image's own
 #      builder stage, so the toolchain matches the release)
 #   2. Compose validation with placeholder secrets
@@ -11,8 +15,8 @@
 #   5. PO token provider smoke test with the production hardening
 #   6. push to ghcr.io/haxurus/muse (:main and :sha-<commit>), print the digest
 #
-# Usage: sudo ./ops/manual-release.sh            (full run, pushes)
-#        sudo ./ops/manual-release.sh --no-push  (everything except the push)
+# Usage: ./ops/manual-release.sh            (full run, pushes)
+#        ./ops/manual-release.sh --no-push  (everything except the push)
 # It never deploys: run muse-deploy with the printed digest afterwards.
 set -euo pipefail
 umask 077
@@ -22,6 +26,7 @@ PUSH=1
 WORK=""
 BUILDER_TAG=""
 SMOKE_CID=""
+LOGGED_IN=0
 
 die() {
   printf '%s\n' "$*" >&2
@@ -32,6 +37,7 @@ cleanup() {
   [[ -n "$SMOKE_CID" ]] && docker rm -f "$SMOKE_CID" >/dev/null 2>&1
   [[ -n "$BUILDER_TAG" ]] && docker image rm "$BUILDER_TAG" >/dev/null 2>&1
   [[ -n "$WORK" ]] && rm -rf -- "$WORK"
+  [[ "$LOGGED_IN" -eq 1 ]] && docker logout ghcr.io >/dev/null 2>&1
   return 0
 }
 trap cleanup EXIT
@@ -42,7 +48,7 @@ case "${1:-}" in
   *) die "Usage: $0 [--no-push]" ;;
 esac
 
-[[ "$(id -u)" -eq 0 ]] || die "Run as root (Docker access)."
+docker info >/dev/null 2>&1 || die "No Docker access (use root or a member of the docker group)."
 cd "$(dirname "$0")/.."
 [[ -f Dockerfile && -f deploy/docker-compose.prod.yml ]] || die "Run from a Muse checkout."
 
@@ -147,6 +153,11 @@ if [[ "$PUSH" -eq 0 ]]; then
   exit 0
 fi
 
+if command -v gh >/dev/null 2>&1; then
+  gh auth token | docker login ghcr.io -u "$(gh api user --jq .login)" --password-stdin >/dev/null \
+    || die "GHCR login with the gh token failed (needs the write:packages scope: gh auth refresh -s write:packages)."
+  LOGGED_IN=1
+fi
 docker push --quiet "$IMAGE_REPO:sha-$commit" >/dev/null
 docker push --quiet "$IMAGE_REPO:main" >/dev/null
 digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" \
@@ -156,9 +167,7 @@ digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{en
 cat <<EOF
 
 Published $commit ($(uname -m) only).
-Deploy it with:
+Deploy it on the VPS with:
 
   sudo /usr/local/sbin/muse-deploy deploy $digest
-
-Then remove the registry credentials: sudo docker logout ghcr.io
 EOF

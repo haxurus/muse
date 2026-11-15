@@ -122,19 +122,17 @@ Backup manuale e restore completo: vedi [DEPLOYMENT.md "Manual recovery"](DEPLOY
 
 ### Release manuale (GitHub Actions non disponibile)
 
-Dettagli in [DEPLOYMENT.md "Manual release"](DEPLOYMENT.md#manual-release-github-actions-unavailable). PAT classico con solo `write:packages`, scadenza breve:
+Dettagli in [DEPLOYMENT.md "Manual release"](DEPLOYMENT.md#manual-release-github-actions-unavailable). Come per gli altri bot: build e push dal PC, la VPS fa solo il deploy. Serve l'accesso a Docker (gruppo `docker`) e `gh` con lo scope `write:packages`:
 
 ```bash
-sudo -i     # tutto come root, anche il clone (lo script richiede root)
-rm -rf /tmp/muse-release && git clone --branch main https://github.com/haxurus/muse.git /tmp/muse-release
-cd /tmp/muse-release
-docker login ghcr.io -u haxurus
+# sul PC, da un checkout pulito di main
+git checkout main && git pull --ff-only
 ./ops/manual-release.sh            # --no-push: tutto tranne la pubblicazione
-docker logout ghcr.io
-/usr/local/sbin/muse-deploy deploy ghcr.io/haxurus/muse@sha256:<digest stampato>
+# sulla VPS
+sudo /usr/local/sbin/muse-deploy deploy ghcr.io/haxurus/muse@sha256:<digest stampato>
 ```
 
-Lo script rifiuta un checkout diverso da `origin/main`, esegue lint/typecheck/test/build, valida Compose, fa lo smoke test del pot-provider e pubblica `:main` e `:sha-<commit>`. Builda solo per l'architettura del VPS e senza attestazioni.
+Lo script rifiuta un checkout diverso da `origin/main`, esegue lint/typecheck/test/build, valida Compose, fa lo smoke test del pot-provider e pubblica `:main` e `:sha-<commit>`. Il login a GHCR usa `gh auth token` solo per il push e fa logout all'uscita: nessun token sulla VPS. Builda solo per l'architettura del PC (deve coincidere con quella del VPS, x86_64) e senza attestazioni.
 
 ### Deploy automatico da GitHub Actions
 

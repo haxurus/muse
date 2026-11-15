@@ -348,18 +348,22 @@ A service that crashes and is restarted by Docker during startup (for example be
 
 ### Manual release (GitHub Actions unavailable)
 
-If GitHub Actions cannot build images, `ops/manual-release.sh` runs the same validation and build on the VPS and publishes the image to GHCR, so deploys stay digest-based. It builds for the VPS architecture only and does not attach SBOM/provenance attestations.
+If GitHub Actions cannot build images, `ops/manual-release.sh` runs the same validation and build on the workstation and publishes the image to GHCR, so deploys stay digest-based (same flow as the other bots on the VPS: build and push locally, the VPS only deploys). It builds for the workstation architecture only, which must match the VPS (x86_64), and does not attach SBOM/provenance attestations.
 
-1. Create a classic personal access token with only `write:packages` (short expiry).
-2. On the VPS, as root:
+1. On the workstation, as a user in the `docker` group, with the GitHub CLI logged in with the `write:packages` scope (`gh auth refresh -s write:packages` if missing), from a clean checkout of `main`:
 
 ```bash
-rm -rf /tmp/muse-release && git clone --branch main https://github.com/haxurus/muse.git /tmp/muse-release
-cd /tmp/muse-release
-docker login ghcr.io -u haxurus
+git checkout main && git pull --ff-only
 ./ops/manual-release.sh
-docker logout ghcr.io
 ```
+
+2. On the VPS, with the digest printed by the script:
+
+```bash
+sudo /usr/local/sbin/muse-deploy deploy ghcr.io/haxurus/muse@sha256:<digest>
+```
+
+The script logs in to GHCR with `gh auth token` only for the push and logs out on exit; without `gh` it uses an existing `docker login ghcr.io`. No registry token is ever stored on the VPS.
 
 The script refuses a checkout that differs from `origin/main`, runs lint, typecheck, tests and the TypeScript build inside the image's builder stage, validates Compose, builds and checks the image, smoke-tests the PO token provider, pushes `:main` and `:sha-<commit>` and prints the `muse-deploy deploy` command with the digest. `--no-push` does everything except publishing. Build caches stay in Docker; reclaim them with `docker builder prune` when disk is low.
 
