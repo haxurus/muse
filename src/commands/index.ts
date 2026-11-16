@@ -1,8 +1,8 @@
-import {SlashCommandBuilder, SlashCommandSubcommandsOnlyBuilder} from '@discordjs/builders';
+import {SlashCommandBuilder} from '@discordjs/builders';
 import {AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction} from 'discord.js';
 
 export default interface Command {
-  readonly slashCommand: Partial<SlashCommandBuilder | SlashCommandSubcommandsOnlyBuilder> & Pick<SlashCommandBuilder, 'toJSON'>;
+  readonly slashCommand: Pick<SlashCommandBuilder, 'name' | 'toJSON'>;
   readonly handledButtonIds?: readonly string[];
   readonly requiresVC?: boolean | ((interaction: ChatInputCommandInteraction) => boolean);
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;

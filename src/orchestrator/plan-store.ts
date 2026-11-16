@@ -106,7 +106,7 @@ const isValidPlanFile = (value: unknown): value is PlanFile => {
   return Object.entries(guilds).every(([guildId, plan]) => isSnowflake(guildId) && isValidGuildPlan(plan))
     && coupons.length <= MAX_COUPONS
     && coupons.every(coupon => isValidCoupon(coupon))
-    && new Set((coupons as Coupon[]).map(coupon => coupon.code)).size === coupons.length;
+    && new Set((coupons).map(coupon => coupon.code)).size === coupons.length;
 };
 
 const copyPlan = (plan: GuildPlan): GuildPlan => ({...plan});

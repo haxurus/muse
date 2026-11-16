@@ -23,7 +23,7 @@ const durationStringToSeconds = (str: string): number => {
   }
 
   const milliseconds = parse(normalized);
-  return Number.isFinite(milliseconds) ? milliseconds / 1000 : Number.NaN;
+  return milliseconds !== null && Number.isFinite(milliseconds) ? milliseconds / 1000 : Number.NaN;
 };
 
 export default durationStringToSeconds;

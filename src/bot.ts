@@ -105,7 +105,7 @@ export default class {
   public shutdown(): void {
     this.setReady(false);
     this.dataRetention.stop();
-    this.client.destroy();
+    void this.client.destroy();
   }
 
   public async register(): Promise<void> {
@@ -117,7 +117,7 @@ export default class {
         command.slashCommand.toJSON();
       } catch (error) {
         console.error(error);
-        throw new Error(`Could not serialize /${command.slashCommand.name ?? ''} to JSON`);
+        throw new Error(`Could not serialize /${command.slashCommand.name} to JSON`);
       }
 
       if (command.slashCommand.name) {

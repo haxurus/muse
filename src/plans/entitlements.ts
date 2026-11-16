@@ -42,7 +42,7 @@ const sanitizeEntitlement = (value: unknown): GuildEntitlement => {
     throw new HttpError(400, 'invalid entitlement', 'INVALID_ENTITLEMENTS');
   }
 
-  return {guildId, tier, allowed, allowedBotIds: [...new Set(allowedBotIds as string[])]};
+  return {guildId, tier, allowed, allowedBotIds: [...new Set(allowedBotIds)]};
 };
 
 export const sanitizeEntitlements = (input: unknown): EntitlementsPush => {

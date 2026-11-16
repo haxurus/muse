@@ -26,7 +26,7 @@ const sanitizeIds = (value: unknown, field: keyof Blocklist): string[] => {
     throw new HttpError(400, `${field} must contain only Discord ids`, 'INVALID_BLOCKLIST');
   }
 
-  return [...new Set(value as string[])];
+  return [...new Set(value)];
 };
 
 export const sanitizeBlocklist = (input: unknown): Blocklist => {

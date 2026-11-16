@@ -10,7 +10,7 @@ export const parseMentionRoleIds = (value: unknown): string[] => {
     throw new HttpError(400, 'mentionRoleIds must be an array of Discord role ids', 'INVALID_ROLE_IDS');
   }
 
-  const unique = [...new Set(value as string[])];
+  const unique = [...new Set(value)];
   if (unique.length > MAX_MENTION_ROLES) {
     throw new HttpError(400, `mentionRoleIds must contain at most ${MAX_MENTION_ROLES} role ids`, 'INVALID_ROLE_IDS');
   }

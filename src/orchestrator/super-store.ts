@@ -89,7 +89,7 @@ const isValidBlockFile = (value: unknown): value is BlockFile => {
     return false;
   }
 
-  const blocks = candidates as Block[];
+  const blocks = candidates;
   const keys = new Set(blocks.map(block => blockKey(block.kind, block.subjectId)));
   return keys.size === blocks.length
     && BLOCK_KINDS.every(kind => blocks.filter(block => block.kind === kind).length <= MAX_BLOCKLIST_ENTRIES);

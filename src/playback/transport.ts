@@ -61,7 +61,7 @@ export const sendPlayback = async (url: string, token: string, body: PlaybackReq
       headers: {'content-type': 'application/json', authorization: `Bearer ${token}`},
       body: JSON.stringify(body),
     });
-    const reader = response.body?.getReader();
+    const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = response.body?.getReader();
     if (!reader) {
       throw new Error('Missing playback response');
     }
